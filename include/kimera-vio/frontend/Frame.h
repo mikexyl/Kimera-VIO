@@ -14,23 +14,21 @@
 
 #pragma once
 
+#include <glog/logging.h>
+#include <gtsam/base/Matrix.h>
+#include <gtsam/geometry/PinholeCamera.h>
 #include <stdio.h>
 #include <stdlib.h>
+
 #include <cstdlib>
 #include <numeric>
-#include <string>
-#include <vector>
-
-#include <glog/logging.h>
-
 #include <opencv2/core/core.hpp>
 #include <opencv2/features2d/features2d.hpp>
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
 #include <opencv2/opencv.hpp>
-
-#include <gtsam/base/Matrix.h>
-#include <gtsam/geometry/PinholeCamera.h>
+#include <string>
+#include <vector>
 
 #include "kimera-vio/frontend/CameraParams.h"
 #include "kimera-vio/pipeline/PipelinePayload.h"
@@ -156,6 +154,8 @@ class Frame : public PipelinePayload {
         id_, timestamp_, cam_param_, keypoints_, landmarks_, versors_));
   }
 
+  const LandmarkIds& getLandmarks() const { return landmarks_; }
+  const KeypointsCV& getKeypoints() const { return keypoints_; }
  public:
   const FrameId id_;
 
@@ -182,7 +182,8 @@ class Frame : public PipelinePayload {
   BearingVectors versors_;
   //! Not currently used
   cv::Mat descriptors_;
-  //! Optional mask for feature detection. Note that can change when the frame is const
+  //! Optional mask for feature detection. Note that can change when the frame
+  //! is const
   mutable cv::Mat detection_mask_;
 
  protected:
