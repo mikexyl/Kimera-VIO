@@ -90,6 +90,7 @@ Pipeline::Pipeline(const VioParams& params)
 
 Pipeline::~Pipeline() {
   if (!shutdown_) {
+    LOG(INFO) << "Pipeline destructor called, shutting down pipeline.";
     shutdown();
   } else {
     LOG(INFO) << "Manual shutdown was requested.";
