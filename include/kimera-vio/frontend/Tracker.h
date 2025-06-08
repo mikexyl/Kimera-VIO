@@ -22,7 +22,6 @@
 #include <gtsam/geometry/StereoCamera.h>
 
 #include <opencv2/opencv.hpp>
-
 #include <optional>
 
 #include "kimera-vio/frontend/Camera.h"
@@ -31,6 +30,8 @@
 #include "kimera-vio/frontend/StereoFrame.h"
 #include "kimera-vio/frontend/Tracker-definitions.h"
 #include "kimera-vio/frontend/VisionImuTrackerParams.h"
+#include "kimera-vio/frontend/VisionImuFrontendParams.h"
+#include "kimera-vio/frontend/feature-detector/FeatureDetectorParams.h"
 #include "kimera-vio/frontend/optical-flow/OpticalFlowPredictor.h"
 #include "kimera-vio/utils/Macros.h"
 #include "kimera-vio/visualizer/Display-definitions.h"
@@ -163,8 +164,8 @@ class Tracker {
    * @param [in] F_points 3D landmarks in the generic frame F.
    * @param [out] F_Pose_cam_estimate Output of pnp ransac.
    * @param[in/out] inliers
-   * @param [in] F_Pose_cam_prior Optional prior pose of the camera with respect to
-   * reference frame F.
+   * @param [in] F_Pose_cam_prior Optional prior pose of the camera with respect
+   * to reference frame F.
    */
   bool pnp(const BearingVectors& cam_bearing_vectors,
            const Landmarks& F_points,

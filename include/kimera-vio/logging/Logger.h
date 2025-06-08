@@ -23,7 +23,6 @@
 #include "kimera-vio/backend/VioBackend-definitions.h"
 #include "kimera-vio/loopclosure/LoopClosureDetector-definitions.h"
 #include "kimera-vio/loopclosure/LcdOutputPacket.h"
-#include "kimera-vio/mesh/Mesh.h"
 
 namespace VIO {
 
@@ -174,27 +173,6 @@ class MesherLogger {
   KIMERA_DELETE_COPY_CONSTRUCTORS(MesherLogger);
   MesherLogger();
   virtual ~MesherLogger() = default;
-
-  /**
-   * @brief serializeMesh logs the mesh into a file that can be later read.
-   * @param mesh Mesh to be serialized to file (this should be const, but the
-   * serialization function needs to be non-const to be able to deserialize).
-   */
-  template <typename T>
-  void serializeMesh(Mesh<T>& mesh, const std::string& filename) {
-    mesh.save(output_path_ + '/' + filename);
-  }
-
-  /**
-   * @brief deserializeMesh reads the serialized mesh from a file.
-   * @param filename File where the mesh was serialized
-   * @param mesh Mesh where to store deserialized data
-   */
-  template <typename T>
-  void deserializeMesh(const std::string& filename, Mesh<T>* mesh) const {
-    CHECK_NOTNULL(mesh);
-    mesh->load(output_path_ + '/' + filename);
-  }
 
  protected:
   std::string output_path_;

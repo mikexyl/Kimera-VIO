@@ -33,8 +33,7 @@ namespace VIO {
 
 // Contains internal data for Visualizer3D window.
 WindowData::WindowData()
-    : window_(cv::viz::Viz3d("3D Visualizer")),
-      mesh_representation_(FLAGS_mesh_representation),
+    : mesh_representation_(FLAGS_mesh_representation),
       mesh_shading_(FLAGS_mesh_shading),
       mesh_ambient_(FLAGS_set_mesh_ambient),
       mesh_lighting_(FLAGS_set_mesh_lighting) {}
@@ -44,7 +43,6 @@ WindowData::~WindowData() {
   // at the end of the program. Probably because of memory not released.
   // See issues in opencv git:
   // https://github.com/opencv/opencv/issues/11219 and many more...
-  window_.close();
 }
 
 }  // namespace VIO

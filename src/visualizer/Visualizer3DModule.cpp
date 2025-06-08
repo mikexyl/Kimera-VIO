@@ -28,22 +28,13 @@ VisualizerModule::VisualizerModule(OutputQueue* output_queue,
                                                             parallel_run),
       frontend_queue_("visualizer_frontend_queue"),
       backend_queue_("visualizer_backend_queue"),
-      mesher_queue_(nullptr),
       visualizer_(std::move(visualizer)) {
   if (visualizer_->visualization_type_ ==
       VisualizationType::kMesh2dTo3dSparse) {
-    // Activate mesher queue if we are going to visualize the mesh.
-    mesher_queue_ = std::make_unique<ThreadsafeQueue<VizMesherInput>>(
-        "visualizer_mesher_queue");
+    throw std::runtime_error(
+        "Meshing is deleted for removing opencv contrib "
+        "dependency.");
   }
-}
-
-void VisualizerModule::fillMesherQueue(const VizMesherInput& mesher_payload) {
-  CHECK(mesher_queue_)
-      << "Filling mesher queue without mesher_queue_ being "
-         "initialized... Make sure you tell the visualizer that"
-         "you want to viz the 3D mesh...";
-  mesher_queue_->push(mesher_payload);
 }
 
 VisualizerModule::InputUniquePtr VisualizerModule::getInputPacket() {
@@ -74,17 +65,9 @@ VisualizerModule::InputUniquePtr VisualizerModule::getInputPacket() {
   CHECK(frontend_payload);
   CHECK(frontend_payload->is_keyframe_);
 
-  VizMesherInput mesher_payload = nullptr;
-  if (mesher_queue_) {
-    // Mesher output is optional, only sync if callback registered.
-    // Sync may fail is someone shuts down the pipeline, so no checks at this
-    // level.
-    PIO::syncQueue(timestamp, mesher_queue_.get(), &mesher_payload);
-  }
-
   // Push the synced messages to the visualizer's input queue
   return std::make_unique<VisualizerInput>(
-      timestamp, mesher_payload, backend_payload, frontend_payload);
+      timestamp, backend_payload, frontend_payload);
 }
 
 VisualizerModule::OutputUniquePtr VisualizerModule::spinOnce(
@@ -97,24 +80,10 @@ void VisualizerModule::shutdownQueues() {
   LOG(INFO) << "Shutting down queues for: " << name_id_;
   frontend_queue_.shutdown();
   backend_queue_.shutdown();
-  if (mesher_queue_) {
-    mesher_queue_->shutdown();
-  }
-
   // This shutdowns the output queue as well.
   MISO::shutdownQueues();
 }
 
 //! Checks if the module has work to do (should check input queues are empty)
-bool VisualizerModule::hasWork() const {
-  LOG_IF(WARNING,
-         (mesher_queue_ ? mesher_queue_->empty() : false) &&
-             (!backend_queue_.empty() || !frontend_queue_.empty()))
-      << "Mesher queue is empty, yet Backend or Frontend queue is not!"
-         "This should not happen since Mesher runs at Backend pace!";
-  // We don't check Frontend queue because it runs faster than the other two
-  // queues.
-  return mesher_queue_ ? !mesher_queue_->empty() : !backend_queue_.empty();
-}
-
+bool VisualizerModule::hasWork() const { return false; }
 }  // namespace VIO

@@ -23,7 +23,6 @@
 #include "kimera-vio/dataprovider/RgbdDataProviderModule.h"
 #include "kimera-vio/frontend/RgbdVisionImuFrontend.h"
 #include "kimera-vio/loopclosure/LcdFactory.h"
-#include "kimera-vio/mesh/MesherFactory.h"
 #include "kimera-vio/utils/Statistics.h"
 #include "kimera-vio/utils/Timer.h"
 #include "kimera-vio/visualizer/DisplayFactory.h"
@@ -141,42 +140,7 @@ RgbdImuPipeline::RgbdImuPipeline(const VioParams& params,
 
   if (static_cast<VisualizationType>(FLAGS_viz_type) ==
       VisualizationType::kMesh2dTo3dSparse) {
-    mesher_module_ = std::make_unique<MesherModule>(
-        parallel_run_,
-        MesherFactory::createMesher(
-            MesherType::PROJECTIVE,
-            MesherParams(camera_->getBodyPoseCam(),
-                         params.camera_params_[0].image_size_)));
-
-    vio_backend_module_->registerOutputCallback(
-        std::bind(&MesherModule::fillBackendQueue,
-                  std::ref(*CHECK_NOTNULL(mesher_module_.get())),
-                  std::placeholders::_1));
-
-    auto& mesher_module = mesher_module_;
-    vio_frontend_module_->registerOutputCallback(
-        [&mesher_module](const FrontendOutputPacketBase::Ptr& base_output) {
-          CHECK(base_output->frontend_type_ == FrontendType::kRgbdImu)
-              << "Frontend output packet found that isn't an RGBD packet!";
-
-          RgbdFrontendOutput::Ptr output =
-              std::dynamic_pointer_cast<RgbdFrontendOutput>(base_output);
-          CHECK(output);
-
-          // mesher only takes stereo frame as input from frontend, so we pick
-          // a minimal set of fields to fill
-          CHECK_NOTNULL(mesher_module.get())
-              ->fillFrontendQueue(std::make_shared<StereoFrontendOutput>(
-                  output->is_keyframe_,
-                  nullptr,
-                  gtsam::Pose3(),
-                  gtsam::Pose3(),
-                  output->frame_lkf_,
-                  nullptr,
-                  output->imu_acc_gyrs_,
-                  cv::Mat(),
-                  output->debug_tracker_info_));
-        });
+    throw std::runtime_error("Mesher implementation is deleted");
   }
 
   // TODO(nathan) LCD
@@ -224,15 +188,6 @@ RgbdImuPipeline::RgbdImuPipeline(const VioParams& params,
         [&visualizer_module](const FrontendOutputPacketBase::Ptr& output) {
           CHECK_NOTNULL(visualizer_module.get())->fillFrontendQueue(output);
         });
-
-    if (mesher_module_) {
-      mesher_module_->registerOutputCallback(
-          std::bind(&VisualizerModule::fillMesherQueue,
-                    std::ref(*CHECK_NOTNULL(visualizer_module_.get())),
-                    std::placeholders::_1));
-    } else {
-      visualizer_module->disableMesherQueue();
-    }
 
     //! Actual displaying of visual data is done in the main thread.
     CHECK(params.display_params_);

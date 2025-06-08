@@ -72,7 +72,6 @@ Pipeline::Pipeline(const VioParams& params)
       frontend_input_queue_("frontend_input_queue"),
       vio_backend_module_(nullptr),
       backend_input_queue_("backend_input_queue"),
-      mesher_module_(nullptr),
       lcd_module_(nullptr),
       visualizer_module_(nullptr),
       display_input_queue_("display_input_queue"),
@@ -129,11 +128,6 @@ std::string Pipeline::printStatus() const {
      << '\n'
      << "Backend Input queue empty? " << backend_input_queue_.empty() << '\n'
      << "Backend is working? " << vio_backend_module_->isWorking() << '\n'
-     << (mesher_module_
-             ? ("Mesher is working? " +
-                std::string(mesher_module_->isWorking() ? "Yes" : "No"))
-             : "No mesher module.")
-     << '\n'
      << (lcd_module_ ? ("LCD is working? " +
                         std::string(lcd_module_->isWorking() ? "Yes" : "No"))
                      : "No LCD module.")
@@ -206,8 +200,6 @@ void Pipeline::spinSequential() {
   CHECK(vio_backend_module_);
   vio_backend_module_->spin();
 
-  if (mesher_module_) mesher_module_->spin();
-
   if (lcd_module_) lcd_module_->spin();
 
   if (visualizer_module_) visualizer_module_->spin();
@@ -226,8 +218,6 @@ bool Pipeline::hasFinished() const {
       backend_input_queue_.isShutdown() || backend_input_queue_.empty();
   const bool dqueue_done =
       display_input_queue_.isShutdown() || display_input_queue_.empty();
-  const bool mesher_done =
-      mesher_module_ != nullptr ? !mesher_module_->isWorking() : true;
   const bool lcd_done =
       lcd_module_ != nullptr ? !lcd_module_->isWorking() : true;
   const bool visualizer_done =
@@ -242,7 +232,6 @@ bool Pipeline::hasFinished() const {
           << "  - frontend: " << vio_frontend_module_->isWorking() << std::endl
           << "  - backend_input_queue: " << bqueue_done << std::endl
           << "  - backend: " << vio_backend_module_->isWorking() << std::endl
-          << "  - mesher: " << mesher_done << std::endl
           << "  - lcd: " << lcd_done << std::endl
           << "  - visualizer: " << visualizer_done << std::endl
           << "  - display_input_queue: " << dqueue_done << std::endl
@@ -262,7 +251,6 @@ bool Pipeline::hasFinished() const {
          !vio_frontend_module_->isWorking() &&
          (backend_input_queue_.isShutdown() || backend_input_queue_.empty()) &&
          !vio_backend_module_->isWorking() &&
-         (mesher_module_ ? !mesher_module_->isWorking() : true) &&
          (lcd_module_ ? !lcd_module_->isWorking() : true) &&
          (visualizer_module_ ? !visualizer_module_->isWorking() : true) &&
          (display_input_queue_.isShutdown() || display_input_queue_.empty()) &&
@@ -336,11 +324,6 @@ void Pipeline::launchThreads() {
     backend_thread_ = std::make_unique<std::thread>(
         &VioBackendModule::spin, CHECK_NOTNULL(vio_backend_module_.get()));
 
-    if (mesher_module_) {
-      mesher_thread_ = std::make_unique<std::thread>(
-          &MesherModule::spin, CHECK_NOTNULL(mesher_module_.get()));
-    }
-
     if (lcd_module_) {
       lcd_thread_ = std::make_unique<std::thread>(
           &LcdModule::spin, CHECK_NOTNULL(lcd_module_.get()));
@@ -369,7 +352,6 @@ void Pipeline::stopThreads() {
   CHECK(vio_frontend_module_);
   vio_frontend_module_->shutdown();
 
-  if (mesher_module_) mesher_module_->shutdown();
   if (lcd_module_) lcd_module_->shutdown();
   if (visualizer_module_) visualizer_module_->shutdown();
   if (display_module_) {

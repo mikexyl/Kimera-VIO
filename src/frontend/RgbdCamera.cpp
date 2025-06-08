@@ -15,8 +15,6 @@
 
 #include "kimera-vio/frontend/RgbdCamera.h"
 
-#include <opencv2/viz.hpp>
-
 #include "kimera-vio/frontend/Camera.h"
 
 namespace VIO {
@@ -28,59 +26,8 @@ void convertToPcl(const cv::Mat& intensity_img,
                   const T& depth_factor,
                   cv::Mat* cloud,
                   cv::Mat* colors) {
-  CHECK_NOTNULL(cloud);
-  CHECK_NOTNULL(colors);
-  CHECK_EQ(intensity_img.type(), CV_8UC1);
-  CHECK(depth_img.type() == CV_16UC1 || depth_img.type() == CV_32FC1);
-  CHECK_EQ(depth_img.size(), intensity_img.size());
-
-  int img_rows = intensity_img.rows;
-  int img_cols = intensity_img.cols;
-
-  // Use correct principal point from calibration
-  float center_x = intrinsics.at(2u);
-  float center_y = intrinsics.at(3u);
-
-  // Combine unit conversion (if necessary) with scaling by focal length
-  // for computing (X,Y) 0.001f if uint16_t, 1.0f if floats in depth_msg
-  // float unit_scaling = 0.001f;
-  double unit_scaling = DepthTraits<T>::toMeters(T(1));
-  float constant_x = unit_scaling / intrinsics.at(0u);
-  float constant_y = unit_scaling / intrinsics.at(1u);
-  float bad_point = std::numeric_limits<float>::quiet_NaN();
-
-  cv::Mat_<cv::Point3f> cloud_out =
-      cv::Mat(img_rows, img_cols, CV_32FC3, cv::Scalar(0.0, 0.0, 0.0));
-  cv::Mat colors_out =
-      cv::Mat(img_rows, img_cols, CV_8UC3, cv::viz::Color::red());
-
-  for (int v = 0u; v < img_rows; ++v) {
-    for (int u = 0u; u < img_cols; ++u) {
-      T depth = depth_img.at<T>(v, u) * depth_factor;
-      cv::Point3f& xyz = cloud_out.at<cv::Point3f>(v, u);
-      cv::Vec3b& color = colors_out.at<cv::Vec3b>(v, u);
-
-      // Check for invalid measurements
-      // TODO(Toni): could clip depth here...
-      if (!DepthTraits<T>::valid(depth)) {
-        xyz.x = bad_point;
-        xyz.y = bad_point;
-        xyz.z = bad_point;
-      } else {
-        // Fill in XYZ
-        xyz.x = (u - center_x) * depth * constant_x;
-        xyz.y = (v - center_y) * depth * constant_y;
-        xyz.z = depth * unit_scaling;
-
-        // Fill in color (grayscale for now)
-        const auto& grey_value = intensity_img.at<uint8_t>(v, u);
-        color = cv::Vec3b(grey_value, grey_value, grey_value);
-      }
-    }
-  }
-
-  *cloud = cloud_out;
-  *colors = colors_out;
+  throw std::runtime_error(
+      "convertToPcl is deleted for removing opencv contrib dependency. ");
 }
 
 RgbdCamera::RgbdCamera(const CameraParams& cam_params) : Camera(cam_params) {}

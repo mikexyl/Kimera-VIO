@@ -13,7 +13,6 @@
  */
 
 #include "kimera-vio/visualizer/Visualizer3DFactory.h"
-#include "kimera-vio/visualizer/OpenCvVisualizer3D.h"
 
 namespace VIO {
 
@@ -23,7 +22,10 @@ Visualizer3D::UniquePtr VisualizerFactory::createVisualizer(
     const BackendType& backend_type) {
   switch (visualizer_type) {
     case VisualizerType::OpenCV: {
-      return std::make_unique<OpenCvVisualizer3D>(viz_type, backend_type);
+      throw std::runtime_error(
+          "OpenCV 3D viz is not supported anymore, please use Pangolin "
+          "instead.");
+      return nullptr;
     }
     default: {
       LOG(FATAL) << "Requested visualizer type is not supported.\n"

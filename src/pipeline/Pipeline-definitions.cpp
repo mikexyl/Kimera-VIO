@@ -18,7 +18,6 @@
 #include <glog/logging.h>
 
 #include "kimera-vio/frontend/Camera.h"
-#include "kimera-vio/visualizer/OpenCvDisplay.h"  // for ocv display params...
 
 DEFINE_bool(use_external_odometry, false, "Use an external odometry input.");
 
@@ -157,8 +156,8 @@ bool VioParams::parseYAML(const std::string&) {
   // Parse DisplayParams
   switch (display_type_) {
     case DisplayType::kOpenCV: {
-      display_params_ = std::make_shared<OpenCv3dDisplayParams>();
-      break;
+      throw std::runtime_error(
+          "OpenCV display type is not supported anymore, please use Pangolin.");
     }
     case DisplayType::kPangolin: {
       // We don't have Pangolin specific params so far...

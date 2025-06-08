@@ -30,7 +30,6 @@
 #include "kimera-vio/dataprovider/MonoDataProviderModule.h"
 #include "kimera-vio/frontend/VisionImuFrontendModule.h"
 #include "kimera-vio/loopclosure/LcdModule.h"
-#include "kimera-vio/mesh/MesherModule.h"
 #include "kimera-vio/utils/ThreadsafeQueue.h"
 #include "kimera-vio/visualizer/Display.h"
 #include "kimera-vio/visualizer/DisplayModule.h"
@@ -224,16 +223,6 @@ class Pipeline {
     vio_frontend_module_->registerOutputCallback(callback);
   }
 
-  inline void registerMesherOutputCallback(
-      const MesherModule::OutputCallback& callback) {
-    if (mesher_module_) {
-      mesher_module_->registerOutputCallback(callback);
-    } else {
-      LOG(ERROR) << "Attempt to register Mesher output callback, but no "
-                 << "Mesher member is active in pipeline.";
-    }
-  }
-
   /// Launch threads for each pipeline module.
   virtual void launchThreads();
 
@@ -274,9 +263,6 @@ class Pipeline {
 
   //! Thread-safe queue for the Backend.
   VioBackendModule::InputQueue backend_input_queue_;
-
-  //! Mesher
-  MesherModule::UniquePtr mesher_module_;
 
   //! Loop Closure Detector
   LcdModule::UniquePtr lcd_module_;

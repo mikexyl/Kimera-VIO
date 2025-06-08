@@ -14,8 +14,6 @@
 
 #pragma once
 
-#include <opencv2/viz.hpp>
-
 #include "kimera-vio/utils/ThreadsafeQueue.h"
 #include "kimera-vio/visualizer/Visualizer3D-definitions.h"
 
@@ -31,8 +29,6 @@ struct WindowData {
   ~WindowData();
 
  public:
-  //! 3D visualization
-  cv::viz::Viz3d window_;
 
   //! Stores the user set mesh representation.
   //! These objects are further modified by callbacks in the display module

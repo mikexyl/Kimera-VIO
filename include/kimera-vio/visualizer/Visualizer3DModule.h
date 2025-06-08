@@ -19,7 +19,6 @@
 #include <vector>
 
 #include "kimera-vio/backend/VioBackend-definitions.h"
-#include "kimera-vio/mesh/Mesher-definitions.h"
 #include "kimera-vio/pipeline/PipelineModule.h"
 #include "kimera-vio/utils/Macros.h"
 #include "kimera-vio/utils/ThreadsafeQueue.h"
@@ -37,7 +36,6 @@ class VisualizerModule
 
   using VizFrontendInput = FrontendOutputPacketBase::Ptr;
   using VizBackendInput = BackendOutput::Ptr;
-  using VizMesherInput = MesherOutput::Ptr;
 
   VisualizerModule(OutputQueue* output_queue,
                    bool parallel_run,
@@ -56,10 +54,6 @@ class VisualizerModule
   inline void fillBackendQueue(const VizBackendInput& backend_payload) {
     backend_queue_.push(backend_payload);
   }
-
-  void fillMesherQueue(const VizMesherInput& mesher_payload);
-
-  inline void disableMesherQueue() { mesher_queue_.reset(nullptr); }
 
  protected:
   //! Synchronize input queues. Currently doing it in a crude way:
@@ -81,8 +75,6 @@ class VisualizerModule
   //! Input Queues
   ThreadsafeQueue<VizFrontendInput> frontend_queue_;
   ThreadsafeQueue<VizBackendInput> backend_queue_;
-  /// Mesher queue is optional, therefore it is a unique ptr (nullptr if unused)
-  ThreadsafeQueue<VizMesherInput>::UniquePtr mesher_queue_;
 
   //! Visualizer implementation
   Visualizer3D::UniquePtr visualizer_;

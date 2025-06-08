@@ -79,8 +79,8 @@ add_library(${PROJECT_NAME} SHARED "")
 add_subdirectory(include/kimera-vio/dataprovider)
 add_subdirectory(src/dataprovider)
 ### Add source code for data provider.
-add_subdirectory(include/kimera-vio/playground)
-add_subdirectory(src/playground)
+# add_subdirectory(include/kimera-vio/playground)
+# add_subdirectory(src/playground)
 ### Add source code for Frontend.
 add_subdirectory(include/kimera-vio/frontend)
 add_subdirectory(src/frontend)
@@ -90,9 +90,6 @@ add_subdirectory(src/backend)
 ### Add source code for factors
 add_subdirectory(include/kimera-vio/factors)
 add_subdirectory(src/factors)
-### Add source code for mesh
-add_subdirectory(include/kimera-vio/mesh)
-add_subdirectory(src/mesh)
 ### Add source code for initialization
 add_subdirectory(include/kimera-vio/initial)
 add_subdirectory(src/initial)
