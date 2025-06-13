@@ -6,6 +6,8 @@
 
 #include "kimera-vio/frontend/feature-detector/FeatureDetector.h"
 
+#include <xfeat-cpp/xfeat_cv.h>
+
 #include <algorithm>
 #include <numeric>
 
@@ -80,6 +82,25 @@ FeatureDetector::FeatureDetector(
           feature_detector_params_.k_);
       break;
     }
+    case FeatureDetectorType::XFEAT: {
+      xfeat::XFeatCV::Params xfeat_params;
+      xfeat_params.max_features =
+          feature_detector_params_.max_features_per_frame_;
+      xfeat_params.xfeat_path = feature_detector_params_.xfeat_path_;
+      xfeat_params.interp_bicubic_path =
+          feature_detector_params_.interp_bicubic_path_;
+      xfeat_params.interp_bilinear_path =
+          feature_detector_params_.interp_bilinear_path_;
+      xfeat_params.interp_nearest_path =
+          feature_detector_params_.interp_nearest_path_;
+      xfeat_params.use_gpu = feature_detector_params_.xfeat_use_gpu_;
+      xfeat_params.matcher_type = feature_detector_params_.matcher_type_;
+      xfeat_params.lighterglue_path =
+          feature_detector_params_.lighterglue_path_;
+
+      feature_detector_ = xfeat::XFeatCV::create(xfeat_params);
+      break;
+    }
     default: {
       LOG(FATAL) << "Unknown feature detector type: "
                  << VIO::to_underlying(
@@ -118,7 +139,7 @@ void FeatureDetector::featureDetection(Frame* cur_frame,
   ///////////////// FEATURE DETECTION //////////////////////
   // Actual feature detection: detects new keypoints where there are no
   // currently tracked ones
-  //auto start_time_tic = utils::Timer::tic();
+  // auto start_time_tic = utils::Timer::tic();
   const KeypointsCV& corners = featureDetection(*cur_frame, nr_corners_needed);
   const size_t& n_corners = corners.size();
 
