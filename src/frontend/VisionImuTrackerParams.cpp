@@ -14,11 +14,11 @@
 
 #include "kimera-vio/frontend/VisionImuTrackerParams.h"
 
-#include <string>
-#include <utility>
-
 #include <gflags/gflags.h>
 #include <glog/logging.h>
+
+#include <string>
+#include <utility>
 
 #include "kimera-vio/common/vio_types.h"
 #include "kimera-vio/utils/YamlParser.h"
@@ -126,7 +126,8 @@ bool TrackerParams::parseYAML(const std::string& filepath) {
   pnp_algorithm_ = static_cast<Pose3d2dAlgorithm>(pnp_algorithm);
 
   int optical_flow_predictor_type;
-  yaml_parser.getYamlParam("optical_flow_predictor_type", &optical_flow_predictor_type);
+  yaml_parser.getYamlParam("optical_flow_predictor_type",
+                           &optical_flow_predictor_type);
   optical_flow_predictor_type_ =
       static_cast<OpticalFlowPredictorType>(optical_flow_predictor_type);
 
@@ -134,6 +135,10 @@ bool TrackerParams::parseYAML(const std::string& filepath) {
 
   yaml_parser.getYamlParam("optimize_2d3d_pose_from_inliers",
                            &optimize_2d3d_pose_from_inliers_);
+
+  yaml_parser.getYamlParam("feature_tracker_type", &tracker_type_);
+  yaml_parser.getYamlParam("lg_num_features", &lighterglue_num_features_);
+  yaml_parser.getYamlParam("lg_model_path", &lighterglue_model_path_);
 
   return true;
 }

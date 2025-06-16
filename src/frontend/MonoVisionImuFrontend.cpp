@@ -245,10 +245,30 @@ StatusMonoMeasurementsPtr MonoVisionImuFrontend::processFrame(
   VLOG(2) << "Starting feature tracking...";
   gtsam::Rot3 ref_frame_R_cur_frame =
       keyframe_R_ref_frame_.inverse().compose(keyframe_R_cur_frame);
-  tracker_->featureTracking(mono_frame_km1_.get(),
-                            mono_frame_k_.get(),
-                            ref_frame_R_cur_frame,
-                            frontend_params_.feature_detector_params_);
+
+  CHECK(feature_detector_);
+  // if we are using lighter glue, detect all features first, and track features
+  // by matching descriptors
+  if (frontend_params_.tracker_params_.tracker_type_ ==
+      TrackerParams::TrackerType::LIGHTERGLUE) {
+    // TODO(mike): detection was after keyframe detection, we moved it here,
+    // need to check if it causes bugs in the keyframe detection
+    feature_detector_->featureDetection(mono_frame_k_.get());
+    tracker_->featureTrackingDesc(mono_frame_km1_.get(),
+                                  mono_frame_k_.get(),
+                                  ref_frame_R_cur_frame,
+                                  frontend_params_.feature_detector_params_);
+  } else {
+    tracker_->featureTracking(mono_frame_km1_.get(),
+                              mono_frame_k_.get(),
+                              ref_frame_R_cur_frame,
+                              frontend_params_.feature_detector_params_);
+
+    // TODO(mike): detection was after keyframe detection, we moved it here,
+    // need to check if it causes bugs in the keyframe detection
+    feature_detector_->featureDetection(mono_frame_k_.get());
+  }
+
   if (feature_tracks) {
     *feature_tracks =
         tracker_->getTrackerImage(*mono_frame_lkf_, *mono_frame_k_);
@@ -288,9 +308,6 @@ StatusMonoMeasurementsPtr MonoVisionImuFrontend::processFrame(
 
     last_keyframe_timestamp_ = mono_frame_k_->timestamp_;
     mono_frame_k_->isKeyframe_ = true;
-
-    CHECK(feature_detector_);
-    feature_detector_->featureDetection(mono_frame_k_.get());
 
     // Undistort keypoints:
     mono_camera_->undistortKeypoints(mono_frame_k_->keypoints_,
@@ -397,7 +414,7 @@ void MonoVisionImuFrontend::sendMonoTrackingToLogger() const {
       }
     }
   }
-  //############################################################################
+  // ############################################################################
 
   // Plot matches.
   cv::Mat img_left_lkf_kf =

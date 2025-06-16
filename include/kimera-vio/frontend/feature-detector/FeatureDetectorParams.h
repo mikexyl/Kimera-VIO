@@ -112,8 +112,6 @@ struct FeatureDetectorParams : public PipelineParams {
   std::string interp_bicubic_path_{""};
   std::string interp_nearest_path_{""};
   bool xfeat_use_gpu_{true};
-  xfeat::MatcherType matcher_type_{xfeat::MatcherType::LIGHTERGLUE};  // Default to LG
-  std::string lighterglue_path_{""};
 };
 
 }  // namespace VIO

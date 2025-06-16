@@ -21,6 +21,7 @@
 #include <vector>   // for vector<>
 
 #include "kimera-vio/frontend/UndistorterRectifier.h"
+#include "kimera-vio/frontend/feature-detector/FeatureDetector.h"
 #include "kimera-vio/frontend/optical-flow/OpticalFlowPredictorFactory.h"
 #include "kimera-vio/utils/Timer.h"
 #include "kimera-vio/utils/UtilsOpenCV.h"
@@ -83,6 +84,21 @@ Tracker::Tracker(const TrackerParams& tracker_params,
   stereo_ransac_.threshold_ = tracker_params_.ransac_threshold_stereo_;
   stereo_ransac_.max_iterations_ = tracker_params_.ransac_max_iterations_;
   stereo_ransac_.probability_ = tracker_params_.ransac_probability_;
+
+  switch (tracker_params.tracker_type_) {
+    case TrackerParams::TrackerType::OPTICAL_FLOW: {
+      feature_tracker_ = OpticalFlowCV::Create();
+      break;
+    }
+    case TrackerParams::TrackerType::LIGHTERGLUE: {
+      LighterGlueCV::Params lg_params;
+      lg_params.min_score = 0.2f;
+      lg_params.model_path = tracker_params_.lighterglue_model_path_;
+      lg_params.use_gpu = true;
+      feature_tracker_ = std::make_shared<LighterGlueCV>(lg_params);
+      break;
+    }
+  }
 }
 
 // TODO(Toni) a pity that this function is not const just because
@@ -134,16 +150,16 @@ void Tracker::featureTracking(
   std::vector<uchar> status;
   std::vector<float> error;
   auto time_lukas_kanade_tic = utils::Timer::tic();
-  cv::calcOpticalFlowPyrLK(ref_frame->img_,
-                           cur_frame->img_,
-                           px_ref,
-                           px_cur,
-                           status,
-                           error,
-                           klt_window_size,
-                           tracker_params_.klt_max_level_,
-                           kTerminationCriteria,
-                           cv::OPTFLOW_USE_INITIAL_FLOW);
+  feature_tracker_->track(ref_frame,
+                          cur_frame,
+                          px_ref,
+                          px_cur,
+                          status,
+                          error,
+                          klt_window_size,
+                          tracker_params_.klt_max_level_,
+                          kTerminationCriteria,
+                          cv::OPTFLOW_USE_INITIAL_FLOW);
   VLOG(1) << "Optical Flow Timing [ms]: "
           << utils::Timer::toc(time_lukas_kanade_tic).count();
   VLOG(2) << "Finished Optical Flow Pyr LK tracking.";
@@ -1285,6 +1301,98 @@ bool Tracker::pnp(const BearingVectors& cam_bearing_vectors,
           << *F_Pose_cam_estimate;
 
   return success;
+}
+
+void Tracker::featureTrackingDesc(
+    Frame* ref_frame,
+    Frame* cur_frame,
+    const gtsam::Rot3& ref_R_cur,
+    const FeatureDetectorParams& feature_detector_params,
+    std::optional<cv::Mat> R) {
+  CHECK_NOTNULL(ref_frame);
+  CHECK_NOTNULL(cur_frame);
+  auto tic = utils::Timer::tic();
+
+  CHECK_EQ(ref_frame->keypoints_.size(), cur_frame->keypoints_.size());
+  CHECK(not ref_frame->descriptors_.empty());
+  CHECK(not cur_frame->descriptors_.empty());
+
+  std::vector<uchar> status;
+  std::vector<float> error;
+  auto time_lukas_kanade_tic = utils::Timer::tic();
+  DMatchVec matches;
+  feature_tracker_->trackDesc(ref_frame, cur_frame, &matches);
+  VLOG(1) << "Optical Flow Timing [ms]: "
+          << utils::Timer::toc(time_lukas_kanade_tic).count();
+  VLOG(2) << "Finished Optical Flow Pyr LK tracking.";
+
+  LOG(INFO) << "Feature tracking: "
+            << "ref_frame.id_: " << ref_frame->id_
+            << ", cur_frame.id_: " << cur_frame->id_
+            << ", Nr tracked keypoints: " << matches.size();
+
+  std::set<LandmarkId> tracked_lmk_ids;
+
+  for (auto match : matches) {
+    auto ref_i = match.queryIdx;
+    auto cur_i = match.trainIdx;
+
+    auto lmk_age = ref_frame->landmarks_age_.at(ref_i);
+    if (lmk_age > tracker_params_.max_feature_track_age_) {
+      // If the feature is too old, we do not track it anymore.
+      ref_frame->landmarks_.at(ref_i) = -1;
+      continue;
+    }
+
+    if (ref_frame->landmarks_.at(ref_i) == -1) {
+      // This is a new feature, assign a new landmark id.
+      ref_frame->landmarks_.at(ref_i) = FeatureDetector::lmk_id++;
+    }
+    cur_frame->landmarks_.at(cur_i) = ref_frame->landmarks_.at(ref_i);
+    tracked_lmk_ids.insert(ref_frame->landmarks_.at(ref_i));
+    ref_frame->landmarks_age_.at(ref_i)++;
+    cur_frame->landmarks_age_.at(cur_i) = ref_frame->landmarks_age_.at(ref_i) +
+                                          1;  // increment age of feature track
+    cur_frame->scores_.at(cur_i) = ref_frame->scores_.at(ref_i);
+  }
+
+  // invalidate all keypoints that were not tracked in the ref frame
+  for (size_t i = 0; i < ref_frame->landmarks_.size(); ++i) {
+    if (ref_frame->landmarks_.at(i) != -1 &&
+        tracked_lmk_ids.find(ref_frame->landmarks_.at(i)) ==
+            tracked_lmk_ids.end()) {
+      // If the landmark was not tracked, invalidate it.
+      ref_frame->landmarks_.at(i) = -1;
+    }
+  }
+
+  // assign unmatched keypoints a new landmark id
+  for (size_t i = 0; i < cur_frame->landmarks_.size(); ++i) {
+    if (cur_frame->landmarks_.at(i) == -1) {
+      cur_frame->landmarks_.at(i) = FeatureDetector::lmk_id++;
+    }
+  }
+
+  // max number of frames in which a feature is seen
+  VLOG(5) << "featureTracking: frame " << cur_frame->id_
+          << ",  Nr tracked keypoints: " << cur_frame->keypoints_.size()
+          << " (max: " << feature_detector_params.max_features_per_frame_ << ")"
+          << " (max observed age of tracked features: "
+          << *std::max_element(cur_frame->landmarks_age_.begin(),
+                               cur_frame->landmarks_age_.end())
+          << " vs. max_feature_track_age_: "
+          << tracker_params_.max_feature_track_age_ << ")";
+  // Display feature tracks together with predicted points.
+  if (display_queue_ && FLAGS_visualize_feature_predictions) {
+    displayImage(cur_frame->timestamp_,
+                 "feature_tracks_with_predicted_keypoints",
+                 getTrackerImage(*ref_frame, *cur_frame),
+                 display_queue_);
+  }
+
+  // Fill debug information
+  debug_info_.nrTrackerFeatures_ = cur_frame->keypoints_.size();
+  debug_info_.featureTrackingTime_ = utils::Timer::toc(tic).count();
 }
 
 }  // namespace VIO

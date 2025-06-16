@@ -16,8 +16,8 @@
 
 #include <Eigen/Eigen>
 #include <opencv2/features2d.hpp>
-#include <vector>
 #include <optional>
+#include <vector>
 
 #include "kimera-vio/frontend/Frame.h"
 #include "kimera-vio/frontend/feature-detector/FeatureDetector-definitions.h"
@@ -48,11 +48,17 @@ class FeatureDetector {
       const cv::Mat& img,
       const cv::Mat& mask = cv::Mat());
 
+  static LandmarkId lmk_id;
+
  private:
   // Returns landmark_count (updated from the new keypoints),
   // and nr or extracted corners.
-  KeypointsCV featureDetection(const Frame& cur_frame,
-                               const int& need_n_corners);
+  KeypointsCV featureDetection(Frame* cur_frame, const int& need_n_corners);
+
+  void featureDetectionTracked(Frame* cur_frame,
+                               std::optional<cv::Mat> R = std::nullopt);
+  void featureDetectionNew(Frame* cur_frame,
+                           std::optional<cv::Mat> R = std::nullopt);
 
   // Parameters.
   const FeatureDetectorParams feature_detector_params_;

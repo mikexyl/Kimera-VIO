@@ -228,18 +228,16 @@ bool FeatureDetectorParams::parseYAML(const std::string& filepath) {
   yaml_parser.getYamlParam("interp_bicubic_path", &interp_bicubic_path_);
   yaml_parser.getYamlParam("interp_nearest_path", &interp_nearest_path_);
   yaml_parser.getYamlParam("xfeat_use_gpu", &xfeat_use_gpu_);
-  yaml_parser.getYamlParam("lighterglue_path", &lighterglue_path_);
-  yaml_parser.getYamlParam("matcher_type", &matcher_type_);
 
   if (feature_detector_type_ == FeatureDetectorType::XFEAT) {
     if (xfeat_path_.empty() || interp_bilinear_path_.empty() ||
         interp_bicubic_path_.empty() || interp_nearest_path_.empty()) {
       LOG(FATAL) << "XFEAT feature detector requires paths to ONNX models.";
     }
-    if (matcher_type_ == xfeat::MatcherType::LIGHTERGLUE &&
-        lighterglue_path_.empty()) {
-      LOG(FATAL) << "LighterGlue matcher requires a path to the ONNX model.";
-    }
+
+    CHECK(not enable_non_max_suppression_)
+        << "XFEAT feature detector has its own non-maximum suppression, do not "
+           "enable non_max_suppression in FeatureDetectorParams.";
   }
 
   return true;

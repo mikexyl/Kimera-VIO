@@ -22,7 +22,6 @@
 #include <gtsam/geometry/StereoCamera.h>
 
 #include <opencv2/opencv.hpp>
-
 #include <optional>
 
 #include "kimera-vio/frontend/Camera.h"
@@ -31,6 +30,8 @@
 #include "kimera-vio/frontend/StereoFrame.h"
 #include "kimera-vio/frontend/Tracker-definitions.h"
 #include "kimera-vio/frontend/VisionImuTrackerParams.h"
+#include "kimera-vio/frontend/feature-tracker/LighterGlueCV.h"
+#include "kimera-vio/frontend/feature-tracker/OpticalFlowCV.h"
 #include "kimera-vio/frontend/optical-flow/OpticalFlowPredictor.h"
 #include "kimera-vio/utils/Macros.h"
 #include "kimera-vio/visualizer/Display-definitions.h"
@@ -72,6 +73,12 @@ class Tracker {
                        const gtsam::Rot3& inter_frame_rotation,
                        const FeatureDetectorParams& feature_detector_params,
                        std::optional<cv::Mat> R = std::nullopt);
+
+  void featureTrackingDesc(Frame* ref_frame,
+                           Frame* cur_frame,
+                           const gtsam::Rot3& inter_frame_rotation,
+                           const FeatureDetectorParams& feature_detector_params,
+                           std::optional<cv::Mat> R = std::nullopt);
 
   /**
    * @brief updateMap Updates the map of landmarks in the time horizon of
@@ -163,8 +170,8 @@ class Tracker {
    * @param [in] F_points 3D landmarks in the generic frame F.
    * @param [out] F_Pose_cam_estimate Output of pnp ransac.
    * @param[in/out] inliers
-   * @param [in] F_Pose_cam_prior Optional prior pose of the camera with respect to
-   * reference frame F.
+   * @param [in] F_Pose_cam_prior Optional prior pose of the camera with respect
+   * to reference frame F.
    */
   bool pnp(const BearingVectors& cam_bearing_vectors,
            const Landmarks& F_points,
@@ -346,6 +353,8 @@ class Tracker {
   //! Most up-to-date map of landmarks with optimized 3D poses from backend.
   //! WARNING: do not use this without locking first its mutex.
   LandmarksMap landmarks_map_;
+
+  FeatureTracker::Ptr feature_tracker_ = nullptr;
 };
 
 }  // namespace VIO
