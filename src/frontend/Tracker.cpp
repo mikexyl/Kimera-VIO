@@ -21,6 +21,7 @@
 #include <vector>   // for vector<>
 
 #include "kimera-vio/frontend/UndistorterRectifier.h"
+#include "kimera-vio/frontend/feature-detector/FeatureDetector.h"
 #include "kimera-vio/frontend/optical-flow/OpticalFlowPredictorFactory.h"
 #include "kimera-vio/utils/Timer.h"
 #include "kimera-vio/utils/UtilsOpenCV.h"
@@ -53,7 +54,8 @@ std::vector<int> remapOpenGvInliersToKimera(
 
 Tracker::Tracker(const TrackerParams& tracker_params,
                  const Camera::ConstPtr& camera,
-                 DisplayQueue* display_queue)
+                 DisplayQueue* display_queue,
+                 std::shared_ptr<Ort::Env> env)
     : tracker_params_(tracker_params),
       landmark_count_(0),
       camera_(camera),
@@ -83,6 +85,21 @@ Tracker::Tracker(const TrackerParams& tracker_params,
   stereo_ransac_.threshold_ = tracker_params_.ransac_threshold_stereo_;
   stereo_ransac_.max_iterations_ = tracker_params_.ransac_max_iterations_;
   stereo_ransac_.probability_ = tracker_params_.ransac_probability_;
+
+  switch (tracker_params.tracker_type_) {
+    case TrackerParams::TrackerType::OPTICAL_FLOW: {
+      feature_tracker_ = OpticalFlowCV::Create();
+      break;
+    }
+    case TrackerParams::TrackerType::LIGHTERGLUE: {
+      LighterGlueCV::Params lg_params;
+      lg_params.min_score = 0.2f;
+      lg_params.model_path = tracker_params_.lighterglue_model_path_;
+      lg_params.use_gpu = true;
+      feature_tracker_ = std::make_shared<LighterGlueCV>(*env, lg_params);
+      break;
+    }
+  }
 }
 
 // TODO(Toni) a pity that this function is not const just because
@@ -134,16 +151,16 @@ void Tracker::featureTracking(
   std::vector<uchar> status;
   std::vector<float> error;
   auto time_lukas_kanade_tic = utils::Timer::tic();
-  cv::calcOpticalFlowPyrLK(ref_frame->img_,
-                           cur_frame->img_,
-                           px_ref,
-                           px_cur,
-                           status,
-                           error,
-                           klt_window_size,
-                           tracker_params_.klt_max_level_,
-                           kTerminationCriteria,
-                           cv::OPTFLOW_USE_INITIAL_FLOW);
+  feature_tracker_->track(ref_frame,
+                          cur_frame,
+                          px_ref,
+                          px_cur,
+                          status,
+                          error,
+                          klt_window_size,
+                          tracker_params_.klt_max_level_,
+                          kTerminationCriteria,
+                          cv::OPTFLOW_USE_INITIAL_FLOW);
   VLOG(1) << "Optical Flow Timing [ms]: "
           << utils::Timer::toc(time_lukas_kanade_tic).count();
   VLOG(2) << "Finished Optical Flow Pyr LK tracking.";
@@ -215,7 +232,8 @@ TrackingStatusPose Tracker::geometricOutlierRejection2d2d(
     const BearingVectors& cur_bearings,
     const KeypointMatches& matches_ref_cur,
     std::vector<int>* inliers,
-    // TODO(TONI): I think this should be using non-rectified left cameras...
+    // TODO(TONI): I think this should be using non-rectified left
+    // cameras...
     const gtsam::Pose3& cam_lkf_Pose_cam_kf) {
   CHECK_NOTNULL(inliers);
 
@@ -278,9 +296,9 @@ TrackingStatusPose Tracker::geometricOutlierRejection2d2d(
   if (!success) {
     status_pose = std::make_pair(TrackingStatus::INVALID, gtsam::Pose3());
   } else {
-    // TODO(Toni): it seems we are not removing outliers if we send an invalid
-    // tracking status (above), but the backend calls addLandmarksToGraph even
-    // when we have an invalid status!
+    // TODO(Toni): it seems we are not removing outliers if we send an
+    // invalid tracking status (above), but the backend calls
+    // addLandmarksToGraph even when we have an invalid status!
 
     // TODO(Toni): check quality of tracking
     //! Check enough inliers.
@@ -396,10 +414,9 @@ Tracker::geometricOutlierRejection3d3dGivenRotation(
   VLOG(5) << "OutlierRejectionStereoGivenRot:"
              " starting 1-point RANSAC (voting)";
 
-  // TODO(Toni): this is 1px std in each dir as of now? Parametrize at the very
-  // least...
-  // Stereo point covariance: for covariance propagation.
-  // 3 px std in each direction
+  // TODO(Toni): this is 1px std in each dir as of now? Parametrize at the
+  // very least... Stereo point covariance: for covariance propagation. 3 px
+  // std in each direction
   gtsam::Matrix3 stereo_pt_cov = gtsam::Matrix3::Identity();
 
   double timeMatchingAndAllocation_p =
@@ -689,7 +706,8 @@ TrackingStatusPose Tracker::geometricOutlierRejection3d3d(
 
   //! Setup adapter.
   Adapter3d3d adapter(f_ref, f_cur);
-  // This is not really used, only in nonlinear optimization, but not in 3-point
+  // This is not really used, only in nonlinear optimization, but not in
+  // 3-point
   adapter.setR12(cam_lkf_Pose_cam_kf.rotation().matrix());
   adapter.sett12(cam_lkf_Pose_cam_kf.translation().matrix());
 
@@ -1071,17 +1089,19 @@ bool Tracker::pnp(const StereoFrame& cur_stereo_frame,
   opengv::points_t W_points;
 
   //! Copy landmarks map since otw we may block backend thread. This assumes
-  //! copying the whole map is quicker than spending time finding the lmks we
-  //! need. Call this as late as possible, so the backend has maximum time.
+  //! copying the whole map is quicker than spending time finding the lmks
+  //! we need. Call this as late as possible, so the backend has maximum
+  //! time.
   LandmarksMap copy_W_landmarks_map;
   {  // Safe-guard the landmarks_map_
     std::lock_guard<std::mutex> lock(landmarks_map_mtx_);
     copy_W_landmarks_map = landmarks_map_;
   }
 
-  // This is horrible, because we are weirdly looping over right_keypoints_rect
-  // to know what landmarks are valid and tracked... Re-do this after PR #420...
-  // How it should be done: loop over feature tracks alone.
+  // This is horrible, because we are weirdly looping over
+  // right_keypoints_rect to know what landmarks are valid and tracked...
+  // Re-do this after PR #420... How it should be done: loop over feature
+  // tracks alone.
   CHECK_EQ(cur_stereo_frame.left_keypoints_rectified_.size(),
            cur_stereo_frame.left_frame_.landmarks_.size());
   for (size_t i = 0; i < cur_stereo_frame.left_keypoints_rectified_.size();
@@ -1103,9 +1123,10 @@ bool Tracker::pnp(const StereoFrame& cur_stereo_frame,
       }
     } else {
       // CHECK_EQ(lmk_id, -1); why is this not true :(
-      //! Not interested in this 2D-3D because the right keypoint is not valid
-      //! and/or the lmk_id is invalid...
-      // NOT ideal because we are dropping valuable info for the mono case...
+      //! Not interested in this 2D-3D because the right keypoint is not
+      //! valid and/or the lmk_id is invalid...
+      // NOT ideal because we are dropping valuable info for the mono
+      // case...
       VLOG(5) << "Dropping 2D-3D correspondence: " << i;
     }
   }
@@ -1256,8 +1277,8 @@ bool Tracker::pnp(const BearingVectors& cam_bearing_vectors,
         break;
       }
       case Pose3d2dAlgorithm::MLPNP: {
-        // TODO(TONI): needs fork of opengv, can we make a static check and use
-        // this iff we are having MLPNP support?
+        // TODO(TONI): needs fork of opengv, can we make a static check and
+        // use this iff we are having MLPNP support?
         LOG(FATAL) << "MLPNP Not implemented...";
         break;
       }
@@ -1285,6 +1306,98 @@ bool Tracker::pnp(const BearingVectors& cam_bearing_vectors,
           << *F_Pose_cam_estimate;
 
   return success;
+}
+
+void Tracker::featureTrackingDesc(
+    Frame* ref_frame,
+    Frame* cur_frame,
+    const gtsam::Rot3& ref_R_cur,
+    const FeatureDetectorParams& feature_detector_params,
+    std::optional<cv::Mat> R) {
+  CHECK_NOTNULL(ref_frame);
+  CHECK_NOTNULL(cur_frame);
+  auto tic = utils::Timer::tic();
+
+  CHECK_EQ(ref_frame->keypoints_.size(), cur_frame->keypoints_.size());
+  CHECK(not ref_frame->descriptors_.empty());
+  CHECK(not cur_frame->descriptors_.empty());
+
+  std::vector<uchar> status;
+  std::vector<float> error;
+  auto time_lukas_kanade_tic = utils::Timer::tic();
+  DMatchVec matches;
+  feature_tracker_->trackDesc(ref_frame, cur_frame, &matches);
+  VLOG(1) << "Optical Flow Timing [ms]: "
+          << utils::Timer::toc(time_lukas_kanade_tic).count();
+  VLOG(2) << "Finished Optical Flow Pyr LK tracking.";
+
+  LOG(INFO) << "Feature tracking: "
+            << "ref_frame.id_: " << ref_frame->id_
+            << ", cur_frame.id_: " << cur_frame->id_
+            << ", Nr tracked keypoints: " << matches.size();
+
+  std::set<LandmarkId> tracked_lmk_ids;
+
+  for (auto match : matches) {
+    auto ref_i = match.queryIdx;
+    auto cur_i = match.trainIdx;
+
+    auto lmk_age = ref_frame->landmarks_age_.at(ref_i);
+    if (lmk_age > tracker_params_.max_feature_track_age_) {
+      // If the feature is too old, we do not track it anymore.
+      ref_frame->landmarks_.at(ref_i) = -1;
+      continue;
+    }
+
+    if (ref_frame->landmarks_.at(ref_i) == -1) {
+      // This is a new feature, assign a new landmark id.
+      ref_frame->landmarks_.at(ref_i) = FeatureDetector::lmk_id++;
+    }
+    cur_frame->landmarks_.at(cur_i) = ref_frame->landmarks_.at(ref_i);
+    tracked_lmk_ids.insert(ref_frame->landmarks_.at(ref_i));
+    ref_frame->landmarks_age_.at(ref_i)++;
+    cur_frame->landmarks_age_.at(cur_i) = ref_frame->landmarks_age_.at(ref_i) +
+                                          1;  // increment age of feature track
+    cur_frame->scores_.at(cur_i) = ref_frame->scores_.at(ref_i);
+  }
+
+  // invalidate all keypoints that were not tracked in the ref frame
+  for (size_t i = 0; i < ref_frame->landmarks_.size(); ++i) {
+    if (ref_frame->landmarks_.at(i) != -1 &&
+        tracked_lmk_ids.find(ref_frame->landmarks_.at(i)) ==
+            tracked_lmk_ids.end()) {
+      // If the landmark was not tracked, invalidate it.
+      ref_frame->landmarks_.at(i) = -1;
+    }
+  }
+
+  // assign unmatched keypoints a new landmark id
+  for (size_t i = 0; i < cur_frame->landmarks_.size(); ++i) {
+    if (cur_frame->landmarks_.at(i) == -1) {
+      cur_frame->landmarks_.at(i) = FeatureDetector::lmk_id++;
+    }
+  }
+
+  // max number of frames in which a feature is seen
+  VLOG(5) << "featureTracking: frame " << cur_frame->id_
+          << ",  Nr tracked keypoints: " << cur_frame->keypoints_.size()
+          << " (max: " << feature_detector_params.max_features_per_frame_ << ")"
+          << " (max observed age of tracked features: "
+          << *std::max_element(cur_frame->landmarks_age_.begin(),
+                               cur_frame->landmarks_age_.end())
+          << " vs. max_feature_track_age_: "
+          << tracker_params_.max_feature_track_age_ << ")";
+  // Display feature tracks together with predicted points.
+  if (display_queue_ && FLAGS_visualize_feature_predictions) {
+    displayImage(cur_frame->timestamp_,
+                 "feature_tracks_with_predicted_keypoints",
+                 getTrackerImage(*ref_frame, *cur_frame),
+                 display_queue_);
+  }
+
+  // Fill debug information
+  debug_info_.nrTrackerFeatures_ = cur_frame->keypoints_.size();
+  debug_info_.featureTrackingTime_ = utils::Timer::toc(tic).count();
 }
 
 }  // namespace VIO

@@ -33,6 +33,7 @@ find_package(DBoW2 REQUIRED)
 find_package(KimeraRPGO REQUIRED)
 # Pangolin is optional
 find_package(Pangolin QUIET)
+find_package(xfeat-cpp REQUIRED)
 
 include(VerifyGtsamConfig)
 option(KIMERA_VERIFY_GTSAM_CONFIG "Check that GTSAM was compiled with the right options" ON)
@@ -130,6 +131,7 @@ target_link_libraries(${PROJECT_NAME}
     gtsam
     gtsam_unstable
     opengv
+    xfeat-cpp::xfeat-cpp
 )
 target_include_directories(${PROJECT_NAME}
   PUBLIC

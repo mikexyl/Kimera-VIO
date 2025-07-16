@@ -218,6 +218,8 @@ class VisionImuFrontend {
   std::optional<OdometryParams> odom_params_;
   // world_Pose_body for the last keyframe
   std::optional<gtsam::Pose3> world_OdomPose_body_lkf_;
+
+  std::shared_ptr<Ort::Env> ort_env_{nullptr};  // ONNX Runtime environment
 };
 
 }  // namespace VIO

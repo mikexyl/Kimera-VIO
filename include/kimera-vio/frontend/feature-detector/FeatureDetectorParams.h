@@ -15,6 +15,8 @@
 
 #pragma once
 
+#include <xfeat-cpp/types.h>
+
 #include "kimera-vio/common/vio_types.h"
 #include "kimera-vio/frontend/feature-detector/FeatureDetector-definitions.h"
 #include "kimera-vio/frontend/feature-detector/NonMaximumSuppression.h"
@@ -103,6 +105,13 @@ struct FeatureDetectorParams : public PipelineParams {
 
   // FAST specific params
   int fast_thresh_ = 10;
+
+  // XFEAT specific params
+  std::string xfeat_path_{""};
+  std::string interp_bilinear_path_{""};
+  std::string interp_bicubic_path_{""};
+  std::string interp_nearest_path_{""};
+  bool xfeat_use_gpu_{true};
 };
 
 }  // namespace VIO

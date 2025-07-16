@@ -10,6 +10,7 @@ find_dependency(GTSAM REQUIRED)
 find_dependency(GTSAM_UNSTABLE REQUIRED)
 find_dependency(OpenCV REQUIRED)
 find_dependency(opengv REQUIRED)
+find_dependency(xfeat-cpp REQUIRED)
 
 list(REMOVE_AT CMAKE_MODULE_PATH -1)
 

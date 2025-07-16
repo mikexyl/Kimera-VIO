@@ -6,6 +6,8 @@
 
 #include "kimera-vio/frontend/feature-detector/FeatureDetector.h"
 
+#include <xfeat-cpp/xfeat_cv.h>
+
 #include <algorithm>
 #include <numeric>
 
@@ -15,8 +17,11 @@
 
 namespace VIO {
 
+LandmarkId FeatureDetector::lmk_id = 0;
+
 FeatureDetector::FeatureDetector(
-    const FeatureDetectorParams& feature_detector_params)
+    const FeatureDetectorParams& feature_detector_params,
+    std::shared_ptr<Ort::Env> env)
     : feature_detector_params_(feature_detector_params),
       non_max_suppression_(nullptr),
       feature_detector_() {
@@ -80,6 +85,22 @@ FeatureDetector::FeatureDetector(
           feature_detector_params_.k_);
       break;
     }
+    case FeatureDetectorType::XFEAT: {
+      xfeat::XFeatCV::Params xfeat_params;
+      xfeat_params.max_features =
+          feature_detector_params_.max_features_per_frame_;
+      xfeat_params.xfeat_path = feature_detector_params_.xfeat_path_;
+      xfeat_params.interp_bicubic_path =
+          feature_detector_params_.interp_bicubic_path_;
+      xfeat_params.interp_bilinear_path =
+          feature_detector_params_.interp_bilinear_path_;
+      xfeat_params.interp_nearest_path =
+          feature_detector_params_.interp_nearest_path_;
+      xfeat_params.use_gpu = feature_detector_params_.xfeat_use_gpu_;
+
+      feature_detector_ = xfeat::XFeatCV::create(*env, xfeat_params);
+      break;
+    }
     default: {
       LOG(FATAL) << "Unknown feature detector type: "
                  << VIO::to_underlying(
@@ -91,8 +112,8 @@ FeatureDetector::FeatureDetector(
 // TODO(Toni) Optimize this function.
 // NOTE: for stereo cameras we pass R to ensure we rectify the versors
 // and 3D points of the features we detect.
-void FeatureDetector::featureDetection(Frame* cur_frame,
-                                       std::optional<cv::Mat> R) {
+void FeatureDetector::featureDetectionTracked(Frame* cur_frame,
+                                              std::optional<cv::Mat> R) {
   CHECK_NOTNULL(cur_frame);
 
   // Check how many new features we need: maxFeaturesPerFrame_ - n_existing
@@ -118,8 +139,8 @@ void FeatureDetector::featureDetection(Frame* cur_frame,
   ///////////////// FEATURE DETECTION //////////////////////
   // Actual feature detection: detects new keypoints where there are no
   // currently tracked ones
-  //auto start_time_tic = utils::Timer::tic();
-  const KeypointsCV& corners = featureDetection(*cur_frame, nr_corners_needed);
+  // auto start_time_tic = utils::Timer::tic();
+  const KeypointsCV& corners = featureDetection(cur_frame, nr_corners_needed);
   const size_t& n_corners = corners.size();
 
   // debug_info_.featureDetectionTime_ =
@@ -138,7 +159,6 @@ void FeatureDetector::featureDetection(Frame* cur_frame,
     cur_frame->versors_.reserve(new_nr_keypoints);
 
     // Incremental id assigned to new landmarks
-    static LandmarkId lmk_id = 0;
     const CameraParams& cam_param = cur_frame->cam_param_;
     for (const KeypointCV& corner : corners) {
       cur_frame->landmarks_.push_back(lmk_id);
@@ -171,7 +191,7 @@ std::vector<cv::KeyPoint> FeatureDetector::rawFeatureDetection(
   return keypoints;
 }
 
-KeypointsCV FeatureDetector::featureDetection(const Frame& cur_frame,
+KeypointsCV FeatureDetector::featureDetection(Frame* cur_frame,
                                               const int& need_n_corners) {
   // cv::namedWindow("Input Image", cv::WINDOW_AUTOSIZE);
   // cv::imshow("Input Image", cur_frame.img_);
@@ -183,18 +203,18 @@ KeypointsCV FeatureDetector::featureDetection(const Frame& cur_frame,
   // keypoints nearby by! The mask is interpreted as: 255 -> consider, 0 ->
   // don't consider.
   cv::Mat mask;
-  if (cur_frame.detection_mask_.empty()) {
-    mask = cv::Mat(cur_frame.img_.size(), CV_8U, cv::Scalar(255));
+  if (cur_frame->detection_mask_.empty()) {
+    mask = cv::Mat(cur_frame->img_.size(), CV_8U, cv::Scalar(255));
   } else {
-    mask = cur_frame.detection_mask_;
+    mask = cur_frame->detection_mask_;
   }
 
-  for (size_t i = 0u; i < cur_frame.keypoints_.size(); ++i) {
-    if (cur_frame.landmarks_.at(i) != -1) {
+  for (size_t i = 0u; i < cur_frame->keypoints_.size(); ++i) {
+    if (cur_frame->landmarks_.at(i) != -1) {
       // Only mask keypoints that are being triangulated (I guess
       // feature tracks? should be made more explicit)
       cv::circle(mask,
-                 cur_frame.keypoints_.at(i),
+                 cur_frame->keypoints_.at(i),
                  feature_detector_params_
                      .min_distance_btw_tracked_and_detected_features_,
                  cv::Scalar(0),
@@ -203,8 +223,15 @@ KeypointsCV FeatureDetector::featureDetection(const Frame& cur_frame,
   }
 
   // Actual raw feature detection
-  std::vector<cv::KeyPoint> keypoints =
-      rawFeatureDetection(cur_frame.img_, mask);
+  std::vector<cv::KeyPoint> keypoints;
+  if (feature_detector_params_.feature_detector_type_ ==
+      FeatureDetectorType::XFEAT) {
+    // when using xfeat, we detect features and compute descriptors
+    feature_detector_->detectAndCompute(
+        cur_frame->img_, mask, keypoints, cur_frame->descriptors_);
+  } else {
+    keypoints = rawFeatureDetection(cur_frame->img_, mask);
+  }
   VLOG(1) << "Number of points detected : " << keypoints.size();
 
   /*{
@@ -228,8 +255,8 @@ KeypointsCV FeatureDetector::featureDetection(const Frame& cur_frame,
         keypoints,
         need_n_corners,
         tolerance,
-        cur_frame.img_.cols,
-        cur_frame.img_.rows,
+        cur_frame->img_.cols,
+        cur_frame->img_.rows,
         feature_detector_params_.nr_horizontal_bins_,
         feature_detector_params_.nr_vertical_bins_,
         feature_detector_params_.binning_mask_);
@@ -285,7 +312,7 @@ KeypointsCV FeatureDetector::featureDetection(const Frame& cur_frame,
       const auto& subpixel_params =
           feature_detector_params_.subpixel_corner_finder_params_;
       auto tic = utils::Timer::tic();
-      cv::cornerSubPix(cur_frame.img_,
+      cv::cornerSubPix(cur_frame->img_,
                        new_corners,
                        subpixel_params.window_size_,
                        subpixel_params.zero_zone_,
@@ -296,6 +323,53 @@ KeypointsCV FeatureDetector::featureDetection(const Frame& cur_frame,
   }
 
   return new_corners;
+}
+
+void FeatureDetector::featureDetection(Frame* cur_frame,
+                                       std::optional<cv::Mat> R) {
+  bool use_tracked_features = feature_detector_params_.feature_detector_type_ !=
+                              FeatureDetectorType::XFEAT;
+  // if we use XFEAT we always detect all new features and then match them
+  if (use_tracked_features) {
+    featureDetectionTracked(cur_frame, R);
+  } else {
+    // If we don't use tracked features, we just detect new features
+    featureDetectionNew(cur_frame, R);
+  }
+}
+
+void FeatureDetector::featureDetectionNew(Frame* cur_frame,
+                                          std::optional<cv::Mat> R) {
+  CHECK_NOTNULL(cur_frame);
+
+  int nr_corners_needed = feature_detector_params_.max_features_per_frame_;
+
+  auto corners = featureDetection(cur_frame, nr_corners_needed);
+
+  const size_t& n_corners = corners.size();
+  CHECK_EQ(n_corners, nr_corners_needed)
+      << "Feature detection returned " << n_corners
+      << " corners, but we requested " << nr_corners_needed;
+
+  cur_frame->landmarks_.reserve(n_corners);
+  cur_frame->landmarks_age_.reserve(n_corners);
+  cur_frame->keypoints_.reserve(n_corners);
+  cur_frame->scores_.reserve(n_corners);
+  cur_frame->versors_.reserve(n_corners);
+
+  // Incremental id assigned to new landmarks
+  const CameraParams& cam_param = cur_frame->cam_param_;
+  for (const KeypointCV& corner : corners) {
+    cur_frame->landmarks_.push_back(-1);
+    // New keypoint, so seen in a single (key)frame so far.
+    cur_frame->landmarks_age_.push_back(0u);
+    cur_frame->keypoints_.push_back(corner);
+    cur_frame->scores_.push_back(0.0);  // NOT IMPLEMENTED
+    cur_frame->versors_.push_back(
+        UndistorterRectifier::GetBearingVector(corner, cam_param, R));
+  }
+  // here we only detect and compute keypoints and descriptors
+  // matching is done afterwards by the lighterglue matcher
 }
 
 }  // namespace VIO

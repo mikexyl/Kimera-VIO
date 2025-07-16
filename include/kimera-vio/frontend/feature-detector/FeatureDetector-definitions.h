@@ -19,6 +19,12 @@
 namespace VIO {
 
 // GFTT is goodFeaturesToTrack detector.
-enum class FeatureDetectorType { FAST = 0, ORB = 1, AGAST = 2, GFTT = 3 };
+enum class FeatureDetectorType {
+  FAST = 0,
+  ORB = 1,
+  AGAST = 2,
+  GFTT = 3,
+  XFEAT = 4
+};
 
 }  // namespace VIO
