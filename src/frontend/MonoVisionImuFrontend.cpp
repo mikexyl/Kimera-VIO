@@ -49,10 +49,10 @@ MonoVisionImuFrontend::MonoVisionImuFrontend(
   CHECK(mono_camera_);
 
   tracker_ = std::make_unique<Tracker>(
-      frontend_params_.tracker_params_, mono_camera_, display_queue);
+      frontend_params_.tracker_params_, mono_camera_, display_queue, ort_env_);
 
   feature_detector_ = std::make_unique<FeatureDetector>(
-      frontend_params_.feature_detector_params_);
+      frontend_params_.feature_detector_params_, ort_env_);
 
   if (VLOG_IS_ON(1)) tracker_->tracker_params_.print();
 }

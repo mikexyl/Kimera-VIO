@@ -20,7 +20,8 @@ namespace VIO {
 LandmarkId FeatureDetector::lmk_id = 0;
 
 FeatureDetector::FeatureDetector(
-    const FeatureDetectorParams& feature_detector_params)
+    const FeatureDetectorParams& feature_detector_params,
+    std::shared_ptr<Ort::Env> env)
     : feature_detector_params_(feature_detector_params),
       non_max_suppression_(nullptr),
       feature_detector_() {
@@ -97,7 +98,7 @@ FeatureDetector::FeatureDetector(
           feature_detector_params_.interp_nearest_path_;
       xfeat_params.use_gpu = feature_detector_params_.xfeat_use_gpu_;
 
-      feature_detector_ = xfeat::XFeatCV::create(xfeat_params);
+      feature_detector_ = xfeat::XFeatCV::create(*env, xfeat_params);
       break;
     }
     default: {

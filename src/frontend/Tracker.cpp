@@ -54,7 +54,8 @@ std::vector<int> remapOpenGvInliersToKimera(
 
 Tracker::Tracker(const TrackerParams& tracker_params,
                  const Camera::ConstPtr& camera,
-                 DisplayQueue* display_queue)
+                 DisplayQueue* display_queue,
+                 std::shared_ptr<Ort::Env> env)
     : tracker_params_(tracker_params),
       landmark_count_(0),
       camera_(camera),
@@ -95,7 +96,7 @@ Tracker::Tracker(const TrackerParams& tracker_params,
       lg_params.min_score = 0.2f;
       lg_params.model_path = tracker_params_.lighterglue_model_path_;
       lg_params.use_gpu = true;
-      feature_tracker_ = std::make_shared<LighterGlueCV>(lg_params);
+      feature_tracker_ = std::make_shared<LighterGlueCV>(*env, lg_params);
       break;
     }
   }
@@ -231,7 +232,8 @@ TrackingStatusPose Tracker::geometricOutlierRejection2d2d(
     const BearingVectors& cur_bearings,
     const KeypointMatches& matches_ref_cur,
     std::vector<int>* inliers,
-    // TODO(TONI): I think this should be using non-rectified left cameras...
+    // TODO(TONI): I think this should be using non-rectified left
+    // cameras...
     const gtsam::Pose3& cam_lkf_Pose_cam_kf) {
   CHECK_NOTNULL(inliers);
 
@@ -294,9 +296,9 @@ TrackingStatusPose Tracker::geometricOutlierRejection2d2d(
   if (!success) {
     status_pose = std::make_pair(TrackingStatus::INVALID, gtsam::Pose3());
   } else {
-    // TODO(Toni): it seems we are not removing outliers if we send an invalid
-    // tracking status (above), but the backend calls addLandmarksToGraph even
-    // when we have an invalid status!
+    // TODO(Toni): it seems we are not removing outliers if we send an
+    // invalid tracking status (above), but the backend calls
+    // addLandmarksToGraph even when we have an invalid status!
 
     // TODO(Toni): check quality of tracking
     //! Check enough inliers.
@@ -412,10 +414,9 @@ Tracker::geometricOutlierRejection3d3dGivenRotation(
   VLOG(5) << "OutlierRejectionStereoGivenRot:"
              " starting 1-point RANSAC (voting)";
 
-  // TODO(Toni): this is 1px std in each dir as of now? Parametrize at the very
-  // least...
-  // Stereo point covariance: for covariance propagation.
-  // 3 px std in each direction
+  // TODO(Toni): this is 1px std in each dir as of now? Parametrize at the
+  // very least... Stereo point covariance: for covariance propagation. 3 px
+  // std in each direction
   gtsam::Matrix3 stereo_pt_cov = gtsam::Matrix3::Identity();
 
   double timeMatchingAndAllocation_p =
@@ -705,7 +706,8 @@ TrackingStatusPose Tracker::geometricOutlierRejection3d3d(
 
   //! Setup adapter.
   Adapter3d3d adapter(f_ref, f_cur);
-  // This is not really used, only in nonlinear optimization, but not in 3-point
+  // This is not really used, only in nonlinear optimization, but not in
+  // 3-point
   adapter.setR12(cam_lkf_Pose_cam_kf.rotation().matrix());
   adapter.sett12(cam_lkf_Pose_cam_kf.translation().matrix());
 
@@ -1087,17 +1089,19 @@ bool Tracker::pnp(const StereoFrame& cur_stereo_frame,
   opengv::points_t W_points;
 
   //! Copy landmarks map since otw we may block backend thread. This assumes
-  //! copying the whole map is quicker than spending time finding the lmks we
-  //! need. Call this as late as possible, so the backend has maximum time.
+  //! copying the whole map is quicker than spending time finding the lmks
+  //! we need. Call this as late as possible, so the backend has maximum
+  //! time.
   LandmarksMap copy_W_landmarks_map;
   {  // Safe-guard the landmarks_map_
     std::lock_guard<std::mutex> lock(landmarks_map_mtx_);
     copy_W_landmarks_map = landmarks_map_;
   }
 
-  // This is horrible, because we are weirdly looping over right_keypoints_rect
-  // to know what landmarks are valid and tracked... Re-do this after PR #420...
-  // How it should be done: loop over feature tracks alone.
+  // This is horrible, because we are weirdly looping over
+  // right_keypoints_rect to know what landmarks are valid and tracked...
+  // Re-do this after PR #420... How it should be done: loop over feature
+  // tracks alone.
   CHECK_EQ(cur_stereo_frame.left_keypoints_rectified_.size(),
            cur_stereo_frame.left_frame_.landmarks_.size());
   for (size_t i = 0; i < cur_stereo_frame.left_keypoints_rectified_.size();
@@ -1119,9 +1123,10 @@ bool Tracker::pnp(const StereoFrame& cur_stereo_frame,
       }
     } else {
       // CHECK_EQ(lmk_id, -1); why is this not true :(
-      //! Not interested in this 2D-3D because the right keypoint is not valid
-      //! and/or the lmk_id is invalid...
-      // NOT ideal because we are dropping valuable info for the mono case...
+      //! Not interested in this 2D-3D because the right keypoint is not
+      //! valid and/or the lmk_id is invalid...
+      // NOT ideal because we are dropping valuable info for the mono
+      // case...
       VLOG(5) << "Dropping 2D-3D correspondence: " << i;
     }
   }
@@ -1272,8 +1277,8 @@ bool Tracker::pnp(const BearingVectors& cam_bearing_vectors,
         break;
       }
       case Pose3d2dAlgorithm::MLPNP: {
-        // TODO(TONI): needs fork of opengv, can we make a static check and use
-        // this iff we are having MLPNP support?
+        // TODO(TONI): needs fork of opengv, can we make a static check and
+        // use this iff we are having MLPNP support?
         LOG(FATAL) << "MLPNP Not implemented...";
         break;
       }

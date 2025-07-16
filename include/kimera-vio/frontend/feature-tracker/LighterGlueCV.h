@@ -3,7 +3,7 @@
 #include <xfeat-cpp/lighterglue_cv.h>
 
 #include "kimera-vio/frontend/Frame.h"
-#include "kimera-vio/frontend/feature-tracker/FeatureTrakcer.h"
+#include "kimera-vio/frontend/feature-tracker/FeatureTracker.h"
 
 namespace VIO {
 class LighterGlueCV : public FeatureTracker {
@@ -14,7 +14,7 @@ class LighterGlueCV : public FeatureTracker {
 
   using Params = xfeat::LighterGlueCV::Params;
 
-  LighterGlueCV(Params params) : lg_matcher_(params) {}
+  LighterGlueCV(Ort::Env& env, Params params) : lg_matcher_(env, params) {}
   virtual ~LighterGlueCV() = default;
 
   void track(Frame* ref_frame,
@@ -82,8 +82,8 @@ class LighterGlueCV : public FeatureTracker {
     err_vec.resize(ref_frame->keypoints_.size(), 0.0f);
   }
 
-  static FeatureTracker::Ptr Create(Params params) {
-    return std::make_shared<LighterGlueCV>(params);
+  static FeatureTracker::Ptr Create(Ort::Env& env, Params params) {
+    return std::make_shared<LighterGlueCV>(env, params);
   }
 
   void trackDesc(Frame* ref_frame,

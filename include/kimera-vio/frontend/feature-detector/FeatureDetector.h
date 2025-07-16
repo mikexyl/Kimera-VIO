@@ -14,6 +14,8 @@
 
 #pragma once
 
+#include <xfeat-cpp/xfeat_cv.h>
+
 #include <Eigen/Eigen>
 #include <opencv2/features2d.hpp>
 #include <optional>
@@ -32,7 +34,8 @@ class FeatureDetector {
   KIMERA_DELETE_COPY_CONSTRUCTORS(FeatureDetector);
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
-  FeatureDetector(const FeatureDetectorParams& feature_detector_params);
+  FeatureDetector(const FeatureDetectorParams& feature_detector_params,
+                  std::shared_ptr<Ort::Env> env = nullptr);
   virtual ~FeatureDetector() = default;
 
  public:

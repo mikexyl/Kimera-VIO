@@ -57,7 +57,8 @@ class Tracker {
    */
   Tracker(const TrackerParams& tracker_params,
           const Camera::ConstPtr& camera,
-          DisplayQueue* display_queue = nullptr);
+          DisplayQueue* display_queue = nullptr,
+          std::shared_ptr<Ort::Env> env = nullptr);
 
   virtual ~Tracker() = default;
 

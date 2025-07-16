@@ -1,7 +1,7 @@
 #pragma once
 
 #include "kimera-vio/frontend/Frame.h"
-#include "kimera-vio/frontend/feature-tracker/FeatureTrakcer.h"
+#include "kimera-vio/frontend/feature-tracker/FeatureTracker.h"
 
 namespace VIO {
 class OpticalFlowCV : public FeatureTracker {

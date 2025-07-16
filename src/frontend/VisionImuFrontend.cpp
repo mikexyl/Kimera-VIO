@@ -35,7 +35,8 @@ VisionImuFrontend::VisionImuFrontend(const FrontendParams& frontend_params,
       tracker_status_summary_(),
       display_queue_(display_queue),
       logger_(nullptr),
-      odom_params_(odom_params) {
+      odom_params_(odom_params),
+      ort_env_(new Ort::Env(ORT_LOGGING_LEVEL_WARNING, "KimeraVIO")) {
   imu_frontend_ = std::make_unique<ImuFrontend>(imu_params, imu_initial_bias);
   if (log_output) {
     logger_ = std::make_unique<FrontendLogger>();
