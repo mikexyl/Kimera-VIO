@@ -16,6 +16,7 @@
 
 #include "kimera-vio/dataprovider/MonoDataProviderModule.h"
 #include "kimera-vio/frontend/Camera.h"
+#include "kimera-vio/loopclosure/DBoWLoopClosureDetector.h"
 #include "kimera-vio/pipeline/Pipeline.h"
 
 namespace VIO {

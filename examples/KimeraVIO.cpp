@@ -25,6 +25,7 @@
 #include "kimera-vio/dataprovider/KittiDataProvider.h"
 #include "kimera-vio/frontend/StereoImuSyncPacket.h"
 #include "kimera-vio/logging/Logger.h"
+#include "kimera-vio/loopclosure/DBoWLoopClosureDetector.h"
 #include "kimera-vio/pipeline/MonoImuPipeline.h"
 #include "kimera-vio/pipeline/Pipeline.h"
 #include "kimera-vio/pipeline/StereoImuPipeline.h"

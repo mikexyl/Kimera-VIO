@@ -6,5 +6,6 @@ target_sources(kimera_vio
     "${CMAKE_CURRENT_LIST_DIR}/LcdModule.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/LcdOutputPacket.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/LoopClosureDetector.cpp"
+    "${CMAKE_CURRENT_LIST_DIR}/DBoWLoopClosureDetector.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/LoopClosureDetectorParams.cpp"
 )

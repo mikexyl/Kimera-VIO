@@ -1331,10 +1331,10 @@ void Tracker::featureTrackingDesc(
           << utils::Timer::toc(time_lukas_kanade_tic).count();
   VLOG(2) << "Finished Optical Flow Pyr LK tracking.";
 
-  LOG(INFO) << "Feature tracking: "
-            << "ref_frame.id_: " << ref_frame->id_
-            << ", cur_frame.id_: " << cur_frame->id_
-            << ", Nr tracked keypoints: " << matches.size();
+  VLOG(10) << "Feature tracking: "
+           << "ref_frame.id_: " << ref_frame->id_
+           << ", cur_frame.id_: " << cur_frame->id_
+           << ", Nr tracked keypoints: " << matches.size();
 
   std::set<LandmarkId> tracked_lmk_ids;
 

@@ -15,7 +15,7 @@
 
 #pragma once
 
-#include "kimera-vio/loopclosure/LoopClosureDetector.h"
+#include "kimera-vio/loopclosure/DBoWLoopClosureDetector.h"
 #include "kimera-vio/loopclosure/LoopClosureDetector-definitions.h"
 
 namespace VIO {
@@ -27,7 +27,7 @@ class LcdFactory {
   LcdFactory() = delete;
   virtual ~LcdFactory() = default;
 
-  static LoopClosureDetector::UniquePtr createLcd(
+  static DBoWLoopClosureDetector::UniquePtr createLcd(
       const LoopClosureDetectorType& lcd_type,
       const LoopClosureDetectorParams& lcd_params,
       const CameraParams& tracker_cam_params,
@@ -39,14 +39,15 @@ class LcdFactory {
       PreloadedVocab::Ptr&& preloaded_vocab = nullptr) {
     switch (lcd_type) {
       case LoopClosureDetectorType::BoW: {
-        return std::make_unique<LoopClosureDetector>(lcd_params,
-                                                     tracker_cam_params,
-                                                     B_Pose_Cam,
-                                                     stereo_camera,
-                                                     stereo_matching_params,
-                                                     rgbd_camera,
-                                                     log_output,
-                                                     std::move(preloaded_vocab));
+        return std::make_unique<DBoWLoopClosureDetector>(
+            lcd_params,
+            tracker_cam_params,
+            B_Pose_Cam,
+            stereo_camera,
+            stereo_matching_params,
+            rgbd_camera,
+            log_output,
+            std::move(preloaded_vocab));
       }
       default: {
         LOG(FATAL) << "Requested loop closure detector type is not supported.\n"
