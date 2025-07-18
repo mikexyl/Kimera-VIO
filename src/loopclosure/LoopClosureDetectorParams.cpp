@@ -164,6 +164,13 @@ bool LoopClosureDetectorParams::parseYAML(const std::string& filepath) {
                              &frame_cache.remove_cache_on_exit);
   }
 
+  yaml_parser.getYamlParam("lcd_lg_num_features", &lcd_lg_num_features_);
+  yaml_parser.getYamlParam("lcd_lg_model_path", &lcd_lg_model_path_);
+  yaml_parser.getYamlParam("lcd_faiss_index_path", &lcd_faiss_index_path_);
+  yaml_parser.getYamlParam("xfeat_nv_head_model_path",
+                           &xfeat_nv_head_model_path_);
+  yaml_parser.getYamlParam("netvlad_model_path", &netvlad_model_path_);
+
   return true;
 }
 

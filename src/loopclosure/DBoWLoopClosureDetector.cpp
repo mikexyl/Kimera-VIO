@@ -84,23 +84,12 @@ DBoWLoopClosureDetector::DBoWLoopClosureDetector(
     bool log_output,
     PreloadedVocab::Ptr&& preloaded_vocab)
     : LoopClosureDetector(lcd_params,
+                          tracker_cam_params,
                           B_Pose_Cam,
                           stereo_camera,
                           stereo_matching_params,
                           rgbd_camera,
-                          log_output),
-      lcd_tp_wrapper_(nullptr) {
-  // Shared noise model initialization
-  gtsam::Vector6 precisions;
-  precisions.head<3>().setConstant(lcd_params_.betweenRotationPrecision_);
-  precisions.tail<3>().setConstant(lcd_params_.betweenTranslationPrecision_);
-  shared_noise_model_ = gtsam::noiseModel::Diagonal::Precisions(precisions);
-
-  // Outlier rejection initialization (inside of tracker)
-  tracker_ = std::make_unique<Tracker>(
-      lcd_params.tracker_params_,
-      std::make_shared<VIO::Camera>(tracker_cam_params));
-
+                          log_output) {
   // Sparse stereo reconstruction members (only if stereo_camera is provided)
   if (stereo_camera) {
     VLOG(5) << "LoopClosureDetector initializing in stereo mode.";
@@ -141,32 +130,8 @@ DBoWLoopClosureDetector::DBoWLoopClosureDetector(
     vocab = loadOrbVocabulary();
   }
 
-  // Initialize the thirdparty wrapper:
-  lcd_tp_wrapper_ = std::make_unique<LcdThirdPartyWrapper>(lcd_params_);
-
-  // Initialize db_BoW_:
+  // Initialize db_:
   db_ = std::make_unique<OrbDatabaseWrapper>(*vocab);
-
-  // Initialize pgo_:
-  // TODO(marcus): parametrize the verbosity of PGO params
-  KimeraRPGO::RobustSolverParams pgo_params;
-  pgo_params.setPcmSimple3DParams(lcd_params_.odom_trans_threshold_,
-                                  lcd_params_.odom_rot_threshold_,
-                                  lcd_params_.pcm_trans_threshold_,
-                                  lcd_params_.pcm_rot_threshold_,
-                                  KimeraRPGO::Verbosity::QUIET);
-  if (lcd_params_.gnc_alpha_ > 0 && lcd_params_.gnc_alpha_ < 1) {
-    pgo_params.setGncInlierCostThresholdsAtProbability(lcd_params_.gnc_alpha_);
-  }
-  pgo_ = std::make_unique<KimeraRPGO::RobustSolver>(pgo_params);
-
-  if (log_output) {
-    logger_ = std::make_unique<LoopClosureDetectorLogger>();
-  }
-
-  if (VLOG_IS_ON(1)) {
-    print();
-  }
 }
 
 DBoWLoopClosureDetector::~DBoWLoopClosureDetector() {
@@ -313,12 +278,6 @@ void DBoWLoopClosureDetector::setDatabase(const OrbDatabaseWrapper& db) {
 /* ------------------------------------------------------------------------ */
 void DBoWLoopClosureDetector::setVocabulary(const OrbVocabulary& voc) {
   db_->setVocabulary(voc);
-}
-
-/* ------------------------------------------------------------------------ */
-void DBoWLoopClosureDetector::print() const {
-  lcd_params_.print();
-  // TODO(marcus): implement
 }
 
 }  // namespace VIO

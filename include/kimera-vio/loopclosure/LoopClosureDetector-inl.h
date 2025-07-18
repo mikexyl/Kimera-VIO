@@ -1,5 +1,8 @@
+#pragma once
+
 #include "kimera-vio/frontend/MonoVisionImuFrontend-definitions.h"
 #include "kimera-vio/frontend/RgbdVisionImuFrontend-definitions.h"
+#include "kimera-vio/loopclosure/LoopClosureDetector.h"
 #include "kimera-vio/utils/Statistics.h"
 #include "kimera-vio/utils/Timer.h"
 #include "kimera-vio/utils/UtilsOpenCV.h"
@@ -14,28 +17,65 @@ template <typename Database, typename FeatureDetector, typename FeatureMatcher>
 LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::
     LoopClosureDetector(
         const LoopClosureDetectorParams& lcd_params,
+        const CameraParams& tracker_cam_params,
         const gtsam::Pose3& B_Pose_Cam,
-        const std::optional<StereoCamera::ConstPtr>& stereo_camera,
+        const std::optional<VIO::StereoCamera::ConstPtr>& stereo_camera,
         const std::optional<StereoMatchingParams>& stereo_matching_params,
-        const std::optional<RgbdCamera::ConstPtr>& rgbd_camera,
+        const std::optional<VIO::RgbdCamera::ConstPtr>& rgbd_camera,
         bool log_output)
-    : lcd_params_(lcd_params),
-      lcd_state_(LcdState::Bootstrap),
-      cache_(lcd_params.frame_cache),
-      pgo_(nullptr),
-      W_Pose_B_kf_vio_(),
-      logger_(nullptr),
-      db_(nullptr),
+    : lcd_state_(LcdState::Bootstrap),
+      lcd_params_(lcd_params),
       feature_detector_(nullptr),
       feature_matcher_(nullptr),
-      tracker_(nullptr),
-      latest_global_vec_(new typename Database::GlobalDesc()),
-      B_Pose_Cam_(B_Pose_Cam),
       stereo_camera_(stereo_camera ? stereo_camera.value() : nullptr),
       stereo_matcher_(nullptr),
       rgbd_camera_(rgbd_camera ? rgbd_camera.value() : nullptr),
+      db_(nullptr),
+      cache_(lcd_params.frame_cache),
+      pgo_(nullptr),
+      W_Pose_B_kf_vio_(),
+      B_Pose_Cam_(B_Pose_Cam),
+      latest_global_vec_(nullptr),
+      tracker_(nullptr),
       num_lc_unoptimized_(0),
-      log_output_(log_output) {}
+      lcd_tp_wrapper_(nullptr),
+      logger_(nullptr),
+      log_output_(log_output) {
+  // Shared noise model initialization
+  gtsam::Vector6 precisions;
+  precisions.head<3>().setConstant(lcd_params_.betweenRotationPrecision_);
+  precisions.tail<3>().setConstant(lcd_params_.betweenTranslationPrecision_);
+  shared_noise_model_ = gtsam::noiseModel::Diagonal::Precisions(precisions);
+
+  // Outlier rejection initialization (inside of tracker)
+  tracker_ = std::make_unique<Tracker>(
+      lcd_params.tracker_params_,
+      std::make_shared<VIO::Camera>(tracker_cam_params));
+
+  // Initialize pgo_:
+  // TODO(marcus): parametrize the verbosity of PGO params
+  KimeraRPGO::RobustSolverParams pgo_params;
+  pgo_params.setPcmSimple3DParams(lcd_params_.odom_trans_threshold_,
+                                  lcd_params_.odom_rot_threshold_,
+                                  lcd_params_.pcm_trans_threshold_,
+                                  lcd_params_.pcm_rot_threshold_,
+                                  KimeraRPGO::Verbosity::QUIET);
+  if (lcd_params_.gnc_alpha_ > 0 && lcd_params_.gnc_alpha_ < 1) {
+    pgo_params.setGncInlierCostThresholdsAtProbability(lcd_params_.gnc_alpha_);
+  }
+  pgo_ = std::make_unique<KimeraRPGO::RobustSolver>(pgo_params);
+
+  // Initialize the thirdparty wrapper:
+  lcd_tp_wrapper_ = std::make_unique<LcdThirdPartyWrapper>(lcd_params_);
+
+  if (log_output) {
+    logger_ = std::make_unique<LoopClosureDetectorLogger>();
+  }
+
+  if (VLOG_IS_ON(1)) {
+    print();
+  }
+}
 
 template <typename Database, typename FeatureDetector, typename FeatureMatcher>
 LcdOutput::UniquePtr
@@ -213,7 +253,7 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::spinOnce(
 
   output_payload->setFrameInformation(curr_frame->keypoints_3d_,
                                       curr_frame->bearing_vectors_,
-                                      curr_bow_vec,
+                                      globalDescToMap(curr_bow_vec),
                                       curr_frame->descriptors_mat_);
   output_payload->timestamp_map_ = timestamp_map_;
 
@@ -355,8 +395,8 @@ FrameId LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::
       std::vector<cv::KeyPoint> keypoints;
       typename Database::Desc descriptors_mat;
       typename Database::DescVector descriptors_vec;
-      getNewFeaturesAndDescriptors(frame.img_, &keypoints, &descriptors_mat);
-      descriptorMatToVec(descriptors_mat, &descriptors_vec);
+      getNewFeaturesAndDescriptors(frame, &keypoints, &descriptors_mat);
+      descriptorMatToVec(frame, descriptors_mat, &descriptors_vec);
 
       BearingVectors versors;
       for (const cv::KeyPoint& keypoint : keypoints) {

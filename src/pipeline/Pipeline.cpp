@@ -43,9 +43,11 @@ DEFINE_int32(min_num_obs_for_mesher_points,
              "Minimum number of observations for a smart factor's landmark to "
              "to be used as a 3d point to consider for the mesher.");
 
-DEFINE_bool(use_lcd,
-            false,
-            "Enable LoopClosureDetector processing in pipeline.");
+DEFINE_int32(use_lcd,
+             0,
+             "Enable LoopClosureDetector processing in pipeline. 0: disabled, "
+             "1: orb+dbow, 2. xfeat+vlad+lg");
+
 DEFINE_bool(
     do_coarse_imu_camera_temporal_sync,
     false,
@@ -82,7 +84,10 @@ Pipeline::Pipeline(const VioParams& params)
       backend_thread_(nullptr),
       mesher_thread_(nullptr),
       lcd_thread_(nullptr),
-      visualizer_thread_(nullptr) {
+      visualizer_thread_(nullptr),
+      ort_env_(new Ort::Env(ORT_LOGGING_LEVEL_WARNING,
+                            "Kimera-VIO"))  // Default logging level
+{
   if (FLAGS_deterministic_random_number_generator) {
     setDeterministicPipeline();
   }
@@ -235,17 +240,17 @@ bool Pipeline::hasFinished() const {
       display_module_ != nullptr ? !display_module_->isWorking() : true;
 
   VLOG(10) << std::endl
-          << std::boolalpha
-          << "  - data: " << data_provider_module_->isWorking() << std::endl
-          << "  - frontend_input_queue: " << fqueue_done << std::endl
-          << "  - frontend: " << vio_frontend_module_->isWorking() << std::endl
-          << "  - backend_input_queue: " << bqueue_done << std::endl
-          << "  - backend: " << vio_backend_module_->isWorking() << std::endl
-          << "  - mesher: " << mesher_done << std::endl
-          << "  - lcd: " << lcd_done << std::endl
-          << "  - visualizer: " << visualizer_done << std::endl
-          << "  - display_input_queue: " << dqueue_done << std::endl
-          << "  - display: " << display_done << std::endl;
+           << std::boolalpha
+           << "  - data: " << data_provider_module_->isWorking() << std::endl
+           << "  - frontend_input_queue: " << fqueue_done << std::endl
+           << "  - frontend: " << vio_frontend_module_->isWorking() << std::endl
+           << "  - backend_input_queue: " << bqueue_done << std::endl
+           << "  - backend: " << vio_backend_module_->isWorking() << std::endl
+           << "  - mesher: " << mesher_done << std::endl
+           << "  - lcd: " << lcd_done << std::endl
+           << "  - visualizer: " << visualizer_done << std::endl
+           << "  - display_input_queue: " << dqueue_done << std::endl
+           << "  - display: " << display_done << std::endl;
 
   // This is a very rough way of knowing if we have finished...
   // Since threads might be in the middle of processing data while we

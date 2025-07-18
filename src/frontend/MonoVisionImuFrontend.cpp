@@ -27,6 +27,7 @@ DECLARE_bool(do_fine_imu_camera_temporal_sync);
 namespace VIO {
 
 MonoVisionImuFrontend::MonoVisionImuFrontend(
+    std::shared_ptr<Ort::Env> env,
     const FrontendParams& frontend_params,
     const ImuParams& imu_params,
     const ImuBias& imu_initial_bias,
@@ -34,7 +35,8 @@ MonoVisionImuFrontend::MonoVisionImuFrontend(
     DisplayQueue* display_queue,
     bool log_output,
     std::optional<OdometryParams> odom_params)
-    : VisionImuFrontend(frontend_params,
+    : VisionImuFrontend(env,
+                        frontend_params,
                         imu_params,
                         imu_initial_bias,
                         display_queue,

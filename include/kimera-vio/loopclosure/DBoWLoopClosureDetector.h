@@ -167,10 +167,10 @@ class DBoWLoopClosureDetector
    */
   void setVocabulary(const OrbVocabulary& voc);
 
-  /* ------------------------------------------------------------------------ */
-  /* @brief Prints parameters and other statistics on the LoopClosureDetector.
-   */
-  void print() const;
+  std::map<int, double> globalDescToMap(
+      const typename OrbDatabaseWrapper::GlobalDesc& global_desc) override {
+    return std::map<int, double>(global_desc.begin(), global_desc.end());
+  }
 
  private:
   void getNewFeaturesAndDescriptors(const cv::Mat& img,
@@ -182,7 +182,6 @@ class DBoWLoopClosureDetector
 
  private:
   // Store latest computed objects for temporal matching and nss scoring
-  std::unique_ptr<LcdThirdPartyWrapper> lcd_tp_wrapper_;
 };
 
 }  // namespace VIO

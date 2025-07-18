@@ -17,6 +17,7 @@
 
 #include "kimera-vio/loopclosure/DBoWLoopClosureDetector.h"
 #include "kimera-vio/loopclosure/LoopClosureDetector-definitions.h"
+#include "kimera-vio/loopclosure/VLADLoopClosureDetector.h"
 
 namespace VIO {
 
@@ -27,7 +28,7 @@ class LcdFactory {
   LcdFactory() = delete;
   virtual ~LcdFactory() = default;
 
-  static DBoWLoopClosureDetector::UniquePtr createLcd(
+  static LoopClosureDetectorBase::UniquePtr createLcd(
       const LoopClosureDetectorType& lcd_type,
       const LoopClosureDetectorParams& lcd_params,
       const CameraParams& tracker_cam_params,
@@ -36,7 +37,8 @@ class LcdFactory {
       const std::optional<StereoMatchingParams>& stereo_matching_params,
       const std::optional<RgbdCamera::ConstPtr>& rgbd_camera,
       bool log_output,
-      PreloadedVocab::Ptr&& preloaded_vocab = nullptr) {
+      PreloadedVocab::Ptr&& preloaded_vocab = nullptr,
+      std::shared_ptr<Ort::Env> env = nullptr) {
     switch (lcd_type) {
       case LoopClosureDetectorType::BoW: {
         return std::make_unique<DBoWLoopClosureDetector>(
@@ -48,6 +50,17 @@ class LcdFactory {
             rgbd_camera,
             log_output,
             std::move(preloaded_vocab));
+      }
+      case LoopClosureDetectorType::NetVLAD: {
+        CHECK(env) << "VLADLoopClosureDetector requires Ort::Env to be set!";
+        return std::make_unique<VLADLoopClosureDetector>(*env,
+                                                         lcd_params,
+                                                         tracker_cam_params,
+                                                         B_Pose_Cam,
+                                                         stereo_camera,
+                                                         stereo_matching_params,
+                                                         rgbd_camera,
+                                                         log_output);
       }
       default: {
         LOG(FATAL) << "Requested loop closure detector type is not supported.\n"

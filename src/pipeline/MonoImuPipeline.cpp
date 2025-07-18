@@ -72,6 +72,7 @@ MonoImuPipeline::MonoImuPipeline(const VioParams& params,
       &frontend_input_queue_,
       parallel_run_,
       VisionImuFrontendFactory::createFrontend(
+          ort_env_,
           params.frontend_type_,
           params.imu_params_,
           gtsam::imuBias::ConstantBias(),
@@ -174,9 +175,23 @@ MonoImuPipeline::MonoImuPipeline(const VioParams& params,
   // }
 
   if (FLAGS_use_lcd) {
+    LoopClosureDetectorType lcd_type;
+
+    switch (FLAGS_use_lcd) {
+      case 1:  // ORB+DBoW2
+        lcd_type = LoopClosureDetectorType::BoW;
+        break;
+      case 2:  // XFeat+Vlad+LG
+        lcd_type = LoopClosureDetectorType::NetVLAD;
+        break;
+      default:
+        LOG(FATAL) << "Invalid value for --use_lcd: " << FLAGS_use_lcd
+                   << ". Valid values are 0 (disabled), 1 (ORB+DBoW2), "
+                   << "and 2 (XFeat+Vlad+LG).";
+    }
     lcd_module_ = std::make_unique<LcdModule>(
         parallel_run_,
-        LcdFactory::createLcd(LoopClosureDetectorType::BoW,
+        LcdFactory::createLcd(lcd_type,
                               params.lcd_params_,
                               camera_->getCamParams(),
                               camera_->getBodyPoseCam(),
@@ -184,7 +199,9 @@ MonoImuPipeline::MonoImuPipeline(const VioParams& params,
                               std::nullopt,
                               std::nullopt,
                               FLAGS_log_output,
-                              std::move(preloaded_vocab)));
+                              std::move(preloaded_vocab),
+                              ort_env_));
+
     //! Register input callbacks
     vio_backend_module_->registerOutputCallback(
         std::bind(&LcdModule::fillBackendQueue,

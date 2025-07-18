@@ -34,7 +34,8 @@ typedef cv::Mat OrbDescriptor;
 typedef std::vector<OrbDescriptor> OrbDescriptorVec;
 
 enum class LoopClosureDetectorType {
-  BoW = 0u,  //! Bag of Words approach
+  BoW = 0u,      //! Bag of Words approach
+  NetVLAD = 1u,  //! NetVLAD approach
 };
 
 enum class LCDStatus : int {
@@ -57,8 +58,8 @@ struct LCDFrame {
            const FrameId& id_kf,
            const std::vector<cv::KeyPoint>& keypoints,
            const Landmarks& keypoints_3d,
-           const OrbDescriptorVec& descriptors_vec,
-           const OrbDescriptor& descriptors_mat,
+           const std::vector<cv::Mat>& descriptors_vec,
+           const cv::Mat& descriptors_mat,
            const BearingVectors& bearing_vectors)
       : timestamp_(timestamp),
         id_(id),
@@ -80,8 +81,8 @@ struct LCDFrame {
   FrameId id_kf_;
   std::vector<cv::KeyPoint> keypoints_;
   Landmarks keypoints_3d_;
-  OrbDescriptorVec descriptors_vec_;
-  OrbDescriptor descriptors_mat_;
+  std::vector<cv::Mat> descriptors_vec_;
+  cv::Mat descriptors_mat_;
   BearingVectors bearing_vectors_;
 
  protected:
@@ -99,8 +100,8 @@ struct StereoLCDFrame : LCDFrame {
                  const FrameId& id_kf,
                  const std::vector<cv::KeyPoint>& keypoints,
                  const Landmarks& keypoints_3d,
-                 const OrbDescriptorVec& descriptors_vec,
-                 const OrbDescriptor& descriptors_mat,
+                 const std::vector<cv::Mat>& descriptors_vec,
+                 const cv::Mat& descriptors_mat,
                  const BearingVectors& bearing_vectors,
                  const StatusKeypointsCV& left_keypoints_rectified,
                  const StatusKeypointsCV& right_keypoints_rectified)

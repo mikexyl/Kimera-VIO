@@ -55,7 +55,7 @@ struct LcdOutput : PipelinePayload {
 
   void setFrameInformation(const Landmarks& keypoints_3d,
                            const BearingVectors& versors,
-                           const DBoW2::BowVector& bow_vec,
+                           const std::map<int, double>& bow_vec,
                            const cv::Mat& descriptors_mat);
 
   // TODO(marcus): inlude stats/score of match

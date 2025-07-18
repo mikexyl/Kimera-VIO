@@ -227,8 +227,19 @@ KeypointsCV FeatureDetector::featureDetection(Frame* cur_frame,
   if (feature_detector_params_.feature_detector_type_ ==
       FeatureDetectorType::XFEAT) {
     // when using xfeat, we detect features and compute descriptors
-    feature_detector_->detectAndCompute(
-        cur_frame->img_, mask, keypoints, cur_frame->descriptors_);
+    auto xfeat_detector =
+        std::dynamic_pointer_cast<xfeat::XFeatCV>(feature_detector_);
+    CHECK_NOTNULL(xfeat_detector);
+    cv::Mat M1, x_prep;
+    xfeat_detector->detectAndCompute(cur_frame->img_,
+                                     mask,
+                                     keypoints,
+                                     cur_frame->descriptors_,
+                                     false,
+                                     &M1,
+                                     &x_prep);
+    cur_frame->xfeat_M1_ = M1;
+    cur_frame->xfeat_x_prep_ = x_prep;
   } else {
     keypoints = rawFeatureDetection(cur_frame->img_, mask);
   }

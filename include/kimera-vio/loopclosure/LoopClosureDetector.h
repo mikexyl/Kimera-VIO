@@ -10,6 +10,7 @@
 #include "kimera-vio/frontend/Tracker.h"
 #include "kimera-vio/logging/Logger.h"
 #include "kimera-vio/loopclosure/LcdOutputPacket.h"
+#include "kimera-vio/loopclosure/LcdThirdPartyWrapper.h"
 #include "kimera-vio/loopclosure/LoopClosureDetector-definitions.h"
 #include "kimera-vio/loopclosure/LoopClosureDetectorParams.h"
 
@@ -57,6 +58,7 @@ class LoopClosureDetector : public LoopClosureDetectorBase {
 
   LoopClosureDetector(
       const LoopClosureDetectorParams& lcd_params,
+      const CameraParams& tracker_cam_params,
       const gtsam::Pose3& B_Pose_Cam,
       const std::optional<VIO::StereoCamera::ConstPtr>& stereo_camera,
       const std::optional<StereoMatchingParams>& stereo_matching_params,
@@ -289,6 +291,13 @@ class LoopClosureDetector : public LoopClosureDetectorBase {
       const cv::Mat& img,
       std::vector<cv::KeyPoint>* keypoints,
       typename Database::Desc* descriptors_mat) = 0;
+
+  virtual void getNewFeaturesAndDescriptors(
+      const Frame& frame,
+      std::vector<cv::KeyPoint>* keypoints,
+      typename Database::Desc* descriptors_mat) {
+    getNewFeaturesAndDescriptors(frame.img_, keypoints, descriptors_mat);
+  }
   /* ------------------------------------------------------------------------
    */
   /** @brief Convert an ORB descriptor from matrix form to vector form for
@@ -299,6 +308,13 @@ class LoopClosureDetector : public LoopClosureDetectorBase {
   virtual void descriptorMatToVec(
       const typename Database::DescMat& descriptors_mat,
       typename Database::DescVector* descriptors_vec) {}
+
+  virtual void descriptorMatToVec(
+      const Frame& frame,
+      const typename Database::DescMat& descriptors_mat,
+      typename Database::DescVector* descriptors_vec) {
+    descriptorMatToVec(descriptors_mat, descriptors_vec);
+  }
 
   /* ------------------------------------------------------------------------
    */
@@ -431,6 +447,14 @@ class LoopClosureDetector : public LoopClosureDetectorBase {
                           const typename Database::GlobalDesc& bow_vec,
                           LoopResult* result) = 0;
 
+  virtual void print() const {
+    lcd_params_.print();
+    // TODO(marcus): implement
+  }
+
+  virtual std::map<int, double> globalDescToMap(
+      const typename Database::GlobalDesc& global_desc) = 0;
+
  protected:
   enum class LcdState {
     Bootstrap,  //! Lcd is initializing
@@ -472,6 +496,8 @@ class LoopClosureDetector : public LoopClosureDetectorBase {
 
   // Queue-checking callback
   int num_lc_unoptimized_;
+
+  std::unique_ptr<LcdThirdPartyWrapper> lcd_tp_wrapper_;
 
   // Logging members
   std::unique_ptr<LoopClosureDetectorLogger> logger_;
