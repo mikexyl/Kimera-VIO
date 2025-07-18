@@ -180,7 +180,7 @@ class Frame : public PipelinePayload {
   std::vector<size_t> landmarks_age_;
   //! in the ref frame of the RECTIFIED left frame
   BearingVectors versors_;
-  //! Not currently used
+
   cv::Mat descriptors_;
   //! Optional mask for feature detection. Note that can change when the frame
   //! is const

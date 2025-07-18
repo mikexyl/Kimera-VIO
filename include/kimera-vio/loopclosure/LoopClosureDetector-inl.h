@@ -55,6 +55,8 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::
   // Initialize pgo_:
   // TODO(marcus): parametrize the verbosity of PGO params
   KimeraRPGO::RobustSolverParams pgo_params;
+  // TODO(mikexyl): turn this off for debugging
+  //  pgo_params.setNoRejection();
   pgo_params.setPcmSimple3DParams(lcd_params_.odom_trans_threshold_,
                                   lcd_params_.odom_rot_threshold_,
                                   lcd_params_.pcm_trans_threshold_,
@@ -235,7 +237,7 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::spinOnce(
   LcdOutput::UniquePtr output_payload = nullptr;
   if (loop_result.isLoop()) {
     output_payload =
-        std::make_unique<LcdOutput>(true,
+        std::make_unique<LcdOutput>(loop_result.status_,
                                     input.timestamp_,
                                     timestamp_map_.at(loop_result.query_id_),
                                     timestamp_map_.at(loop_result.match_id_),
@@ -370,6 +372,11 @@ void LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::
       num_lc_unoptimized_ >= lcd_params_.max_lc_cached_before_optimize_ ||
       !is_backend_queue_filled_cb_();
 
+  VLOG(1) << "PGO: do optimize: " << do_optimize
+          << ", num_lc_unoptimized: " << num_lc_unoptimized_
+          << ", max_lc_cached_before_optimize_: "
+          << lcd_params_.max_lc_cached_before_optimize_;
+
   if (!do_optimize) {
     num_lc_unoptimized_++;
   } else {
@@ -378,6 +385,10 @@ void LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::
 
   CHECK(pgo_);
   pgo_->update(nfg, gtsam::Values(), do_optimize && !FLAGS_lcd_no_optimize);
+  VLOG(1) << "PGO: input pg size: " << nfg.size()
+          << ", updated pg size: " << pgo_->getFactorsUnsafe().size()
+          << ", num_lc: " << pgo_->getNumLC()
+          << ", num_lc_inliers: " << pgo_->getNumLCInliers();
 }
 
 /* ------------------------------------------------------------------------

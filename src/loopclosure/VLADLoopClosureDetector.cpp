@@ -15,6 +15,11 @@ void VLADLoopClosureDetector::detectLoop(
   CHECK_NOTNULL(db_);
   result->query_id_ = frame_id;
 
+  if (frame_id < static_cast<FrameId>(lcd_params_.recent_frames_window_)) {
+    result->status_ = LCDStatus::NO_MATCHES;
+    return;
+  }
+
   int max_possible_match_id = frame_id - lcd_params_.recent_frames_window_;
   if (max_possible_match_id < 0) {
     max_possible_match_id = 0;
@@ -31,6 +36,19 @@ void VLADLoopClosureDetector::detectLoop(
               max_possible_match_id);
 
   db_->add(global_desc);
+
+  // remove -1 from query_result
+  query_result.erase(std::remove(query_result.begin(), query_result.end(), -1),
+                     query_result.end());
+
+  // if the query result has recent frames, throw error
+  for (const auto& id : query_result) {
+    if (id >= max_possible_match_id) {
+      throw std::runtime_error(
+          "VLADLoopClosureDetector: Query result contains recent frames. "
+          "This should not happen.");
+    }
+  }
 
   if (query_result.empty()) {
     result->status_ = LCDStatus::NO_MATCHES;
@@ -118,6 +136,8 @@ void VLADLoopClosureDetector::getNewFeaturesAndDescriptors(
     keypoints->push_back(cv::KeyPoint(
         keypoint.x, keypoint.y, 0.0f));  // size is not used in VLAD
   }
+
+  *descriptors_mat = frame.descriptors_;
 }
 
 void VLADLoopClosureDetector::descriptorMatToVec(

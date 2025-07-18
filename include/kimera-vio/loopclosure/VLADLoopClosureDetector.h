@@ -185,6 +185,66 @@ class VLADLoopClosureDetector
     }
     return desc_map;
   }
+
+  // using xfeat nv, lcd frame's descriptors_vec are 2 mats: M1 and x_prep
+  // and lcd frames' descriptors_mat are the actual xfeat descriptors of each
+  // keypoints
+  void computeDescriptorMatches(const typename Database::Desc& ref_descriptors,
+                                const typename Database::Desc& cur_descriptors,
+                                KeypointMatches* matches_match_query,
+                                bool cut_matches = false) const override {
+    throw std::runtime_error(
+        "VLADLoopClosureDetector: computeDescriptorMatches is deleted for VLAD "
+        "LCD.");
+  }
+
+  void computeDescriptorMatches(const LCDFrame& ref,
+                                const LCDFrame& curr,
+                                KeypointMatches* matches_match_query,
+                                bool cut_matches = false) const override {
+    // the keypoint descriptors from frontend frame should be used, so the
+    // ref/cur descriptors are empty, and this function is replace with the
+    // function following
+    CHECK_NOTNULL(matches_match_query);
+    CHECK_NOTNULL(feature_matcher_);
+
+    matches_match_query->clear();
+    std::vector<cv::DMatch> matches;
+
+    // TODO(mikexyl): use the actual image size from the frames
+    // but since the onnx models have to use a fixed size, so good for now
+    static cv::Size image_size0 =
+        cv::Size(640, 480);  // Default size, can be changed
+
+    cv::Mat ref_kp_mat(ref.keypoints_.size(), 2, CV_32F);
+    for (size_t i = 0; i < ref.keypoints_.size(); ++i) {
+      ref_kp_mat.at<float>(i, 0) = ref.keypoints_[i].pt.x;
+      ref_kp_mat.at<float>(i, 1) = ref.keypoints_[i].pt.y;
+    }
+
+    cv::Mat cur_kp_mat(curr.keypoints_.size(), 2, CV_32F);
+    for (size_t i = 0; i < curr.keypoints_.size(); ++i) {
+      cur_kp_mat.at<float>(i, 0) = curr.keypoints_[i].pt.x;
+      cur_kp_mat.at<float>(i, 1) = curr.keypoints_[i].pt.y;
+    }
+
+    xfeat::DetectionResult ref_ret{
+        .keypoints = ref_kp_mat,
+        .descriptors = ref.descriptors_mat_,
+    },
+        cur_ret{
+            .keypoints = cur_kp_mat,
+            .descriptors = curr.descriptors_mat_,
+        };
+
+    feature_matcher_->match(
+        cur_ret, image_size0, ref_ret, image_size0, matches);
+
+    matches_match_query->reserve(matches.size());
+    for (const auto& match : matches) {
+      matches_match_query->emplace_back(match.trainIdx, match.queryIdx);
+    }
+  }
 };
 
 }  // namespace VIO

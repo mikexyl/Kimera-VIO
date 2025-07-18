@@ -91,10 +91,11 @@ class LoopClosureDetector : public LoopClosureDetectorBase {
    * @param[in] cut_matches If true, Lowe's Ratio Test will be used to cut
    *  out bad matches before sending output.
    */
-  void computeDescriptorMatches(const typename Database::Desc& ref_descriptors,
-                                const typename Database::Desc& cur_descriptors,
-                                KeypointMatches* matches_match_query,
-                                bool cut_matches = false) const {
+  virtual void computeDescriptorMatches(
+      const typename Database::Desc& ref_descriptors,
+      const typename Database::Desc& cur_descriptors,
+      KeypointMatches* matches_match_query,
+      bool cut_matches = false) const {
     CHECK_NOTNULL(matches_match_query);
     matches_match_query->clear();
 
@@ -119,6 +120,18 @@ class LoopClosureDetector : public LoopClosureDetectorBase {
     }
   }
 
+  virtual void computeDescriptorMatches(const LCDFrame& ref,
+                                        const LCDFrame& curr,
+                                        KeypointMatches* matches_match_query,
+                                        bool cut_matches = false) const {
+    CHECK_NOTNULL(matches_match_query);
+
+    return computeDescriptorMatches(ref.descriptors_mat_,
+                                    curr.descriptors_mat_,
+                                    matches_match_query,
+                                    cut_matches);
+  }
+
   void verifyAndRecoverPose(LoopResult* result) {
     CHECK_NOTNULL(result);
 
@@ -131,10 +144,8 @@ class LoopClosureDetector : public LoopClosureDetectorBase {
 
     // Find correspondences between keypoints.
     KeypointMatches matches_match_query;
-    computeDescriptorMatches(match_frame->descriptors_mat_,
-                             query_frame->descriptors_mat_,
-                             &matches_match_query,
-                             true);
+    computeDescriptorMatches(
+        *match_frame, *query_frame, &matches_match_query, true);
 
     // Perform geometric verification check.
     gtsam::Pose3 camMatch_T_camQuery_2d;
@@ -302,7 +313,8 @@ class LoopClosureDetector : public LoopClosureDetectorBase {
    */
   /** @brief Convert an ORB descriptor from matrix form to vector form for
    * use with BoW.
-   * @param[in] descriptors_mat An Database::Desc matrix with input descriptors
+   * @param[in] descriptors_mat An Database::Desc matrix with input
+   * descriptors
    * @param[out] descriptors_vec The descriptors in vectorize format
    */
   virtual void descriptorMatToVec(
@@ -329,7 +341,8 @@ class LoopClosureDetector : public LoopClosureDetectorBase {
   void rewriteStereoFrameFeatures(const std::vector<cv::KeyPoint>& keypoints,
                                   StereoFrame* stereo_frame) const;
 
-  /* ------------------------------------------------------------------------ */
+  /* ------------------------------------------------------------------------
+   */
   bool geometricVerificationCam2d2d(const LCDFrame& ref_frame,
                                     const LCDFrame& cur_frame,
                                     const KeypointMatches& matches_match_query,
@@ -362,7 +375,8 @@ class LoopClosureDetector : public LoopClosureDetectorBase {
     return result.first == TrackingStatus::VALID;
   }
 
-  /* ------------------------------------------------------------------------ */
+  /* ------------------------------------------------------------------------
+   */
   /** @brief Determine the 3D pose betwen two frames.
    * @param[in] ref_id The frame ID of the match image in the database.
    * @param[in] cur_id The frame ID of the query image in the database.
@@ -382,7 +396,8 @@ class LoopClosureDetector : public LoopClosureDetectorBase {
                        const KeypointMatches& matches_query_match,
                        gtsam::Pose3* bodyMatch_T_bodyQuery_3d,
                        std::vector<int>* inliers);
-  /* ------------------------------------------------------------------------ */
+  /* ------------------------------------------------------------------------
+   */
   /** @brief Refine relative pose given by ransac using smart factors.
    * @param[in] ref_id The frame ID of the match image in the database.
    * @param[in] cur_id The frame ID of the query image in the database.
@@ -398,11 +413,12 @@ class LoopClosureDetector : public LoopClosureDetectorBase {
                            const gtsam::Pose3& camMatch_T_camQuery_3d,
                            const KeypointMatches& matches_query_match);
 
-  /* ------------------------------------------------------------------------ */
+  /* ------------------------------------------------------------------------
+   */
   /** @brief Gives the transform between two frames in the body frame given
    *  that same transform in the camera frame.
-   * @param[in] camMatch_T_camQuery The relative pose between two frames in the
-   *  camera coordinate frame.
+   * @param[in] camMatch_T_camQuery The relative pose between two frames in
+   * the camera coordinate frame.
    * @param[out] bodyMatch_T_bodyQuery The relative pose between two frames in
    * the
    *  body coordinate frame.
@@ -416,13 +432,14 @@ class LoopClosureDetector : public LoopClosureDetectorBase {
         B_Pose_Cam_ * camMatch_T_camQuery * B_Pose_Cam_.inverse();
   }
 
-  /* ------------------------------------------------------------------------ */
+  /* ------------------------------------------------------------------------
+   */
   /** @brief The inverse of transformCameraPoseToBodyPose.
    * @param[in] bodyMatch_T_bodyQuery The relative pose between two frames in
    * the
    *  body coordinate frame.
-   * @param[out] camMatch_T_camQuery The relative pose between two frames in the
-   *  camera coordinate frame.
+   * @param[out] camMatch_T_camQuery The relative pose between two frames in
+   * the camera coordinate frame.
    * @return
    */
   void transformBodyPoseToCameraPose(const gtsam::Pose3& bodyMatch_T_bodyQuery,
@@ -432,14 +449,15 @@ class LoopClosureDetector : public LoopClosureDetectorBase {
         B_Pose_Cam_.inverse() * bodyMatch_T_bodyQuery * B_Pose_Cam_;
   }
 
-  /* ------------------------------------------------------------------------ */
-  /** @brief Runs all checks on a frame and determines whether it a loop-closure
-   *         with a previous frame or not. Fills the LoopResult with this
+  /* ------------------------------------------------------------------------
+   */
+  /** @brief Runs all checks on a frame and determines whether it a
+   * loop-closure with a previous frame or not. Fills the LoopResult with this
    *         information.
    * @param[in] frame_id A FrameId representing the ID of the latest LCDFrame
    * added to the database, which will be used to detect loop-closures.
-   * @param[in] bow_vec A descriptor vector for the latest LCDFrame to be scored
-   *                    and added to the database.
+   * @param[in] bow_vec A descriptor vector for the latest LCDFrame to be
+   * scored and added to the database.
    * @param[out] result A pointer to the LoopResult that is filled with the
    *                    result of the loop-closure detection stage.
    */

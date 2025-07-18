@@ -44,7 +44,7 @@ nr_vertical_bins: 5
 binning_mask: []
 
 # Subpixel corner refinement for the monocular case
-enable_subpixel_corner_finder: 1
+enable_subpixel_corner_finder: 0
 max_iters: 40
 epsilon_error: 0.001
 window_size: 10
