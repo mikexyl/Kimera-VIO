@@ -45,6 +45,14 @@ LcdOutput::LcdOutput(const Timestamp& timestamp_kf)
       id_match_(0),
       id_recent_(0) {}
 
+LcdOutput::LcdOutput(LCDStatus lcd_status, const Timestamp& timestamp_kf)
+    : PipelinePayload(timestamp_kf),
+      lcd_status_(lcd_status),
+      timestamp_query_(0),
+      timestamp_match_(0),
+      id_match_(0),
+      id_recent_(0) {}
+
 void LcdOutput::setMapInformation(const gtsam::Pose3& W_Pose_Map,
                                   const gtsam::Pose3& Map_Pose_Odom,
                                   const gtsam::Values& states,

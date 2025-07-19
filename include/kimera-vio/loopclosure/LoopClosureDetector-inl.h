@@ -8,7 +8,6 @@
 #include "kimera-vio/utils/UtilsOpenCV.h"
 
 DECLARE_bool(lcd_no_optimize);
-
 DECLARE_bool(lcd_no_detection);
 
 namespace VIO {
@@ -61,7 +60,7 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::
                                   lcd_params_.odom_rot_threshold_,
                                   lcd_params_.pcm_trans_threshold_,
                                   lcd_params_.pcm_rot_threshold_,
-                                  KimeraRPGO::Verbosity::QUIET);
+                                  KimeraRPGO::Verbosity::VERBOSE);
   if (lcd_params_.gnc_alpha_ > 0 && lcd_params_.gnc_alpha_ < 1) {
     pgo_params.setGncInlierCostThresholdsAtProbability(lcd_params_.gnc_alpha_);
   }
@@ -245,7 +244,8 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::spinOnce(
                                     loop_result.query_id_,
                                     loop_result.relative_pose_);
   } else {
-    output_payload = std::make_unique<LcdOutput>(input.timestamp_);
+    output_payload =
+        std::make_unique<LcdOutput>(loop_result.status_, input.timestamp_);
   }
 
   CHECK(output_payload) << "Missing LCD output payload.";

@@ -49,6 +49,8 @@ struct LcdOutput : PipelinePayload {
 
   explicit LcdOutput(const Timestamp& timestamp_kf);
 
+  explicit LcdOutput(LCDStatus lcd_status, const Timestamp& timestamp_kf);
+
   void setMapInformation(const gtsam::Pose3& W_Pose_Map,
                          const gtsam::Pose3& Map_Pose_Odom,
                          const gtsam::Values& states,

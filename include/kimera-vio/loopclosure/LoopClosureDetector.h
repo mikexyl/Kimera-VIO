@@ -138,6 +138,9 @@ class LoopClosureDetector : public LoopClosureDetectorBase {
     const auto match_frame = cache_.getFrame(result->match_id_);
     const auto query_frame = cache_.getFrame(result->query_id_);
     if (!match_frame || !query_frame) {
+      VLOG(1) << "LoopClosureDetector: No match or query frame found for "
+              << "match_id: " << result->match_id_
+              << ", query_id: " << result->query_id_;
       result->status_ = LCDStatus::NO_MATCHES;
       return;
     }
@@ -146,6 +149,9 @@ class LoopClosureDetector : public LoopClosureDetectorBase {
     KeypointMatches matches_match_query;
     computeDescriptorMatches(
         *match_frame, *query_frame, &matches_match_query, true);
+    VLOG(1) << "LoopClosureDetector: Found " << matches_match_query.size()
+            << " kp matches between frames " << result->match_id_ << " and "
+            << result->query_id_;
 
     // Perform geometric verification check.
     gtsam::Pose3 camMatch_T_camQuery_2d;

@@ -16,6 +16,8 @@ void VLADLoopClosureDetector::detectLoop(
   result->query_id_ = frame_id;
 
   if (frame_id < static_cast<FrameId>(lcd_params_.recent_frames_window_)) {
+    VLOG(1) << "VLADLoopClosureDetector: Not enough frames processed yet. "
+            << "Skipping loop closure detection.";
     result->status_ = LCDStatus::NO_MATCHES;
     return;
   }
@@ -38,8 +40,22 @@ void VLADLoopClosureDetector::detectLoop(
   db_->add(global_desc);
 
   // remove -1 from query_result
-  query_result.erase(std::remove(query_result.begin(), query_result.end(), -1),
-                     query_result.end());
+  for (size_t i = 0; i < query_result.size(); ++i) {
+    if (query_result[i] == -1) {
+      query_result.erase(query_result.begin() + i);
+      query_distance.erase(query_distance.begin() + i);
+      --i;  // Adjust index after erasure.
+    }
+  }
+
+  if (VLOG_IS_ON(1)) {
+    // print query results and distances
+    std::stringstream ss;
+    ss << "VLADLoopClosureDetector: query results: ";
+    for (size_t i = 0; i < query_result.size(); ++i)
+      ss << "{" << query_result[i] << ", " << query_distance[i] << "} ";
+    VLOG(1) << ss.str();
+  }
 
   // if the query result has recent frames, throw error
   for (const auto& id : query_result) {
@@ -51,6 +67,7 @@ void VLADLoopClosureDetector::detectLoop(
   }
 
   if (query_result.empty()) {
+    VLOG(1) << "VLADLoopClosureDetector: No matches found.";
     result->status_ = LCDStatus::NO_MATCHES;
     return;
   }
@@ -64,6 +81,9 @@ void VLADLoopClosureDetector::detectLoop(
   }
 
   if (lcd_params_.use_nss_ && nss_distance > FLAGS_max_nss_vlad_distance) {
+    VLOG(1) << "VLADLoopClosureDetector: NSS distance " << nss_distance
+            << " exceeds threshold " << FLAGS_max_nss_vlad_distance
+            << ". No loop closure.";
     result->status_ = LCDStatus::LOW_NSS_FACTOR;
     return;
   }
@@ -105,6 +125,7 @@ void VLADLoopClosureDetector::detectLoop(
   lcd_tp_wrapper_->computeIslands(&dbow_query_result, &islands);
 
   if (islands.empty()) {
+    VLOG(1) << "VLADLoopClosureDetector: No islands found in matches.";
     result->status_ = LCDStatus::NO_GROUPS;
     return;
   }
@@ -118,11 +139,15 @@ void VLADLoopClosureDetector::detectLoop(
       lcd_tp_wrapper_->checkTemporalConstraint(frame_id, best_island);
 
   if (!pass_temporal_constraint) {
+    VLOG(1) << "VLADLoopClosureDetector: Failed temporal constraint check.";
     result->status_ = LCDStatus::FAILED_TEMPORAL_CONSTRAINT;
     return;
   }
 
   verifyAndRecoverPose(result);
+  if (result->status_ != LCDStatus::LOOP_DETECTED) {
+    VLOG(1) << "VLADLoopClosureDetector: Failed pose verification or recovery.";
+  }
 }
 
 void VLADLoopClosureDetector::getNewFeaturesAndDescriptors(

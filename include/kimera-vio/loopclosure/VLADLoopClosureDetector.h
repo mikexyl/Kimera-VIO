@@ -131,8 +131,9 @@ class VLADLoopClosureDetector
             .n_kpts = lcd_params_.lcd_lg_num_features_,
         });
 
-    auto faiss_db =
-        std::make_unique<Database::Database>(lcd_params_.lcd_faiss_index_path_);
+    auto faiss_db = std::make_unique<Database::Database>(
+        Database::Database::IndexMode::kIVFFlat,
+        lcd_params_.lcd_faiss_index_path_);
     db_ = std::make_unique<Database>(std::move(faiss_db),
                                      env,
                                      lcd_params_.xfeat_nv_head_model_path_,
@@ -230,10 +231,12 @@ class VLADLoopClosureDetector
 
     xfeat::DetectionResult ref_ret{
         .keypoints = ref_kp_mat,
+        .scores = {},
         .descriptors = ref.descriptors_mat_,
     },
         cur_ret{
             .keypoints = cur_kp_mat,
+            .scores = {},
             .descriptors = curr.descriptors_mat_,
         };
 
