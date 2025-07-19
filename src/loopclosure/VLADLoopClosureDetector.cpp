@@ -104,20 +104,32 @@ void VLADLoopClosureDetector::detectLoop(
     return dbow_query_result;
   };
 
-  auto dbow_query_result =
-      faiss_to_dbow_queryresults(query_result, query_distance);
-
   // Remove high distances from the QueryResults based on nss.
+  static constexpr double kVLADNSSDistanceThreshold = 1.;
   for (size_t i = 0; i < query_result.size(); ++i) {
-    if (query_distance[i] > nss_distance) {
+    if (query_distance[i] > nss_distance * kVLADNSSDistanceThreshold) {
       query_result.erase(query_result.begin() + i);
       query_distance.erase(query_distance.begin() + i);
       --i;  // Adjust index after erasure.
     }
   }
 
-  // Set best candidate to highest scorer.
-  result->match_id_ = query_result[0];
+  auto dbow_query_result =
+      faiss_to_dbow_queryresults(query_result, query_distance);
+
+  // Begin grouping and checking matches.
+  if (query_result.empty()) {
+    result->status_ = LCDStatus::LOW_SCORE;
+    return;
+  }
+
+  // Set best candidate to the lowest label index
+  if (query_result.size() > 3)
+    result->match_id_ =
+        *std::min_element(query_result.begin(), query_result.begin() + 3);
+  else
+    result->match_id_ =
+        *std::min_element(query_result.begin(), query_result.end());
 
   // Compute islands in the matches.
   // An island is a group of matches with close frame_ids.

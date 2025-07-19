@@ -243,6 +243,12 @@ class VLADLoopClosureDetector
     feature_matcher_->match(
         cur_ret, image_size0, ref_ret, image_size0, matches);
 
+    if (matches.size() < 50) {
+      LOG(WARNING) << "VLADLoopClosureDetector: LG: Not enough matches found: "
+                   << matches.size() << ".";
+      return;
+    }
+
     matches_match_query->reserve(matches.size());
     for (const auto& match : matches) {
       matches_match_query->emplace_back(match.trainIdx, match.queryIdx);
