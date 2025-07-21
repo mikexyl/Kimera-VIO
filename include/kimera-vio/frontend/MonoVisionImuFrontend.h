@@ -82,8 +82,10 @@ class MonoVisionImuFrontend : public VisionImuFrontend {
       const gtsam::Rot3& keyframe_R_ref_frame,
       cv::Mat* feature_tracks = nullptr);
 
-  void getSmartMonoMeasurements(const Frame::Ptr& frame,
-                                MonoMeasurements* smart_mono_measurements);
+  static void getSmartMonoMeasurements(
+      const Frame::Ptr& frame,
+      MonoMeasurements* smart_mono_measurements,
+      const Frame::Ptr& lkf_frame = nullptr);
 
   void sendFeatureTracksToLogger() const;
 

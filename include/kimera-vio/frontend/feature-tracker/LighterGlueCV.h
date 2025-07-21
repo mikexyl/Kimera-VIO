@@ -69,6 +69,9 @@ class LighterGlueCV : public FeatureTracker {
 
     lg_matcher_.match(det0, image_size0, det1, image_size1, matches);
 
+    VLOG(1) << "found " << matches.size() << " matches, time gap: "
+            << (cur_frame->timestamp_ - ref_frame->timestamp_) / 1e6 << " ms";
+
     std::vector<uchar>& status_vec =
         *reinterpret_cast<std::vector<uchar>*>(status.getObj());
     status_vec.resize(ref_frame->keypoints_.size(), 0);  // Initialize to 0
@@ -88,6 +91,7 @@ class LighterGlueCV : public FeatureTracker {
 
   void trackDesc(Frame* ref_frame,
                  Frame* cur_frame,
+                 const std::vector<cv::Point2f>& predictedPts,
                  DMatchVec* matches) override {
     CHECK_NOTNULL(ref_frame);
     CHECK_NOTNULL(cur_frame);
@@ -116,6 +120,9 @@ class LighterGlueCV : public FeatureTracker {
     cv::Size image_size1 = cur_frame->img_.size();  // Use actual image size
 
     lg_matcher_.match(det0, image_size0, det1, image_size1, *matches);
+
+    VLOG(1) << "found " << matches->size() << " matches, time gap: "
+            << (cur_frame->timestamp_ - ref_frame->timestamp_) / 1e6 << " ms";
   }
 
  private:

@@ -499,7 +499,9 @@ void VioBackend::addLandmarkToGraph(const LandmarkId& lmk_id,
     const FrameId& frame_id = obs.first;
     const gtsam::Symbol& pose_symbol = gtsam::Symbol(kPoseSymbolChar, frame_id);
     const StereoPoint2& measurement = obs.second;
-    new_factor->add(measurement, pose_symbol, stereo_cal_);
+    if (new_factor->find(pose_symbol) == new_factor->end()) {
+      new_factor->add(measurement, pose_symbol, stereo_cal_);
+    }
 
     if (VLOG_IS_ON(10)) ss << " " << obs.first;
   }
@@ -527,18 +529,22 @@ void VioBackend::updateLandmarkInGraph(
 
   const gtsam::Symbol pose_symbol(kPoseSymbolChar, new_measurement.first);
   const StereoPoint2& measurement = new_measurement.second;
-  new_factor->add(measurement, pose_symbol, stereo_cal_);
+  if (new_factor->find(pose_symbol) == new_factor->end()) {
+    new_factor->add(measurement, pose_symbol, stereo_cal_);
+  }
 
   // Update the factor
   Slot slot = old_smart_factors_it->second.second;
   if (slot != -1) {
     new_smart_factors_.insert(std::make_pair(lmk_id, new_factor));
   } else {
+    new_smart_factors_.insert(std::make_pair(lmk_id, new_factor));
     // If it's slot in the graph is still -1, it means that the factor has not
     // been inserted yet in the graph...
-    LOG(FATAL) << "When updating the smart factor, its slot should not be -1!"
-                  " Offensive lmk_id: "
-               << lmk_id;
+    // LOG(FATAL) << "When updating the smart factor, its slot should not be
+    // -1!"
+    //               " Offensive lmk_id: "
+    //            << lmk_id;
   }
   old_smart_factors_it->second.first = new_factor;
   VLOG(10) << "updateLandmarkInGraph: added observation to point: " << lmk_id;

@@ -30,6 +30,7 @@
 #include "kimera-vio/frontend/StereoFrame.h"
 #include "kimera-vio/frontend/Tracker-definitions.h"
 #include "kimera-vio/frontend/VisionImuTrackerParams.h"
+#include "kimera-vio/frontend/feature-tracker/FlannTracker.h"
 #include "kimera-vio/frontend/feature-tracker/LighterGlueCV.h"
 #include "kimera-vio/frontend/feature-tracker/OpticalFlowCV.h"
 #include "kimera-vio/frontend/optical-flow/OpticalFlowPredictor.h"
@@ -79,7 +80,8 @@ class Tracker {
                            Frame* cur_frame,
                            const gtsam::Rot3& inter_frame_rotation,
                            const FeatureDetectorParams& feature_detector_params,
-                           std::optional<cv::Mat> R = std::nullopt);
+                           std::optional<cv::Mat> R = std::nullopt,
+                           bool invalidate_landmarks = true);
 
   /**
    * @brief updateMap Updates the map of landmarks in the time horizon of

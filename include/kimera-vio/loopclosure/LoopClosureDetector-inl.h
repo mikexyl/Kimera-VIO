@@ -60,7 +60,7 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::
                                   lcd_params_.odom_rot_threshold_,
                                   lcd_params_.pcm_trans_threshold_,
                                   lcd_params_.pcm_rot_threshold_,
-                                  KimeraRPGO::Verbosity::VERBOSE);
+                                  KimeraRPGO::Verbosity::QUIET);
   if (lcd_params_.gnc_alpha_ > 0 && lcd_params_.gnc_alpha_ < 1) {
     pgo_params.setGncInlierCostThresholdsAtProbability(lcd_params_.gnc_alpha_);
   }
