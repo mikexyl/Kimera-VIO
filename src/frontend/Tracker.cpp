@@ -101,7 +101,8 @@ Tracker::Tracker(const TrackerParams& tracker_params,
       break;
     }
     case TrackerParams::TrackerType::FLANN: {
-      feature_tracker_ = std::make_shared<FlannTracker>();
+      feature_tracker_ = std::make_shared<FlannTracker>(
+          tracker_params_.lighterglue_num_features_);
       break;
     }
   }
