@@ -396,7 +396,7 @@ void RgbdVisionImuFrontend::fillSmartStereoMeasurements(
     }
 
     measurements->push_back(
-        std::make_pair(landmark_ids[i], gtsam::StereoPoint2(uL, uR, v)));
+        {landmark_ids[i], gtsam::StereoPoint2(uL, uR, v), -1});
   }
 }
 

@@ -466,7 +466,7 @@ void VioBackend::addLandmarksToGraph(const LandmarkIds& landmarks_kf) {
       addLandmarkToGraph(lmk_id, ft);
       ++n_new_landmarks;
     } else {
-      const std::pair<FrameId, StereoPoint2> obs_kf = ft.obs_.back();
+      const auto obs_kf = ft.obs_.back();
 
       LOG_IF(FATAL, obs_kf.first != static_cast<FrameId>(curr_kf_id_))
           << "addLandmarksToGraph: last obs is not from the current "
@@ -498,24 +498,8 @@ void VioBackend::addLandmarkToGraph(const LandmarkId& lmk_id,
   // Add observations to smart factor
   if (VLOG_IS_ON(10)) new_factor->print();
   std::stringstream ss;
-  for (const std::pair<FrameId, StereoPoint2>& obs : ft.obs_) {
-    const FrameId& frame_id = obs.first;
-    const gtsam::Symbol& pose_symbol = gtsam::Symbol(kPoseSymbolChar, frame_id);
-    const StereoPoint2& measurement = obs.second;
-    if (new_factor->find(pose_symbol) == new_factor->end()) {
-      new_factor->add(measurement, pose_symbol, stereo_cal_);
-      auto noise = new_factor->noiseModel();
-      auto smart_noise_ptr =
-          boost::dynamic_pointer_cast<gtsam::noiseModel::ExpandingIsotropic<3>>(
-              noise);
-      if (smart_noise_ptr) {
-        CHECK(smart_noise_);
-        CHECK_EQ(smart_noise_->sigmas().size(), 3U)
-            << "Smart noise should have 3 sigmas, but has: "
-            << smart_noise_->sigmas().size();
-        smart_noise_ptr->pushSigma(smart_noise_->sigmas()[0]);
-      }
-    }
+  for (const auto& obs : ft.obs_) {
+    addFeatureObsToFactor(new_factor, obs);
 
     if (VLOG_IS_ON(10)) ss << " " << obs.first;
   }
@@ -529,9 +513,8 @@ void VioBackend::addLandmarkToGraph(const LandmarkId& lmk_id,
 
 /* -------------------------------------------------------------------------- */
 // Updates a landmark already in the graph.
-void VioBackend::updateLandmarkInGraph(
-    const LandmarkId& lmk_id,
-    const std::pair<FrameId, StereoPoint2>& new_measurement) {
+void VioBackend::updateLandmarkInGraph(const LandmarkId& lmk_id,
+                                       const FeatureObs& new_obs) {
   // Update existing smart-factor
   auto old_smart_factors_it = old_smart_factors_.find(lmk_id);
   CHECK(old_smart_factors_it != old_smart_factors_.end())
@@ -541,22 +524,7 @@ void VioBackend::updateLandmarkInGraph(
   // Clone old factor to keep all previous measurements, now append one.
   SmartStereoFactor::shared_ptr new_factor(new SmartStereoFactor(*old_factor));
 
-  const gtsam::Symbol pose_symbol(kPoseSymbolChar, new_measurement.first);
-  const StereoPoint2& measurement = new_measurement.second;
-  if (new_factor->find(pose_symbol) == new_factor->end()) {
-    new_factor->add(measurement, pose_symbol, stereo_cal_);
-    auto noise = new_factor->noiseModel();
-    auto smart_noise_ptr =
-        boost::dynamic_pointer_cast<gtsam::noiseModel::ExpandingIsotropic<3>>(
-            noise);
-    if (smart_noise_ptr) {
-      CHECK(smart_noise_);
-      CHECK_EQ(smart_noise_->sigmas().size(), 3U)
-          << "Smart noise should have 3 sigmas, but has: "
-          << smart_noise_->sigmas().size();
-      smart_noise_ptr->pushSigma(smart_noise_->sigmas()[0]);
-    }
-  }
+  addFeatureObsToFactor(new_factor, new_obs);
 
   // Update the factor
   Slot slot = old_smart_factors_it->second.second;
@@ -776,6 +744,7 @@ void VioBackend::addStereoMeasurementsToFeatureTracks(
   for (size_t i = 0u; i < n_stereo_measurements; ++i) {
     const LandmarkId& lmk_id_in_kf_i = stereo_meas_kf[i].first;
     const StereoPoint2& stereo_px_i = stereo_meas_kf[i].second;
+    const double stereo_px_sigma = stereo_meas_kf[i].px_sigma;
 
     // We filtered invalid lmks in the StereoTracker, so this should not happen.
     CHECK_NE(lmk_id_in_kf_i, -1) << "landmarkId_kf_i == -1?";
@@ -796,8 +765,9 @@ void VioBackend::addStereoMeasurementsToFeatureTracks(
       // New feature.
       VLOG(20) << "Creating new feature track for lmk: " << lmk_id_in_kf_i
                << '.';
-      feature_tracks_.insert(
-          std::make_pair(lmk_id_in_kf_i, FeatureTrack(frame_num, stereo_px_i)));
+      feature_tracks_.insert(std::make_pair(
+          lmk_id_in_kf_i,
+          FeatureTrack(frame_num, stereo_px_i, stereo_px_sigma)));
       ++landmark_count_;
     } else {
       // @TODO: It seems that this else condition does not help --
@@ -814,7 +784,7 @@ void VioBackend::addStereoMeasurementsToFeatureTracks(
       // Add observation to existing landmark.
       VLOG(20) << "Updating feature track for lmk: " << lmk_id_in_kf_i << ".";
       feature_track_it->second.obs_.push_back(
-          std::make_pair(frame_num, stereo_px_i));
+          FeatureObs(frame_num, stereo_px_i, stereo_px_sigma));
 
       // TODO(Toni):
       // Mark feature tracks that have been re-observed, so that we can delete

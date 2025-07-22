@@ -367,6 +367,13 @@ void MonoVisionImuFrontend::getSmartMonoMeasurements(
     const Frame::Ptr& lkf_frame) {
   // TODO(marcus): convert to point2 when ready!
   CHECK_NOTNULL(smart_mono_measurements);
+  if (frame->keypoint_stds.size()) {
+    CHECK_EQ(frame->keypoint_stds.size(), frame->keypoints_.size())
+        << "Keypoint stds size does not match keypoints size.";
+  } else {
+    frame->keypoint_stds.resize(frame->keypoints_.size(), -1.0);
+  }
+
   frame->checkFrame();
 
   const LandmarkIds& landmarkId_kf = frame->landmarks_;
@@ -386,10 +393,12 @@ void MonoVisionImuFrontend::getSmartMonoMeasurements(
     const auto& uL = keypoints_undistorted.at(i).second.x;
     const auto& v = keypoints_undistorted.at(i).second.y;
 
+    double px_sigma = frame->keypoint_stds.at(i);
+
     // Initialize to missing pixel information.
     double uR = std::numeric_limits<double>::quiet_NaN();
     smart_mono_measurements->push_back(
-        std::make_pair(landmarkId_kf[i], gtsam::StereoPoint2(uL, uR, v)));
+        {landmarkId_kf[i], gtsam::StereoPoint2(uL, uR, v), px_sigma});
   }
 
   if (not lkf_frame) {

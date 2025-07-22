@@ -37,6 +37,7 @@
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
 #include <gtsam/slam/BetweenFactor.h>
 #include <gtsam/slam/PriorFactor.h>
+#include <vio_factors/ExpandingIsotropic.h>
 #if GTSAM_VERSION_MAJOR <= 4 && GTSAM_VERSION_MINOR < 3
 #include <gtsam_unstable/nonlinear/BatchFixedLagSmoother.h>
 #else
@@ -228,9 +229,8 @@ class VioBackend {
   // Adds a landmark to the graph for the first time.
   void addLandmarkToGraph(const LandmarkId& lm_id, const FeatureTrack& lm);
 
-  void updateLandmarkInGraph(
-      const LandmarkId& lmk_id,
-      const std::pair<FrameId, StereoPoint2>& new_measurement);
+  void updateLandmarkInGraph(const LandmarkId& lmk_id,
+                             const FeatureObs& new_obs);
 
   /**
    * @brief addStateValues Add values for the state: pose, velocity, and imu
@@ -453,6 +453,29 @@ class VioBackend {
   inline gtsam::Values getState() const { return state_; }
   inline int getLandmarkCount() const { return landmark_count_; }
   inline DebugVioInfo getCurrentDebugVioInfo() const { return debug_info_; }
+
+  void addFeatureObsToFactor(const SmartStereoFactor::shared_ptr& new_factor,
+                             const FeatureObs& obs) {
+    const FrameId& frame_id = obs.first;
+    const gtsam::Symbol& pose_symbol = gtsam::Symbol(kPoseSymbolChar, frame_id);
+    const StereoPoint2& measurement = obs.second;
+    double stereo_px_sigma = obs.px_sigma;
+    if (new_factor->find(pose_symbol) == new_factor->end()) {
+      new_factor->add(measurement, pose_symbol, stereo_cal_);
+      auto noise = new_factor->noiseModel();
+      auto smart_noise_ptr =
+          boost::dynamic_pointer_cast<gtsam::noiseModel::ExpandingIsotropic<3>>(
+              noise);
+      if (smart_noise_ptr) {
+        CHECK(smart_noise_);
+        CHECK_EQ(smart_noise_->sigmas().size(), 3U)
+            << "Smart noise should have 3 sigmas, but has: "
+            << smart_noise_->sigmas().size();
+        smart_noise_ptr->pushSigma(
+            stereo_px_sigma > 0 ? stereo_px_sigma : smart_noise_->sigmas()[0]);
+      }
+    }
+  }
 
  protected:
   // Raw, user-specified params.

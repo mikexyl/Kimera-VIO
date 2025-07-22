@@ -73,6 +73,13 @@ using PointsWithId = std::vector<PointWithId>;
 using PointsWithIdMap = std::unordered_map<LandmarkId, Landmark>;
 using LmkIdToLmkTypeMap = std::unordered_map<LandmarkId, LandmarkType>;
 
+struct FeatureObs : std::pair<FrameId, StereoPoint2> {
+  FeatureObs(const FrameId& frame_id, const StereoPoint2& px, double px_sigma)
+      : std::pair<FrameId, StereoPoint2>(frame_id, px), px_sigma(px_sigma) {}
+
+  double px_sigma = -1.;
+};
+
 ////////////////////////////////////////////////////////////////////////////////
 // FeatureTrack
 // TODO(Toni): what is this doing here... should be in Frontend at worst.
@@ -83,13 +90,14 @@ class FeatureTrack {
   // TODO(Toni): add getters for feature track length
  public:
   //! Observation: {FrameId, Px-Measurement}
-  std::vector<std::pair<FrameId, StereoPoint2>> obs_;
+  std::vector<FeatureObs> obs_;
 
   // Is the lmk in the graph?
   bool in_ba_graph_ = false;
 
-  FeatureTrack(FrameId frame_id, const StereoPoint2& px) {
-    obs_.push_back(std::make_pair(frame_id, px));
+  FeatureTrack(FrameId frame_id, const StereoPoint2& px, double px_sigma = -1.)
+      : in_ba_graph_(false) {
+    obs_.emplace_back(frame_id, px, px_sigma);
   }
 
   void print() const {

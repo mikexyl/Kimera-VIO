@@ -21,7 +21,16 @@
 
 namespace VIO {
 
-using StereoMeasurement = std::pair<LandmarkId, gtsam::StereoPoint2>;
+// derive from std::pair to add pixel noise model
+struct StereoMeasurement : std::pair<LandmarkId, gtsam::StereoPoint2> {
+  StereoMeasurement(const LandmarkId& lmk_id,
+                    const gtsam::StereoPoint2& stereo_point,
+                    double sigma)
+      : std::pair<LandmarkId, gtsam::StereoPoint2>(lmk_id, stereo_point),
+        px_sigma(sigma) {}
+
+  double px_sigma = -1.;
+};
 using StereoMeasurements = std::vector<StereoMeasurement>;
 using StatusStereoMeasurements =
     std::pair<TrackerStatusSummary, StereoMeasurements>;

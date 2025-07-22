@@ -230,16 +230,19 @@ KeypointsCV FeatureDetector::featureDetection(Frame* cur_frame,
     auto xfeat_detector =
         std::dynamic_pointer_cast<xfeat::XFeatCV>(feature_detector_);
     CHECK_NOTNULL(xfeat_detector);
-    cv::Mat M1, x_prep;
+    std::vector<cv::Vec2d> keypoint_stds;
     xfeat_detector->detectAndCompute(cur_frame->img_,
                                      mask,
                                      keypoints,
                                      cur_frame->descriptors_,
                                      false,
-                                     &M1,
-                                     &x_prep);
-    cur_frame->xfeat_M1_ = M1;
-    cur_frame->xfeat_x_prep_ = x_prep;
+                                     &cur_frame->xfeat_M1_,
+                                     &cur_frame->xfeat_x_prep_,
+                                     &keypoint_stds);
+    for (size_t i = 0; i < keypoints.size(); ++i) {
+      cur_frame->keypoint_stds.push_back(
+          std::max(keypoint_stds[i][0], keypoint_stds[i][1]));
+    }
   } else {
     keypoints = rawFeatureDetection(cur_frame->img_, mask);
   }

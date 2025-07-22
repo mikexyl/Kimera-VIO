@@ -187,6 +187,7 @@ class Frame : public PipelinePayload {
   mutable cv::Mat detection_mask_;
 
   cv::Mat xfeat_M1_, xfeat_x_prep_;
+  std::vector<double> keypoint_stds;
 
  protected:
   Frame(const FrameId& id,

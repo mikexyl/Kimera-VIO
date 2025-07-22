@@ -528,7 +528,7 @@ void StereoVisionImuFrontend::getSmartStereoMeasurements(
       uR = rightKeypoints.at(i).second.x;
     }
     smart_stereo_measurements->push_back(
-        std::make_pair(landmarkId_kf[i], gtsam::StereoPoint2(uL, uR, v)));
+        {landmarkId_kf[i], gtsam::StereoPoint2(uL, uR, v), -1});
   }
 }
 
