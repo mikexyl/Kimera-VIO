@@ -17,6 +17,7 @@
 
 #include "kimera-vio/dataprovider/StereoDataProviderModule.h"
 #include "kimera-vio/frontend/StereoCamera.h"
+#include "kimera-vio/loopclosure/DBoWLoopClosureDetector.h"
 #include "kimera-vio/pipeline/Pipeline.h"
 
 namespace VIO {
@@ -28,11 +29,11 @@ class StereoImuPipeline : public Pipeline {
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
   /**
-     * @brief StereoImuPipeline
-     * @param params Vio parameters
-     * @param visualizer Optional visualizer for visualizing 3D results
-     * @param displayer Optional displayer for visualizing 2D results
-     */
+   * @brief StereoImuPipeline
+   * @param params Vio parameters
+   * @param visualizer Optional visualizer for visualizing 3D results
+   * @param displayer Optional displayer for visualizing 2D results
+   */
   StereoImuPipeline(const VioParams& params,
                     Visualizer3D::UniquePtr&& visualizer = nullptr,
                     DisplayBase::UniquePtr&& displayer = nullptr,

@@ -14,8 +14,8 @@
 
 #pragma once
 
-#include "kimera-vio/dataprovider/RgbdDataProviderModule.h"
 #include "kimera-vio/frontend/RgbdCamera.h"
+#include "kimera-vio/loopclosure/DBoWLoopClosureDetector.h"
 #include "kimera-vio/pipeline/Pipeline.h"
 
 namespace VIO {

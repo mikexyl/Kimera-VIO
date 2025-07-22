@@ -622,7 +622,7 @@ void LoopClosureDetectorLogger::logLoopClosure(const LcdOutput& lcd_output) {
   output_stream_lcd << lcd_output.timestamp_ << ","
                     << lcd_output.timestamp_query_ << ","
                     << lcd_output.timestamp_match_ << ","
-                    << lcd_output.is_loop_closure_ << ","
+                    << static_cast<int>(lcd_output.lcd_status_) << ","
                     << lcd_output.id_match_ << "," << lcd_output.id_recent_
                     << "," << rel_trans.x() << "," << rel_trans.y() << ","
                     << rel_trans.z() << "," << rel_quat.w() << ","

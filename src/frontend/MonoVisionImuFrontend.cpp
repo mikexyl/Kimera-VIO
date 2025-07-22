@@ -27,6 +27,7 @@ DECLARE_bool(do_fine_imu_camera_temporal_sync);
 namespace VIO {
 
 MonoVisionImuFrontend::MonoVisionImuFrontend(
+    std::shared_ptr<Ort::Env> env,
     const FrontendParams& frontend_params,
     const ImuParams& imu_params,
     const ImuBias& imu_initial_bias,
@@ -34,7 +35,8 @@ MonoVisionImuFrontend::MonoVisionImuFrontend(
     DisplayQueue* display_queue,
     bool log_output,
     std::optional<OdometryParams> odom_params)
-    : VisionImuFrontend(frontend_params,
+    : VisionImuFrontend(env,
+                        frontend_params,
                         imu_params,
                         imu_initial_bias,
                         display_queue,
@@ -249,14 +251,19 @@ StatusMonoMeasurementsPtr MonoVisionImuFrontend::processFrame(
   CHECK(feature_detector_);
   // if we are using lighter glue, detect all features first, and track features
   // by matching descriptors
-  if (frontend_params_.tracker_params_.tracker_type_ ==
-      TrackerParams::TrackerType::LIGHTERGLUE) {
+  if (frontend_params_.tracker_params_.tracker_type_ !=
+      TrackerParams::TrackerType::OPTICAL_FLOW) {
     // TODO(mike): detection was after keyframe detection, we moved it here,
     // need to check if it causes bugs in the keyframe detection
     feature_detector_->featureDetection(mono_frame_k_.get());
     tracker_->featureTrackingDesc(mono_frame_km1_.get(),
                                   mono_frame_k_.get(),
                                   ref_frame_R_cur_frame,
+                                  frontend_params_.feature_detector_params_);
+
+    tracker_->featureTrackingDesc(mono_frame_lkf_.get(),
+                                  mono_frame_k_.get(),
+                                  keyframe_R_cur_frame,
                                   frontend_params_.feature_detector_params_);
   } else {
     tracker_->featureTracking(mono_frame_km1_.get(),
@@ -356,7 +363,8 @@ StatusMonoMeasurementsPtr MonoVisionImuFrontend::processFrame(
 // but want to switch to gtsam::Point2
 void MonoVisionImuFrontend::getSmartMonoMeasurements(
     const Frame::Ptr& frame,
-    MonoMeasurements* smart_mono_measurements) {
+    MonoMeasurements* smart_mono_measurements,
+    const Frame::Ptr& lkf_frame) {
   // TODO(marcus): convert to point2 when ready!
   CHECK_NOTNULL(smart_mono_measurements);
   frame->checkFrame();
@@ -382,6 +390,11 @@ void MonoVisionImuFrontend::getSmartMonoMeasurements(
     double uR = std::numeric_limits<double>::quiet_NaN();
     smart_mono_measurements->push_back(
         std::make_pair(landmarkId_kf[i], gtsam::StereoPoint2(uL, uR, v)));
+  }
+
+  if (not lkf_frame) {
+    // If we are not using a keyframe, we are done.
+    return;
   }
 }
 

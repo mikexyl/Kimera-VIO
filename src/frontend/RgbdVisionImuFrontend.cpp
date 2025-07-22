@@ -34,6 +34,7 @@ using RgbdInputPtr = FrontendInputPacketBase::UniquePtr;
 using utils::Timer;
 
 RgbdVisionImuFrontend::RgbdVisionImuFrontend(
+    std::shared_ptr<Ort::Env> env,
     const FrontendParams& frontend_params,
     const ImuParams& imu_params,
     const ImuBias& imu_initial_bias,
@@ -41,7 +42,8 @@ RgbdVisionImuFrontend::RgbdVisionImuFrontend(
     DisplayQueue* display_queue,
     bool log_output,
     std::optional<OdometryParams> odom_params)
-    : VisionImuFrontend(frontend_params,
+    : VisionImuFrontend(env,
+                        frontend_params,
                         imu_params,
                         imu_initial_bias,
                         display_queue,

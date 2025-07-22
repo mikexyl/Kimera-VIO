@@ -17,7 +17,7 @@
 
 namespace VIO {
 
-LcdModule::LcdModule(bool parallel_run, LoopClosureDetector::UniquePtr lcd)
+LcdModule::LcdModule(bool parallel_run, LoopClosureDetectorBase::UniquePtr lcd)
     : MIMOPipelineModule<LcdInput, LcdOutput>("Lcd", parallel_run),
       frontend_queue_("lcd_frontend_queue"),
       backend_queue_("lcd_backend_queue"),

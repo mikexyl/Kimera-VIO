@@ -14,23 +14,21 @@
 
 #pragma once
 
+#include <glog/logging.h>
+#include <gtsam/base/Matrix.h>
+#include <gtsam/geometry/PinholeCamera.h>
 #include <stdio.h>
 #include <stdlib.h>
+
 #include <cstdlib>
 #include <numeric>
-#include <string>
-#include <vector>
-
-#include <glog/logging.h>
-
 #include <opencv2/core/core.hpp>
 #include <opencv2/features2d/features2d.hpp>
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
 #include <opencv2/opencv.hpp>
-
-#include <gtsam/base/Matrix.h>
-#include <gtsam/geometry/PinholeCamera.h>
+#include <string>
+#include <vector>
 
 #include "kimera-vio/frontend/CameraParams.h"
 #include "kimera-vio/pipeline/PipelinePayload.h"
@@ -81,7 +79,9 @@ class Frame : public PipelinePayload {
         landmarks_(frame.landmarks_),
         landmarks_age_(frame.landmarks_age_),
         versors_(frame.versors_),
-        descriptors_(frame.descriptors_) {}
+        descriptors_(frame.descriptors_),
+        xfeat_M1_(frame.xfeat_M1_),
+        xfeat_x_prep_(frame.xfeat_x_prep_) {}
 
  public:
   /* ------------------------------------------------------------------------ */
@@ -180,10 +180,13 @@ class Frame : public PipelinePayload {
   std::vector<size_t> landmarks_age_;
   //! in the ref frame of the RECTIFIED left frame
   BearingVectors versors_;
-  //! Not currently used
+
   cv::Mat descriptors_;
-  //! Optional mask for feature detection. Note that can change when the frame is const
+  //! Optional mask for feature detection. Note that can change when the frame
+  //! is const
   mutable cv::Mat detection_mask_;
+
+  cv::Mat xfeat_M1_, xfeat_x_prep_;
 
  protected:
   Frame(const FrameId& id,

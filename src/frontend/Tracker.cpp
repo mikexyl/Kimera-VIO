@@ -93,10 +93,15 @@ Tracker::Tracker(const TrackerParams& tracker_params,
     }
     case TrackerParams::TrackerType::LIGHTERGLUE: {
       LighterGlueCV::Params lg_params;
-      lg_params.min_score = 0.2f;
+      lg_params.min_score = -1.f;
       lg_params.model_path = tracker_params_.lighterglue_model_path_;
+      lg_params.n_kpts = tracker_params_.lighterglue_num_features_;
       lg_params.use_gpu = true;
       feature_tracker_ = std::make_shared<LighterGlueCV>(*env, lg_params);
+      break;
+    }
+    case TrackerParams::TrackerType::FLANN: {
+      feature_tracker_ = std::make_shared<FlannTracker>();
       break;
     }
   }
@@ -163,6 +168,17 @@ void Tracker::featureTracking(
                           cv::OPTFLOW_USE_INITIAL_FLOW);
   VLOG(1) << "Optical Flow Timing [ms]: "
           << utils::Timer::toc(time_lukas_kanade_tic).count();
+
+  size_t num_tracked;
+  // collect number of status !=0
+  num_tracked = std::count_if(status.begin(), status.end(), [](uchar s) {
+    return static_cast<bool>(s);
+  });
+
+  VLOG(1) << "Optical Flow Pyr LK tracked " << num_tracked
+          << " keypoints out of " << px_ref.size()
+          << " in reference frame: " << ref_frame->id_ << " to current "
+          << cur_frame->id_ << ".";
   VLOG(2) << "Finished Optical Flow Pyr LK tracking.";
 
   // TODO(Toni): use the error to further take only the best tracks?
@@ -1313,10 +1329,33 @@ void Tracker::featureTrackingDesc(
     Frame* cur_frame,
     const gtsam::Rot3& ref_R_cur,
     const FeatureDetectorParams& feature_detector_params,
-    std::optional<cv::Mat> R) {
+    std::optional<cv::Mat> R,
+    bool invalidate_landmarks) {
   CHECK_NOTNULL(ref_frame);
   CHECK_NOTNULL(cur_frame);
   auto tic = utils::Timer::tic();
+
+  // Fill up structure for reference pixels and their labels.
+  KeypointsCV px_ref;
+  std::vector<size_t> indices_of_valid_landmarks;
+  for (size_t i = 0; i < ref_frame->keypoints_.size(); ++i) {
+    px_ref.push_back(ref_frame->keypoints_[i]);
+  }
+
+  // Setup termination criteria for optical flow.
+  const cv::TermCriteria kTerminationCriteria(
+      cv::TermCriteria::COUNT + cv::TermCriteria::EPS,
+      tracker_params_.klt_max_iter_,
+      tracker_params_.klt_eps_);
+  const cv::Size2i klt_window_size(tracker_params_.klt_win_size_,
+                                   tracker_params_.klt_win_size_);
+
+  // Initialize to old locations
+  LOG_IF(ERROR, px_ref.size() == 0u) << "No keypoints in reference frame!";
+
+  KeypointsCV px_cur;
+  CHECK(optical_flow_predictor_->predictSparseFlow(px_ref, ref_R_cur, &px_cur));
+  KeypointsCV px_predicted = px_cur;
 
   CHECK_EQ(ref_frame->keypoints_.size(), cur_frame->keypoints_.size());
   CHECK(not ref_frame->descriptors_.empty());
@@ -1326,15 +1365,15 @@ void Tracker::featureTrackingDesc(
   std::vector<float> error;
   auto time_lukas_kanade_tic = utils::Timer::tic();
   DMatchVec matches;
-  feature_tracker_->trackDesc(ref_frame, cur_frame, &matches);
+  feature_tracker_->trackDesc(ref_frame, cur_frame, px_predicted, &matches);
   VLOG(1) << "Optical Flow Timing [ms]: "
           << utils::Timer::toc(time_lukas_kanade_tic).count();
   VLOG(2) << "Finished Optical Flow Pyr LK tracking.";
 
-  LOG(INFO) << "Feature tracking: "
-            << "ref_frame.id_: " << ref_frame->id_
-            << ", cur_frame.id_: " << cur_frame->id_
-            << ", Nr tracked keypoints: " << matches.size();
+  VLOG(1) << "Feature tracking: "
+          << "ref_frame.id_: " << ref_frame->id_
+          << ", cur_frame.id_: " << cur_frame->id_
+          << ", Nr tracked keypoints: " << matches.size();
 
   std::set<LandmarkId> tracked_lmk_ids;
 
@@ -1362,12 +1401,14 @@ void Tracker::featureTrackingDesc(
   }
 
   // invalidate all keypoints that were not tracked in the ref frame
-  for (size_t i = 0; i < ref_frame->landmarks_.size(); ++i) {
-    if (ref_frame->landmarks_.at(i) != -1 &&
-        tracked_lmk_ids.find(ref_frame->landmarks_.at(i)) ==
-            tracked_lmk_ids.end()) {
-      // If the landmark was not tracked, invalidate it.
-      ref_frame->landmarks_.at(i) = -1;
+  if (invalidate_landmarks) {
+    for (size_t i = 0; i < ref_frame->landmarks_.size(); ++i) {
+      if (ref_frame->landmarks_.at(i) != -1 &&
+          tracked_lmk_ids.find(ref_frame->landmarks_.at(i)) ==
+              tracked_lmk_ids.end()) {
+        // If the landmark was not tracked, invalidate it.
+        ref_frame->landmarks_.at(i) = -1;
+      }
     }
   }
 

@@ -28,7 +28,7 @@ class LcdModule : public MIMOPipelineModule<LcdInput, LcdOutput> {
   using LcdFrontendInput = FrontendOutputPacketBase::Ptr;
   using LcdBackendInput = BackendOutput::Ptr;
 
-  LcdModule(bool parallel_run, LoopClosureDetector::UniquePtr lcd);
+  LcdModule(bool parallel_run, LoopClosureDetectorBase::UniquePtr lcd);
   virtual ~LcdModule() = default;
 
   inline void fillFrontendQueue(const LcdFrontendInput& frontend_payload) {
@@ -76,7 +76,7 @@ class LcdModule : public MIMOPipelineModule<LcdInput, LcdOutput> {
   ThreadsafeQueue<LcdBackendInput> backend_queue_;
 
   //! Lcd implementation
-  LoopClosureDetector::UniquePtr lcd_;
+  LoopClosureDetectorBase::UniquePtr lcd_;
 
   // handles access to underlying lcd detector
   mutable std::mutex mutex_;

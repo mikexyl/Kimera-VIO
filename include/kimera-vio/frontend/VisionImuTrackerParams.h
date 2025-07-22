@@ -87,6 +87,7 @@ struct TrackerParams : public PipelineParams {
   enum class TrackerType {
     OPTICAL_FLOW = 0,
     LIGHTERGLUE,
+    FLANN,
   } tracker_type_ = TrackerType::OPTICAL_FLOW;
 
   // lighterglue parameters

@@ -44,7 +44,7 @@ DECLARE_bool(visualize_lmk_type);
 DECLARE_int32(viz_type);
 DECLARE_bool(deterministic_random_number_generator);
 DECLARE_int32(min_num_obs_for_mesher_points);
-DECLARE_bool(use_lcd);
+DECLARE_int32(use_lcd);
 
 namespace VIO {
 
@@ -303,6 +303,8 @@ class Pipeline {
   std::unique_ptr<std::thread> mesher_thread_ = {nullptr};
   std::unique_ptr<std::thread> lcd_thread_ = {nullptr};
   std::unique_ptr<std::thread> visualizer_thread_ = {nullptr};
+
+  std::shared_ptr<Ort::Env> ort_env_ = nullptr;  // ONNX Runtime environment
 };
 
 }  // namespace VIO
