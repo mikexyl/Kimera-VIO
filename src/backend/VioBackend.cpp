@@ -31,6 +31,7 @@
 
 #include <gflags/gflags.h>
 #include <glog/logging.h>
+#include <vio_factors/ExpandingIsotropic.h>
 
 #include <limits>  // for numeric_limits<>
 #include <map>
@@ -486,8 +487,10 @@ void VioBackend::addLandmarkToGraph(const LandmarkId& lmk_id,
                                     const FeatureTrack& ft) {
   // We use a unit pinhole projection camera for the smart factors to be
   // more efficient.
+  gtsam::noiseModel::ExpandingIsotropic<3>::shared_ptr smart_noise(
+      new gtsam::noiseModel::ExpandingIsotropic<3>());
   SmartStereoFactor::shared_ptr new_factor(new SmartStereoFactor(
-      smart_noise_, smart_factors_params_, B_Pose_leftCamRect_));
+      smart_noise, smart_factors_params_, B_Pose_leftCamRect_));
 
   VLOG(10) << "Adding landmark with: " << ft.obs_.size()
            << " landmarks to graph, with keys: ";
@@ -501,6 +504,17 @@ void VioBackend::addLandmarkToGraph(const LandmarkId& lmk_id,
     const StereoPoint2& measurement = obs.second;
     if (new_factor->find(pose_symbol) == new_factor->end()) {
       new_factor->add(measurement, pose_symbol, stereo_cal_);
+      auto noise = new_factor->noiseModel();
+      auto smart_noise_ptr =
+          boost::dynamic_pointer_cast<gtsam::noiseModel::ExpandingIsotropic<3>>(
+              noise);
+      if (smart_noise_ptr) {
+        CHECK(smart_noise_);
+        CHECK_EQ(smart_noise_->sigmas().size(), 3U)
+            << "Smart noise should have 3 sigmas, but has: "
+            << smart_noise_->sigmas().size();
+        smart_noise_ptr->pushSigma(smart_noise_->sigmas()[0]);
+      }
     }
 
     if (VLOG_IS_ON(10)) ss << " " << obs.first;
@@ -531,6 +545,17 @@ void VioBackend::updateLandmarkInGraph(
   const StereoPoint2& measurement = new_measurement.second;
   if (new_factor->find(pose_symbol) == new_factor->end()) {
     new_factor->add(measurement, pose_symbol, stereo_cal_);
+    auto noise = new_factor->noiseModel();
+    auto smart_noise_ptr =
+        boost::dynamic_pointer_cast<gtsam::noiseModel::ExpandingIsotropic<3>>(
+            noise);
+    if (smart_noise_ptr) {
+      CHECK(smart_noise_);
+      CHECK_EQ(smart_noise_->sigmas().size(), 3U)
+          << "Smart noise should have 3 sigmas, but has: "
+          << smart_noise_->sigmas().size();
+      smart_noise_ptr->pushSigma(smart_noise_->sigmas()[0]);
+    }
   }
 
   // Update the factor

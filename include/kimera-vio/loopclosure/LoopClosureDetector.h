@@ -479,6 +479,18 @@ class LoopClosureDetector : public LoopClosureDetectorBase {
   virtual std::map<int, double> globalDescToMap(
       const typename Database::GlobalDesc& global_desc) = 0;
 
+  virtual void cleanFrame(const FrameId& frame_id) {
+    auto frame = cache_.getFrame(frame_id);
+    if (frame) {
+      cleanFrame(frame);
+    } else {
+      LOG(WARNING) << "LoopClosureDetector: Attempted to clean frame with ID "
+                   << frame_id << " but it does not exist in the cache.";
+    }
+  }
+
+  virtual void cleanFrame(const LCDFrame::Ptr& frame) {}
+
  protected:
   enum class LcdState {
     Bootstrap,  //! Lcd is initializing

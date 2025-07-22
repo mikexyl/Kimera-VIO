@@ -254,6 +254,10 @@ class VLADLoopClosureDetector
       matches_match_query->emplace_back(match.trainIdx, match.queryIdx);
     }
   }
+
+  void cleanFrame(const LCDFrame::Ptr& frame) override {
+    frame->descriptors_vec_.clear();
+  }
 };
 
 }  // namespace VIO

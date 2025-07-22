@@ -259,6 +259,8 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::spinOnce(
                                       curr_frame->descriptors_mat_);
   output_payload->timestamp_map_ = timestamp_map_;
 
+  cleanFrame(lcd_frame_id);
+
   if (logger_) {
     debug_info_.timestamp_ = output_payload->timestamp_;
     debug_info_.loop_result_ = loop_result;
