@@ -40,6 +40,7 @@ class FeatureTracker {
 
   virtual void trackDesc(Frame* ref_frame,
                          Frame* cur_frame,
+                         cv::Mat homography,
                          const std::vector<cv::Point2f>& predictedPts,
                          DMatchVec* matches) {}
 };

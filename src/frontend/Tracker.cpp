@@ -22,6 +22,7 @@
 
 #include "kimera-vio/frontend/UndistorterRectifier.h"
 #include "kimera-vio/frontend/feature-detector/FeatureDetector.h"
+#include "kimera-vio/frontend/feature-tracker/GpuBFMatcher.h"
 #include "kimera-vio/frontend/optical-flow/OpticalFlowPredictorFactory.h"
 #include "kimera-vio/utils/Timer.h"
 #include "kimera-vio/utils/UtilsOpenCV.h"
@@ -95,14 +96,19 @@ Tracker::Tracker(const TrackerParams& tracker_params,
       LighterGlueCV::Params lg_params;
       lg_params.min_score = -1.f;
       lg_params.model_path = tracker_params_.lighterglue_model_path_;
-      lg_params.n_kpts = tracker_params_.lighterglue_num_features_;
+      lg_params.n_kpts = tracker_params_.num_features_;
       lg_params.use_gpu = true;
       feature_tracker_ = std::make_shared<LighterGlueCV>(*env, lg_params);
       break;
     }
     case TrackerParams::TrackerType::FLANN: {
-      feature_tracker_ = std::make_shared<FlannTracker>(
-          tracker_params_.lighterglue_num_features_);
+      feature_tracker_ =
+          std::make_shared<FlannTracker>(tracker_params_.num_features_);
+      break;
+    }
+    case TrackerParams::TrackerType::GPU_BF: {
+      feature_tracker_ = std::make_shared<GpuBFMatcher>(
+          tracker_params_.num_features_, tracker_params_.gpu_bf_min_sim);
       break;
     }
   }
@@ -929,7 +935,7 @@ void Tracker::removeOutliersStereo(const std::vector<int>& inliers,
 
   // Remove outliers: outliers cannot be a vector of size_t because opengv
   // uses a vector of int.
-  for (const size_t& out : outliers) {
+  for (const size_t out : outliers) {
     const KeypointMatch& kp_match = (*matches_ref_cur)[out];
     ref_stereoFrame->right_keypoints_rectified_.at(kp_match.first).first =
         KeypointStatus::FAILED_ARUN;
@@ -1351,12 +1357,10 @@ void Tracker::featureTrackingDesc(
   const cv::Size2i klt_window_size(tracker_params_.klt_win_size_,
                                    tracker_params_.klt_win_size_);
 
+  auto H = optical_flow_predictor_->getHomography(ref_R_cur);
+
   // Initialize to old locations
   LOG_IF(ERROR, px_ref.size() == 0u) << "No keypoints in reference frame!";
-
-  KeypointsCV px_cur;
-  CHECK(optical_flow_predictor_->predictSparseFlow(px_ref, ref_R_cur, &px_cur));
-  KeypointsCV px_predicted = px_cur;
 
   CHECK_EQ(ref_frame->keypoints_.size(), cur_frame->keypoints_.size());
   CHECK(not ref_frame->descriptors_.empty());
@@ -1366,7 +1370,7 @@ void Tracker::featureTrackingDesc(
   std::vector<float> error;
   auto time_lukas_kanade_tic = utils::Timer::tic();
   DMatchVec matches;
-  feature_tracker_->trackDesc(ref_frame, cur_frame, px_predicted, &matches);
+  feature_tracker_->trackDesc(ref_frame, cur_frame, H, {}, &matches);
   VLOG(1) << "Optical Flow Timing [ms]: "
           << utils::Timer::toc(time_lukas_kanade_tic).count();
   VLOG(2) << "Finished Optical Flow Pyr LK tracking.";

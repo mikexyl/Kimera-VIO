@@ -88,11 +88,16 @@ struct TrackerParams : public PipelineParams {
     OPTICAL_FLOW = 0,
     LIGHTERGLUE,
     FLANN,
+    GPU_BF,
   } tracker_type_ = TrackerType::OPTICAL_FLOW;
 
+  int num_features_ = 500;  // num features to track
+
   // lighterglue parameters
-  int lighterglue_num_features_ = 500;  // num features to track
   std::string lighterglue_model_path_{};
+
+  // gpu matcher parameters
+  float gpu_bf_min_sim = 0.4;
 };
 
 }  // namespace VIO

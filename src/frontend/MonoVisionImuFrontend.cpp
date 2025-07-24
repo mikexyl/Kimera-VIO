@@ -261,10 +261,10 @@ StatusMonoMeasurementsPtr MonoVisionImuFrontend::processFrame(
                                   ref_frame_R_cur_frame,
                                   frontend_params_.feature_detector_params_);
 
-    tracker_->featureTrackingDesc(mono_frame_lkf_.get(),
-                                  mono_frame_k_.get(),
-                                  keyframe_R_cur_frame,
-                                  frontend_params_.feature_detector_params_);
+    // tracker_->featureTrackingDesc(mono_frame_lkf_.get(),
+    //                               mono_frame_k_.get(),
+    //                               keyframe_R_cur_frame,
+    //                               frontend_params_.feature_detector_params_);
   } else {
     tracker_->featureTracking(mono_frame_km1_.get(),
                               mono_frame_k_.get(),

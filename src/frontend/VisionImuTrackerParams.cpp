@@ -137,8 +137,10 @@ bool TrackerParams::parseYAML(const std::string& filepath) {
                            &optimize_2d3d_pose_from_inliers_);
 
   yaml_parser.getYamlParam("feature_tracker_type", &tracker_type_);
-  yaml_parser.getYamlParam("lg_num_features", &lighterglue_num_features_);
+  yaml_parser.getYamlParam("num_features", &num_features_);
   yaml_parser.getYamlParam("lg_model_path", &lighterglue_model_path_);
+
+  yaml_parser.getYamlParam("gpu_bf_min_sim", &gpu_bf_min_sim);
 
   return true;
 }
