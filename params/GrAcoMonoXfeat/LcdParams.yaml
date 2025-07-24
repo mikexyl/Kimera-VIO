@@ -1,9 +1,9 @@
 %YAML:1.0
 # LoopClosureDetector parameters:
 use_nss: 1
-alpha: 0.1
+alpha: 0.2
 min_temporal_matches: 1
-recent_frames_window: 60
+recent_frames_window: 50
 max_db_results: 50
 min_nss_factor: 0.05
 min_matches_per_island: 1
@@ -13,7 +13,7 @@ max_nrFrames_between_queries: 2
 
 refine_pose: 0
 
-lowe_ratio: 0.9
+lowe_ratio: 0.7
 matcher_type: 3
 
 nfeatures: 1000
@@ -29,8 +29,8 @@ fast_threshold: 20
 betweenRotationPrecision: 10000 # 1/(0.01*0.01)
 betweenTranslationPrecision: 100 # 1/(0.1*0.1)
 
-odom_rot_threshold: 0.01
-odom_trans_threshold: 0.02
+odom_rot_threshold: 0.05
+odom_trans_threshold: 0.2
 pcm_rot_threshold: -1
 pcm_trans_threshold: -1
 gnc_alpha: 0.7
@@ -60,7 +60,6 @@ ransac_use_2point_2d2d: 0
 # pose_recovery_type options:
 #   0: 3d3d (Arun)
 #   1: PnP (opengv)
-#   2: k5ptRotOnly
 pose_recovery_type: 2
 ransac_max_iterations: 500
 ransac_probability: 0.995

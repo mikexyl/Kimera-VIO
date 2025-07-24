@@ -256,15 +256,15 @@ StatusMonoMeasurementsPtr MonoVisionImuFrontend::processFrame(
     // TODO(mike): detection was after keyframe detection, we moved it here,
     // need to check if it causes bugs in the keyframe detection
     feature_detector_->featureDetection(mono_frame_k_.get());
-    tracker_->featureTrackingDesc(mono_frame_km1_.get(),
-                                  mono_frame_k_.get(),
-                                  ref_frame_R_cur_frame,
-                                  frontend_params_.feature_detector_params_);
-
-    // tracker_->featureTrackingDesc(mono_frame_lkf_.get(),
+    // tracker_->featureTrackingDesc(mono_frame_km1_.get(),
     //                               mono_frame_k_.get(),
-    //                               keyframe_R_cur_frame,
+    //                               ref_frame_R_cur_frame,
     //                               frontend_params_.feature_detector_params_);
+
+    tracker_->featureTrackingDesc(mono_frame_lkf_.get(),
+                                  mono_frame_k_.get(),
+                                  keyframe_R_cur_frame,
+                                  frontend_params_.feature_detector_params_);
   } else {
     tracker_->featureTracking(mono_frame_km1_.get(),
                               mono_frame_k_.get(),

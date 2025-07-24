@@ -40,6 +40,7 @@ class GpuBFMatcher : public FeatureTracker {
   void trackDesc(Frame* ref_frame,
                  Frame* cur_frame,
                  cv::Mat homography,
+                 int search_radius,
                  const std::vector<cv::Point2f>& predictedPts,
                  DMatchVec* matches) override {
     CHECK_NOTNULL(gpu_matcher_);
@@ -67,7 +68,8 @@ class GpuBFMatcher : public FeatureTracker {
     det1.descriptors = cur_frame->descriptors_;
 
     std::vector<cv::DMatch> matches_vec;
-    matches_vec = gpu_matcher_->match(det0, det1, min_sim_, homography);
+    matches_vec =
+        gpu_matcher_->match(det0, det1, min_sim_, homography, search_radius);
     std::cout << "Number of matches found: " << matches_vec.size() << std::endl;
 
     // copy matches to DMatchVec

@@ -108,7 +108,7 @@ Tracker::Tracker(const TrackerParams& tracker_params,
     }
     case TrackerParams::TrackerType::GPU_BF: {
       feature_tracker_ = std::make_shared<GpuBFMatcher>(
-          tracker_params_.num_features_, tracker_params_.gpu_bf_min_sim);
+          tracker_params_.num_features_, tracker_params_.gpu_bf_min_sim_);
       break;
     }
   }
@@ -1370,7 +1370,8 @@ void Tracker::featureTrackingDesc(
   std::vector<float> error;
   auto time_lukas_kanade_tic = utils::Timer::tic();
   DMatchVec matches;
-  feature_tracker_->trackDesc(ref_frame, cur_frame, H, {}, &matches);
+  feature_tracker_->trackDesc(
+      ref_frame, cur_frame, H, tracker_params_.search_radius_, {}, &matches);
   VLOG(1) << "Optical Flow Timing [ms]: "
           << utils::Timer::toc(time_lukas_kanade_tic).count();
   VLOG(2) << "Finished Optical Flow Pyr LK tracking.";

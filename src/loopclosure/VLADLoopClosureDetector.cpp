@@ -124,9 +124,9 @@ void VLADLoopClosureDetector::detectLoop(
   }
 
   // Set best candidate to the lowest label index
-  if (query_result.size() > 3)
+  if (query_result.size() > 5)
     result->match_id_ =
-        *std::min_element(query_result.begin(), query_result.begin() + 3);
+        *std::min_element(query_result.begin(), query_result.begin() + 5);
   else
     result->match_id_ =
         *std::min_element(query_result.begin(), query_result.end());

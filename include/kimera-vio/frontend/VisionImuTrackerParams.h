@@ -97,7 +97,8 @@ struct TrackerParams : public PipelineParams {
   std::string lighterglue_model_path_{};
 
   // gpu matcher parameters
-  float gpu_bf_min_sim = 0.4;
+  float gpu_bf_min_sim_ = 0.4;
+  float search_radius_ = 45;
 };
 
 }  // namespace VIO
