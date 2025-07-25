@@ -4,16 +4,15 @@ klt_win_size: 24
 klt_max_iter: 30
 klt_max_level: 4
 klt_eps: 0.1
-maxFeatureAge: 25
+maxFeatureAge: 500
 
 # Detector Params
 # 0: FAST
 # 1: ORB
 # 2: AGAST
 # 3: GFTT, aka Good Features To Track
-# 4: XFEAT
-feature_detector_type: 4
-maxFeaturesPerFrame: 2000
+feature_detector_type: 3
+maxFeaturesPerFrame: 500
 
 # Good Features To Track specific parameters
 quality_level: 0.001
@@ -26,7 +25,7 @@ k: 0.04
 fast_thresh: 10
 
 equalizeImage: 0
-nominalBaseline: 0.11
+nominalBaseline: 0.05
 toleranceTemplateMatching: 0.15
 templ_cols: 101 #must be odd
 templ_rows: 11
@@ -36,15 +35,15 @@ maxPointDist: 10
 bidirectionalMatching: 0
 
 # Non-maximum suppression params
-max_nr_keypoints_before_anms: 2000
-enable_non_max_suppression: 0
+max_nr_keypoints_before_anms: 500
+enable_non_max_suppression: 1
 non_max_suppression_type: 6
 nr_horizontal_bins: 7
 nr_vertical_bins: 5
 binning_mask: []
 
 # Subpixel corner refinement for the monocular case
-enable_subpixel_corner_finder: 0
+enable_subpixel_corner_finder: 1
 max_iters: 40
 epsilon_error: 0.001
 window_size: 10
@@ -64,7 +63,7 @@ ransac_probability: 0.995
 ransac_randomize: 0
 min_intra_keyframe_time: 0.2
 max_intra_keyframe_time: 10.0
-max_disparity_since_lkf: 200
+max_disparity_since_lkf: 200 #large value to disable
 minNumberFeatures: 0
 useStereoTracking: 0
 disparityThreshold: 0.5
@@ -97,7 +96,7 @@ interp_nearest_path: /workspaces/src/xfeat-cpp/onnx_model/interpolator_nearest_6
 xfeat_use_gpu: 1
 matcher_type: 0 # 0: Brute Force, 1: FLANN, 2: LighterGlue
 
-feature_tracker_type: 3 # 0: OpticalFlow, 1: LighterGlue 2: Flann 3: GpuBFMatcher
+feature_tracker_type: 0 # 0: OpticalFlow, 1: LighterGlue 2: Flann 3: GpuBFMatcher
 num_features: 2000
 lg_model_path: /workspaces/src/xfeat-cpp/onnx_model/lg_640x480_1000.onnx
 gpu_bf_min_sim: 0.7 # Minimum similarity for GpuBFMatcher

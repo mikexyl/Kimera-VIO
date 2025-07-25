@@ -81,6 +81,7 @@ struct LCDFrame {
   FrameId id_kf_;
   std::vector<cv::KeyPoint> keypoints_;
   Landmarks keypoints_3d_;
+  std::vector<bool> keypoint_has_landmark_;
   std::vector<cv::Mat> descriptors_vec_;
   cv::Mat descriptors_mat_;
   BearingVectors bearing_vectors_;

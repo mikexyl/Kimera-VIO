@@ -26,8 +26,8 @@ score_type_id: 0
 patch_sze: 31
 fast_threshold: 20
 
-betweenRotationPrecision: 10000 # 1/(0.01*0.01)
-betweenTranslationPrecision: 100 # 1/(0.1*0.1)
+betweenRotationPrecision: 1 # 1/(0.01*0.01)
+betweenTranslationPrecision: 1 # 1/(0.1*0.1)
 
 odom_rot_threshold: 0.01
 odom_trans_threshold: 0.02
@@ -61,7 +61,7 @@ ransac_use_2point_2d2d: 0
 #   0: 3d3d (Arun)
 #   1: PnP (opengv)
 #   2: k5ptRotOnly
-pose_recovery_type: 2
+pose_recovery_type: 1
 ransac_max_iterations: 500
 ransac_probability: 0.995
 ransac_randomize: 0

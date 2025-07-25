@@ -190,4 +190,59 @@ void VLADLoopClosureDetector::descriptorMatToVec(
   descriptors_vec->push_back(frame.xfeat_x_prep_);
 }
 
+LCDFrame::Ptr VLADLoopClosureDetector::poseRecoveryPnP(
+    const Frame& frame,
+    const PointsWithIdMap& W_points_with_ids,
+    const gtsam::Pose3& W_Pose_Blkf) {
+  size_t nr_kpts = frame.keypoints_.size();
+  CHECK_EQ(frame.landmarks_.size(), nr_kpts);
+  CHECK_EQ(frame.versors_.size(), nr_kpts);
+  CHECK_EQ(frame.keypoints_undistorted_.size(), nr_kpts);
+
+  auto keypoints = frame.keypoints_;
+
+  BearingVectors undistorted_bearing_vectors;
+  for (const auto& pt : keypoints) {
+    undistorted_bearing_vectors.push_back(
+        UndistorterRectifier::GetBearingVector(pt, frame.cam_param_));
+  }
+
+  std::vector<cv::KeyPoint> keypoints_to_save;
+  for (const auto& pt : keypoints) {
+    keypoints_to_save.push_back(cv::KeyPoint(pt.x, pt.y, 0.0f));
+  }
+
+  std::vector<bool> keypoint_has_landmark(keypoints_to_save.size(), false);
+
+  Landmarks landmarks_in_cam;
+  for (size_t i = 0; i < nr_kpts; ++i) {
+    const LandmarkId& lmk_id = frame.landmarks_[i];
+    if (lmk_id != -1 and
+        W_points_with_ids.find(lmk_id) != W_points_with_ids.end()) {
+      // Convert point from world frame to local camera frame so that
+      // the reference frame matches the convention used in the stereo
+      // case.
+      Landmark cam_keypoint_3d =
+          (W_Pose_Blkf * B_Pose_Cam_).inverse() * W_points_with_ids.at(lmk_id);
+      landmarks_in_cam.push_back(cam_keypoint_3d);
+      keypoint_has_landmark[i] = true;
+    } else {
+      VLOG(10) << "PoseRecoveryPnP: landmark id not in world points!";
+      landmarks_in_cam.push_back(Landmark::Zero());
+    }
+  }
+
+  auto lcd_frame = std::make_shared<LCDFrame>(
+      frame.timestamp_,
+      FrameCache::NEW_ID,
+      frame.id_,
+      keypoints_to_save,
+      landmarks_in_cam,
+      std::vector<cv::Mat>{frame.xfeat_M1_, frame.xfeat_x_prep_},
+      frame.descriptors_,
+      undistorted_bearing_vectors);
+  lcd_frame->keypoint_has_landmark_ = keypoint_has_landmark;
+  return lcd_frame;
+}
+
 }  // namespace VIO

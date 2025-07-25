@@ -255,6 +255,10 @@ class VLADLoopClosureDetector
     }
   }
 
+  LCDFrame::Ptr poseRecoveryPnP(const Frame& frame,
+                                const PointsWithIdMap& W_points_with_ids,
+                                const gtsam::Pose3& W_Pose_Blkf) override;
+
   void cleanFrame(const LCDFrame::Ptr& frame) override {
     frame->descriptors_vec_.clear();
   }

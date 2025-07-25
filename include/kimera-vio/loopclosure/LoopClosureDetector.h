@@ -402,6 +402,12 @@ class LoopClosureDetector : public LoopClosureDetectorBase {
                        const KeypointMatches& matches_query_match,
                        gtsam::Pose3* bodyMatch_T_bodyQuery_3d,
                        std::vector<int>* inliers);
+
+  virtual LCDFrame::Ptr poseRecoveryPnP(
+      const Frame& frame,
+      const PointsWithIdMap& W_points_with_ids,
+      const gtsam::Pose3& W_Pose_Blkf) = 0;
+
   /* ------------------------------------------------------------------------
    */
   /** @brief Refine relative pose given by ransac using smart factors.
