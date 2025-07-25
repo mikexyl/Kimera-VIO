@@ -43,8 +43,8 @@ outlierRejection: 3
 retriangulationThreshold: 0.001
 
 ## Noise models ##
-smartNoiseSigma: 5.0
-monoNoiseSigma: 5
+smartNoiseSigma: 12.0
+monoNoiseSigma: 12
 monoNormType: 2
 monoNormParam: 4.6851
 stereoNoiseSigma: 3

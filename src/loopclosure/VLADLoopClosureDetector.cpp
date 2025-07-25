@@ -232,6 +232,16 @@ LCDFrame::Ptr VLADLoopClosureDetector::poseRecoveryPnP(
     }
   }
 
+  size_t nr_landmarks = std::count_if(keypoint_has_landmark.begin(),
+                                      keypoint_has_landmark.end(),
+                                      [](bool has_lmk) { return has_lmk; });
+  LOG(INFO) << "LCD: new frame has " << std::setprecision(2)
+            << static_cast<double>(nr_landmarks) / keypoint_has_landmark.size()
+            << " ratio of landmarks";
+
+  LOG(INFO) << "LCD: new frame has " << std::setprecision(2)
+            << W_points_with_ids.size() << " landmarks in horizon.";
+
   auto lcd_frame = std::make_shared<LCDFrame>(
       frame.timestamp_,
       FrameCache::NEW_ID,

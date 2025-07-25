@@ -128,6 +128,7 @@ class VLADLoopClosureDetector
         xfeat::LighterGlueCV::Params{
             .model_path = lcd_params_.lcd_lg_model_path_,
             .use_gpu = true,
+            .min_score = -1,
             .n_kpts = lcd_params_.lcd_lg_num_features_,
         });
 
@@ -246,6 +247,33 @@ class VLADLoopClosureDetector
     if (matches.size() < 50) {
       LOG(WARNING) << "VLADLoopClosureDetector: LG: Not enough matches found: "
                    << matches.size() << ".";
+      return;
+    }
+
+    int num_landmarks = 0;
+    for (const auto& match : matches) {
+      int ref_idx = match.trainIdx;
+      int cur_idx = match.queryIdx;
+      if (ref.keypoint_has_landmark_[ref_idx] &&
+          curr.keypoint_has_landmark_[cur_idx]) {
+        ++num_landmarks;
+      }
+    }
+    if (num_landmarks < 20) {
+      LOG(WARNING) << "VLADLCD: Not enough landmark matches "
+                   << "found: " << num_landmarks << ".";
+      size_t ref_kpts_have_lmk = std::count(ref.keypoint_has_landmark_.begin(),
+                                            ref.keypoint_has_landmark_.end(),
+                                            true);
+      size_t cur_kpts_have_lmk = std::count(curr.keypoint_has_landmark_.begin(),
+                                            curr.keypoint_has_landmark_.end(),
+                                            true);
+      LOG(WARNING) << "VLADLCD: ratio of keypoints with landmarks: "
+                   << "ref: " << std::setprecision(2)
+                   << static_cast<double>(num_landmarks) / ref_kpts_have_lmk
+                   << ", cur: " << std::setprecision(2)
+                   << static_cast<double>(num_landmarks) / cur_kpts_have_lmk
+                   << ".";
       return;
     }
 
