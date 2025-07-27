@@ -170,6 +170,7 @@ bool LoopClosureDetectorParams::parseYAML(const std::string& filepath) {
   yaml_parser.getYamlParam("xfeat_nv_head_model_path",
                            &xfeat_nv_head_model_path_);
   yaml_parser.getYamlParam("netvlad_model_path", &netvlad_model_path_);
+  yaml_parser.getYamlParam("local_window_size", &local_window_size_);
 
   return true;
 }
