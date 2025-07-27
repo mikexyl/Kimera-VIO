@@ -39,11 +39,13 @@ struct XfeatNVWrapper : xfeat::XfeatNetVLADONNX {
     global_desc = Base::transform(M1, x_prep);
   }
 
-  template <typename... Args>
-  void add(Args&&... args) {
+  void add(const GlobalDesc& global_desc) {
     CHECK_NOTNULL(db_);
+    CHECK(not global_desc.empty());
+    faiss::idx_t id = id_to_desc_map_.size();
+    id_to_desc_map_.emplace(id, global_desc.clone());
     try {
-      db_->add(std::forward<Args>(args)...);
+      db_->add(global_desc);
     } catch (const std::exception& e) {
       LOG(ERROR) << "Failed to add to database: " << e.what();
       throw;
@@ -71,8 +73,17 @@ struct XfeatNVWrapper : xfeat::XfeatNetVLADONNX {
     }
   }
 
+  GlobalDesc get(const faiss::idx_t id) const {
+    if (id_to_desc_map_.count(id)) {
+      return id_to_desc_map_.at(id);
+    } else {
+      return GlobalDesc();  // Return an empty cv::Mat if id not found
+    }
+  }
+
  private:
   std::unique_ptr<Database> db_;
+  std::map<faiss::idx_t, cv::Mat> id_to_desc_map_;
 };
 
 // dummy feature detector that does nothing
