@@ -431,7 +431,7 @@ FrameId LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::
     case PoseRecoveryType::kPnP: {
       // Build and store LCDFrame object.
       return cache_.addFrame(
-          this->poseRecoveryPnP(frame, W_points_with_ids, W_Pose_Blkf));
+          this->processMonoPnP(frame, W_points_with_ids, W_Pose_Blkf));
     } break;
 
     case PoseRecoveryType::k3d3d: {

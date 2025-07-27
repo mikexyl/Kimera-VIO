@@ -129,6 +129,11 @@ class VioBackend {
       LmkIdToLmkTypeMap* lmk_id_to_lmk_type_map = nullptr,
       const size_t& min_age = 2);
 
+  PointsWithIdMap getMapLmkIdsTo3dPointsOutTimeHorizon(
+      const gtsam::NonlinearFactorGraph& graph,
+      LmkIdToLmkTypeMap* lmk_id_to_lmk_type_map = nullptr,
+      const size_t& min_age = 2);
+
   inline gtsam::Matrix getCurrentStateCovariance() const {
     return state_covariance_lkf_;
   }

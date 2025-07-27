@@ -14,7 +14,9 @@ class LighterGlueCV : public FeatureTracker {
 
   using Params = xfeat::LighterGlueCV::Params;
 
-  LighterGlueCV(Ort::Env& env, Params params) : lg_matcher_(env, params) {}
+  LighterGlueCV(Ort::Env& env, Params params) : lg_matcher_(env, params) {
+    lg_matcher_.warmup();
+  }
   virtual ~LighterGlueCV() = default;
 
   void track(Frame* ref_frame,

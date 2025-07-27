@@ -190,7 +190,7 @@ void VLADLoopClosureDetector::descriptorMatToVec(
   descriptors_vec->push_back(frame.xfeat_x_prep_);
 }
 
-LCDFrame::Ptr VLADLoopClosureDetector::poseRecoveryPnP(
+LCDFrame::Ptr VLADLoopClosureDetector::processMonoPnP(
     const Frame& frame,
     const PointsWithIdMap& W_points_with_ids,
     const gtsam::Pose3& W_Pose_Blkf) {
