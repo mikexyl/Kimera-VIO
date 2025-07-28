@@ -69,6 +69,8 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::
   // Initialize the thirdparty wrapper:
   lcd_tp_wrapper_ = std::make_unique<LcdThirdPartyWrapper>(lcd_params_);
 
+  landmark_manager_ = std::make_unique<LcdLandmarkManager>();
+
   if (log_output) {
     logger_ = std::make_unique<LoopClosureDetectorLogger>();
   }
@@ -85,7 +87,10 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::spinOnce(
   CHECK_GE(input.cur_kf_id_, 0);
   CHECK(feature_detector_);
   CHECK(feature_matcher_);
+  CHECK(landmark_manager_);
   CHECK(db_);
+
+  landmark_manager_->updateLandmarks(input.W_points_with_ids_);
 
   // Update the PGO with the Backend VIO estimate.
   // TODO(marcus): only add factor if it's a set distance away from previous
@@ -702,13 +707,19 @@ bool LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::
       for (const KeypointMatch& it : matches_match_query) {
         const BearingVector& query_bearing =
             cur_frame.bearing_vectors_.at(it.second);
-        bool ref_kp_has_lmk = ref_frame.keypoint_has_landmark_.at(it.first);
-        if (!ref_kp_has_lmk) {
+        CHECK(it.first < ref_frame.landmark_ids.size())
+            << "LoopClosureDetector: Invalid landmark id index " << it.first
+            << " for ref_frame with size " << ref_frame.landmark_ids.size()
+            << ".";
+        auto ref_lmk_id = ref_frame.landmark_ids.at(it.first);
+        auto lmk = landmark_manager_->getLandmark(ref_lmk_id);
+        if (!lmk) {
           continue;
         }
-        const Landmark& match_point = ref_frame.keypoints_3d_.at(it.first);
+        Landmark camMatch_lmk =
+            (ref_frame.W_Pose_Blkf_ * B_Pose_Cam_).inverse() * (*lmk);
         camQuery_bearing_vectors.push_back(query_bearing);
-        camMatch_points.push_back(match_point);
+        camMatch_points.push_back(camMatch_lmk);
       }
 
       success = tracker_->pnp(camQuery_bearing_vectors,

@@ -278,20 +278,20 @@ class VLADLoopClosureDetector
     int num_landmarks_in_ref = 0;
     for (const auto& match : matches) {
       int ref_idx = match.trainIdx;
-      if (ref.keypoint_has_landmark_[ref_idx]) {
+      if (landmark_manager_->count(ref.landmark_ids[ref_idx]) > 0) {
         ++num_landmarks_in_ref;
       }
     }
-    if (num_landmarks_in_ref < 20) {
+    if (num_landmarks_in_ref < 50) {
       LOG(WARNING) << "VLADLCD: Not enough landmark matches "
                    << "found: " << num_landmarks_in_ref << ".";
-      size_t ref_kpts_have_lmk = std::count(ref.keypoint_has_landmark_.begin(),
-                                            ref.keypoint_has_landmark_.end(),
-                                            true);
+
       LOG(WARNING) << "VLADLCD: ratio of keypoints with landmarks: "
                    << "ref: " << std::setprecision(2)
                    << static_cast<double>(num_landmarks_in_ref) /
-                          ref_kpts_have_lmk;
+                          static_cast<double>(ref.keypoints_.size())
+                   << ".";
+
       return;
     }
 

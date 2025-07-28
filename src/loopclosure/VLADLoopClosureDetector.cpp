@@ -237,46 +237,17 @@ LCDFrame::Ptr VLADLoopClosureDetector::processMonoPnP(
     keypoints_to_save.push_back(cv::KeyPoint(pt.x, pt.y, 0.0f));
   }
 
-  std::vector<bool> keypoint_has_landmark(keypoints_to_save.size(), false);
-
-  Landmarks landmarks_in_cam;
-  for (size_t i = 0; i < nr_kpts; ++i) {
-    const LandmarkId& lmk_id = frame.landmarks_[i];
-    if (lmk_id != -1 and
-        W_points_with_ids.find(lmk_id) != W_points_with_ids.end()) {
-      // Convert point from world frame to local camera frame so that
-      // the reference frame matches the convention used in the stereo
-      // case.
-      Landmark cam_keypoint_3d =
-          (W_Pose_Blkf * B_Pose_Cam_).inverse() * W_points_with_ids.at(lmk_id);
-      landmarks_in_cam.push_back(cam_keypoint_3d);
-      keypoint_has_landmark[i] = true;
-    } else {
-      VLOG(10) << "PoseRecoveryPnP: landmark id not in world points!";
-      landmarks_in_cam.push_back(Landmark::Zero());
-    }
-  }
-
-  size_t nr_landmarks = std::count_if(keypoint_has_landmark.begin(),
-                                      keypoint_has_landmark.end(),
-                                      [](bool has_lmk) { return has_lmk; });
-  LOG(INFO) << "LCD: new frame has " << std::setprecision(2)
-            << static_cast<double>(nr_landmarks) / keypoint_has_landmark.size()
-            << " ratio of landmarks";
-
-  LOG(INFO) << "LCD: new frame has " << std::setprecision(2)
-            << W_points_with_ids.size() << " landmarks in horizon.";
-
   auto lcd_frame = std::make_shared<LCDFrame>(
       frame.timestamp_,
       FrameCache::NEW_ID,
       frame.id_,
       keypoints_to_save,
-      landmarks_in_cam,
+      Landmarks(),
       std::vector<cv::Mat>{frame.xfeat_M1_, frame.xfeat_x_prep_},
       frame.descriptors_,
-      undistorted_bearing_vectors);
-  lcd_frame->keypoint_has_landmark_ = keypoint_has_landmark;
+      undistorted_bearing_vectors,
+      W_Pose_Blkf);
+  lcd_frame->landmark_ids = frame.landmarks_;
   return lcd_frame;
 }
 
