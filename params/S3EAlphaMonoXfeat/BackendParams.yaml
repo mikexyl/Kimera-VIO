@@ -6,12 +6,12 @@ backend_modality: 0
 #INITIALIZATION PARAMETERS
 autoInitialize: 1
 roundOnAutoInitialize: 0
-initialPositionSigma: 1e-05
+initialPositionSigma: 1e-02
 initialRollPitchSigma: 0.174533 # 10.0/180.0*M_PI
-initialYawSigma: 0.00174533 # 0.1/180.0*M_PI
-initialVelocitySigma: 0.001
-initialAccBiasSigma: 0.0001
-initialGyroBiasSigma: 0.001
+initialYawSigma: 0.1
+initialVelocitySigma: 0.1
+initialAccBiasSigma: 0.1
+initialGyroBiasSigma: 0.1
 
 # VISION PARAMETERS ###########################################################
 ## Smart Factors ##
@@ -30,7 +30,7 @@ rankTolerance: 1
 #   * if the landmark is triangulated at distance larger than this,
 #   * result is flagged as degenerate.
 #   */
-landmarkDistanceThreshold: 50
+landmarkDistanceThreshold: 100
 
 # DynamicOutlierRejection:
 #  /**
