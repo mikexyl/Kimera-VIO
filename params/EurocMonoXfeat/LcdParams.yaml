@@ -26,7 +26,7 @@ score_type_id: 0
 patch_sze: 31
 fast_threshold: 20
 
-betweenRotationPrecision: 1 # 1/(0.01*0.01)
+betweenRotationPrecision: 0.1 # 1/(0.01*0.01)
 betweenTranslationPrecision: 0.01 # 1/(0.1*0.1)
 
 odom_rot_threshold: 0.01

@@ -161,6 +161,20 @@ class VLADLoopClosureDetector
                   const Database::GlobalDesc& bow_vec,
                   LoopResult* result) override;
 
+  void detectLoopOutsideLocalWindow(const FrameId& frame_id,
+                                    const Database::GlobalDesc& bow_vec,
+                                    LoopResult* result);
+
+  std::optional<FrameId> findFirstFrameIdOutsideLocalWindow(
+      const FrameId& frame_id) const {
+    if (frame_id <= static_cast<FrameId>(lcd_params_.local_window_size_)) {
+      return std::nullopt;  // No frames outside the local window.
+    } else {
+      return frame_id - lcd_params_.local_window_size_;
+      // Return the first frame ID outside the local window.
+    }
+  }
+
   void getNewFeaturesAndDescriptors(
       const cv::Mat& img,
       std::vector<cv::KeyPoint>* keypoints,
@@ -261,30 +275,23 @@ class VLADLoopClosureDetector
       return;
     }
 
-    int num_landmarks = 0;
+    int num_landmarks_in_ref = 0;
     for (const auto& match : matches) {
       int ref_idx = match.trainIdx;
-      int cur_idx = match.queryIdx;
-      if (ref.keypoint_has_landmark_[ref_idx] &&
-          curr.keypoint_has_landmark_[cur_idx]) {
-        ++num_landmarks;
+      if (ref.keypoint_has_landmark_[ref_idx]) {
+        ++num_landmarks_in_ref;
       }
     }
-    if (num_landmarks < 20) {
+    if (num_landmarks_in_ref < 20) {
       LOG(WARNING) << "VLADLCD: Not enough landmark matches "
-                   << "found: " << num_landmarks << ".";
+                   << "found: " << num_landmarks_in_ref << ".";
       size_t ref_kpts_have_lmk = std::count(ref.keypoint_has_landmark_.begin(),
                                             ref.keypoint_has_landmark_.end(),
                                             true);
-      size_t cur_kpts_have_lmk = std::count(curr.keypoint_has_landmark_.begin(),
-                                            curr.keypoint_has_landmark_.end(),
-                                            true);
       LOG(WARNING) << "VLADLCD: ratio of keypoints with landmarks: "
                    << "ref: " << std::setprecision(2)
-                   << static_cast<double>(num_landmarks) / ref_kpts_have_lmk
-                   << ", cur: " << std::setprecision(2)
-                   << static_cast<double>(num_landmarks) / cur_kpts_have_lmk
-                   << ".";
+                   << static_cast<double>(num_landmarks_in_ref) /
+                          ref_kpts_have_lmk;
       return;
     }
 
