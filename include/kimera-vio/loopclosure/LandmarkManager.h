@@ -4,13 +4,15 @@
 #include "kimera-vio/frontend/Frame.h"
 
 namespace VIO {
-class LcdLandmarkManager : public std::map<LandmarkId, Landmark> {
+class LcdLandmarkManager : public std::unordered_map<LandmarkId, Landmark> {
  public:
+  using Base = std::unordered_map<LandmarkId, Landmark>;
+
   KIMERA_POINTER_TYPEDEFS(LcdLandmarkManager);
   KIMERA_DELETE_COPY_CONSTRUCTORS(LcdLandmarkManager);
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
-  LcdLandmarkManager() : std::map<LandmarkId, Landmark>() {}
+  LcdLandmarkManager() : Base() {}
   virtual ~LcdLandmarkManager() = default;
 
   void updateLandmarks(const PointsWithIdMap& W_points_with_ids) {

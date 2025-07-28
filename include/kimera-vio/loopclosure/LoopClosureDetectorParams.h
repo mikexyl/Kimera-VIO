@@ -129,6 +129,9 @@ class LoopClosureDetectorParams : public PipelineParams {
   std::string lcd_faiss_index_path_{};
   std::string xfeat_nv_head_model_path_{};
   std::string netvlad_model_path_{};
+
+  int local_window_size_ = 50;  // number of most recent keyframes to skip when
+                                // detecting loops
 };
 
 }  // namespace VIO
