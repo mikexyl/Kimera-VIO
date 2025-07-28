@@ -98,7 +98,9 @@ FeatureDetector::FeatureDetector(
           feature_detector_params_.interp_nearest_path_;
       xfeat_params.use_gpu = feature_detector_params_.xfeat_use_gpu_;
 
-      feature_detector_ = xfeat::XFeatCV::create(*env, xfeat_params);
+      auto xfeat = xfeat::XFeatCV::create(*env, xfeat_params);
+      xfeat->warmup();
+      feature_detector_ = xfeat;
       break;
     }
     default: {

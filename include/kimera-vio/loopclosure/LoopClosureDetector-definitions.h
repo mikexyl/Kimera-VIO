@@ -60,7 +60,8 @@ struct LCDFrame {
            const Landmarks& keypoints_3d,
            const std::vector<cv::Mat>& descriptors_vec,
            const cv::Mat& descriptors_mat,
-           const BearingVectors& bearing_vectors)
+           const BearingVectors& bearing_vectors,
+           const Pose3& W_Pose_Blkf = Pose3())
       : timestamp_(timestamp),
         id_(id),
         id_kf_(id_kf),
@@ -68,7 +69,8 @@ struct LCDFrame {
         keypoints_3d_(keypoints_3d),
         descriptors_vec_(descriptors_vec),
         descriptors_mat_(descriptors_mat),
-        bearing_vectors_(bearing_vectors) {}
+        bearing_vectors_(bearing_vectors),
+        W_Pose_Blkf_(W_Pose_Blkf) {}
 
   virtual ~LCDFrame() = default;
 
@@ -81,10 +83,11 @@ struct LCDFrame {
   FrameId id_kf_;
   std::vector<cv::KeyPoint> keypoints_;
   Landmarks keypoints_3d_;
-  std::vector<bool> keypoint_has_landmark_;
+  std::vector<LandmarkId> landmark_ids;
   std::vector<cv::Mat> descriptors_vec_;
   cv::Mat descriptors_mat_;
   BearingVectors bearing_vectors_;
+  Pose3 W_Pose_Blkf_;  // VIO pose of the frame in the world frame
 
  protected:
   virtual void saveBytes(std::ostream& buffer) const;

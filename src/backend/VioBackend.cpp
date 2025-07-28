@@ -192,7 +192,7 @@ BackendOutput::UniquePtr VioBackend::spinOnce(const BackendInput& input) {
       // Also, if lmk type requested, fill lmk id to lmk type object.
       // WARNING this also cleans the lmks inside the old_smart_factors map!
       lmk_ids_to_3d_points_in_time_horizon =
-          getMapLmkIdsTo3dPointsInTimeHorizon(
+          getMapLmkIdsTo3dPointsOutTimeHorizon(
               smoother_->getFactors(),
               kOutputLmkTypeMap ? &lmk_id_to_lmk_type_map : nullptr,
               kMinLmkObs);
@@ -2321,6 +2321,118 @@ bool VioBackend::deleteLmkFromFeatureTracks(const LandmarkId& lmk_id) {
     return true;
   }
   return false;
+}
+
+PointsWithIdMap VioBackend::getMapLmkIdsTo3dPointsOutTimeHorizon(
+    const gtsam::NonlinearFactorGraph& graph,
+    LmkIdToLmkTypeMap* lmk_id_to_lmk_type_map,
+    const size_t& min_age) {
+  PointsWithIdMap points_with_id;
+
+  if (lmk_id_to_lmk_type_map) {
+    lmk_id_to_lmk_type_map->clear();
+  }
+
+  // Step 1:
+  /////////////// Add landmarks encoded in the smart factors. //////////////////
+
+  // old_smart_factors_ has all smart factors included so far.
+  // Retrieve lmk ids from smart factors in state.
+  size_t nr_smart_lmks = 0;
+  for (SmartFactorMap::iterator old_smart_factor_it =
+           old_smart_factors_.begin();
+       old_smart_factor_it !=
+       old_smart_factors_
+           .end();) {  //!< landmarkId -> {SmartFactorPtr, SlotIndex}
+
+    // Retrieve lmk_id of the smart factor.
+    LandmarkId lmk_id = old_smart_factor_it->first;
+
+    // Retrieve smart factor.
+    SmartStereoFactor::shared_ptr smart_factor_ptr =
+        old_smart_factor_it->second.first;
+    // Check that pointer is well definied.
+    CHECK(smart_factor_ptr) << "Smart factor is not well defined.";
+
+    // Retrieve smart factor slot in the graph.
+    Slot slot_id = old_smart_factor_it->second.second;
+
+    // Check that slot is admissible.
+    // Slot should be positive.
+    DCHECK(slot_id >= 0) << "Slot of smart factor is not admissible.";
+    // Ensure the graph size is small enough to cast to int.
+    DCHECK_LT(graph.size(), std::numeric_limits<Slot>::max())
+        << "Invalid cast, that would cause an overflow!";
+    // Slot should be inferior to the size of the graph.
+    DCHECK_LT(slot_id, static_cast<Slot>(graph.size()));
+
+    // if graph does not contain this slot, or the slot is other factor,
+    // then the smart factor is outdated, and we delete it and record its
+    // triangulation point
+    if (!graph.exists(slot_id) or smart_factor_ptr != graph.at(slot_id)) {
+      // This slot does not exist in the current graph...
+      VLOG(5) << "The slot with id: " << slot_id
+              << " does not exist in the graph.\n"
+              << "Deleting old_smart_factor of lmk id: " << lmk_id;
+      old_smart_factor_it = old_smart_factors_.erase(old_smart_factor_it);
+      // Update as well the feature track....
+      // TODO(TONI): please remove this and centralize how feature tracks
+      // and new/old_smart_factors are added and removed!
+      CHECK(deleteLmkFromFeatureTracks(lmk_id));
+    } else {
+      // Next iteration.
+      old_smart_factor_it++;
+      continue;
+    }
+
+    // Get triangulation result from smart factor.
+    const gtsam::TriangulationResult& result = smart_factor_ptr->point();
+    if (result.valid()) {
+      CHECK(result);
+      if (smart_factor_ptr->measured().size() >= min_age) {
+        // Triangulation result from smart factor is valid and
+        // we have observed the lmk at least min_age times.
+        VLOG(20) << "Adding lmk with id: " << lmk_id
+                 << " to list of lmks in time horizon";
+        // Check that we have not added this lmk already...
+        CHECK(points_with_id.find(lmk_id) == points_with_id.end());
+        points_with_id[lmk_id] = *result;
+        if (lmk_id_to_lmk_type_map) {
+          (*lmk_id_to_lmk_type_map)[lmk_id] = LandmarkType::SMART;
+        }
+        nr_smart_lmks++;
+      } else {
+        VLOG(20) << "Rejecting lmk with id: " << lmk_id
+                 << " from list of lmks in time horizon: "
+                 << "not enough measurements, "
+                 << smart_factor_ptr->measured().size() << ", vs min_age of "
+                 << min_age << ".";
+      }
+    } else {
+      VLOG(20) << "Triangulation result for smart factor of lmk with id "
+               << lmk_id << " is not initialized...";
+    }
+  }
+
+  // Step 2:
+  ////////////// Add landmarks that now are in projection factors. /////////////
+  size_t nr_proj_lmks = 0;
+  for (const auto& key_value : state_) {
+    const gtsam::Symbol key(key_value.key);
+    if (key.chr() != 'l') {
+      continue;
+    }
+
+    const auto lmk_id = key.index();
+    if (points_with_id.find(lmk_id) != points_with_id.end()) {
+      // We have already added this lmk.
+      continue;
+    }
+    points_with_id[lmk_id] = key_value.value.cast<gtsam::Point3>();
+    nr_proj_lmks++;
+  }
+
+  return points_with_id;
 }
 
 }  // namespace VIO.

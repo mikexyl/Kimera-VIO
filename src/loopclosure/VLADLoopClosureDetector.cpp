@@ -7,15 +7,36 @@ DEFINE_double(max_nss_vlad_distance,
               0.06,
               "Maximum NSS distance for VLAD loop closure detection.");
 
-void VLADLoopClosureDetector::detectLoop(
+void VLADLoopClosureDetector::detectLoop(const FrameId& frame_id,
+                                         const Database::GlobalDesc& bow_vec,
+                                         LoopResult* result) {
+  CHECK_NOTNULL(result);
+  auto query_frame_outside_local_window =
+      this->findFirstFrameIdOutsideLocalWindow(frame_id);
+  if (query_frame_outside_local_window) {
+    this->detectLoopOutsideLocalWindow(
+        *query_frame_outside_local_window, bow_vec, result);
+  }
+
+  db_->add(bow_vec);
+}
+
+void VLADLoopClosureDetector::detectLoopOutsideLocalWindow(
     const FrameId& frame_id,
-    const Database::GlobalDesc& global_desc,
+    const Database::GlobalDesc&,  // not used, leave it here for compatibility
     LoopResult* result) {
   CHECK_NOTNULL(result);
   CHECK_NOTNULL(db_);
   result->query_id_ = frame_id;
 
-  if (frame_id < static_cast<FrameId>(lcd_params_.recent_frames_window_)) {
+  cv::Mat global_desc = db_->get(frame_id);
+  CHECK(!global_desc.empty())
+      << "VLADLoopClosureDetector: Global descriptor for frame " << frame_id
+      << " is empty.";
+
+  if (frame_id < static_cast<FrameId>(lcd_params_.recent_frames_window_ +
+                                      lcd_params_.max_db_results_ +
+                                      lcd_params_.local_window_size_)) {
     VLOG(1) << "VLADLoopClosureDetector: Not enough frames processed yet. "
             << "Skipping loop closure detection.";
     result->status_ = LCDStatus::NO_MATCHES;
@@ -32,16 +53,15 @@ void VLADLoopClosureDetector::detectLoop(
       lcd_params_.max_db_results_, std::numeric_limits<float>::max());
 
   db_->search(global_desc,
-              lcd_params_.max_db_results_,
+              50,  // TODO(mikexyl): here if we set it bigger than 50 or max
+                   // results + window size, it corrupts memory for some reason
               query_result,
               query_distance,
               max_possible_match_id);
 
-  db_->add(global_desc);
-
   // remove -1 from query_result
   for (size_t i = 0; i < query_result.size(); ++i) {
-    if (query_result[i] == -1) {
+    if (query_result[i] == -1 or query_result[i] >= max_possible_match_id) {
       query_result.erase(query_result.begin() + i);
       query_distance.erase(query_distance.begin() + i);
       --i;  // Adjust index after erasure.
@@ -72,9 +92,14 @@ void VLADLoopClosureDetector::detectLoop(
     return;
   }
 
+  auto prev_global_vec = db_->get(frame_id - 1);
+  CHECK(!prev_global_vec.empty())
+      << "VLADLoopClosureDetector: Previous global descriptor for frame "
+      << (frame_id - 1) << " is empty.";
+
   double nss_distance = 0.0;
-  if (lcd_params_.use_nss_ && latest_global_vec_) {
-    nss_distance = db_->distance(global_desc, *latest_global_vec_);
+  if (lcd_params_.use_nss_) {
+    nss_distance = db_->distance(global_desc, prev_global_vec);
   } else {
     LOG_IF(ERROR, !lcd_params_.use_nss_)
         << "Setting use_nss as false is deprecated.";
@@ -190,7 +215,7 @@ void VLADLoopClosureDetector::descriptorMatToVec(
   descriptors_vec->push_back(frame.xfeat_x_prep_);
 }
 
-LCDFrame::Ptr VLADLoopClosureDetector::poseRecoveryPnP(
+LCDFrame::Ptr VLADLoopClosureDetector::processMonoPnP(
     const Frame& frame,
     const PointsWithIdMap& W_points_with_ids,
     const gtsam::Pose3& W_Pose_Blkf) {
@@ -212,46 +237,17 @@ LCDFrame::Ptr VLADLoopClosureDetector::poseRecoveryPnP(
     keypoints_to_save.push_back(cv::KeyPoint(pt.x, pt.y, 0.0f));
   }
 
-  std::vector<bool> keypoint_has_landmark(keypoints_to_save.size(), false);
-
-  Landmarks landmarks_in_cam;
-  for (size_t i = 0; i < nr_kpts; ++i) {
-    const LandmarkId& lmk_id = frame.landmarks_[i];
-    if (lmk_id != -1 and
-        W_points_with_ids.find(lmk_id) != W_points_with_ids.end()) {
-      // Convert point from world frame to local camera frame so that
-      // the reference frame matches the convention used in the stereo
-      // case.
-      Landmark cam_keypoint_3d =
-          (W_Pose_Blkf * B_Pose_Cam_).inverse() * W_points_with_ids.at(lmk_id);
-      landmarks_in_cam.push_back(cam_keypoint_3d);
-      keypoint_has_landmark[i] = true;
-    } else {
-      VLOG(10) << "PoseRecoveryPnP: landmark id not in world points!";
-      landmarks_in_cam.push_back(Landmark::Zero());
-    }
-  }
-
-  size_t nr_landmarks = std::count_if(keypoint_has_landmark.begin(),
-                                      keypoint_has_landmark.end(),
-                                      [](bool has_lmk) { return has_lmk; });
-  LOG(INFO) << "LCD: new frame has " << std::setprecision(2)
-            << static_cast<double>(nr_landmarks) / keypoint_has_landmark.size()
-            << " ratio of landmarks";
-
-  LOG(INFO) << "LCD: new frame has " << std::setprecision(2)
-            << W_points_with_ids.size() << " landmarks in horizon.";
-
   auto lcd_frame = std::make_shared<LCDFrame>(
       frame.timestamp_,
       FrameCache::NEW_ID,
       frame.id_,
       keypoints_to_save,
-      landmarks_in_cam,
+      Landmarks(),
       std::vector<cv::Mat>{frame.xfeat_M1_, frame.xfeat_x_prep_},
       frame.descriptors_,
-      undistorted_bearing_vectors);
-  lcd_frame->keypoint_has_landmark_ = keypoint_has_landmark;
+      undistorted_bearing_vectors,
+      W_Pose_Blkf);
+  lcd_frame->landmark_ids = frame.landmarks_;
   return lcd_frame;
 }
 

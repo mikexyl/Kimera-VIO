@@ -172,7 +172,7 @@ class DBoWLoopClosureDetector
     return std::map<int, double>(global_desc.begin(), global_desc.end());
   }
 
-  LCDFrame::Ptr poseRecoveryPnP(const Frame& frame,
+  LCDFrame::Ptr processMonoPnP(const Frame& frame,
                                 const PointsWithIdMap& W_points_with_ids,
                                 const gtsam::Pose3& W_Pose_Blkf) override {
     // We use existing features instead of new ORB ones like in the stereo

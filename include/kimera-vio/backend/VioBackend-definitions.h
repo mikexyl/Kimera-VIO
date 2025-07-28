@@ -70,7 +70,7 @@ using PointWithId = std::pair<LandmarkId, Landmark>;
 using PointsWithId = std::vector<PointWithId>;
 // TODO(Toni):  there is the same in vio_types.cpp, replace by that one, since
 // now the frontend also has such concept.
-using PointsWithIdMap = std::unordered_map<LandmarkId, Landmark>;
+using PointsWithIdMap = LandmarksMap;
 using LmkIdToLmkTypeMap = std::unordered_map<LandmarkId, LandmarkType>;
 
 struct FeatureObs : std::pair<FrameId, StereoPoint2> {

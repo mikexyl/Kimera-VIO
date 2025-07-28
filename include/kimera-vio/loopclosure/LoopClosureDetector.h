@@ -9,6 +9,7 @@
 #include "kimera-vio/frontend/StereoMatcher.h"
 #include "kimera-vio/frontend/Tracker.h"
 #include "kimera-vio/logging/Logger.h"
+#include "kimera-vio/loopclosure/LandmarkManager.h"
 #include "kimera-vio/loopclosure/LcdOutputPacket.h"
 #include "kimera-vio/loopclosure/LcdThirdPartyWrapper.h"
 #include "kimera-vio/loopclosure/LoopClosureDetector-definitions.h"
@@ -403,10 +404,9 @@ class LoopClosureDetector : public LoopClosureDetectorBase {
                        gtsam::Pose3* bodyMatch_T_bodyQuery_3d,
                        std::vector<int>* inliers);
 
-  virtual LCDFrame::Ptr poseRecoveryPnP(
-      const Frame& frame,
-      const PointsWithIdMap& W_points_with_ids,
-      const gtsam::Pose3& W_Pose_Blkf) = 0;
+  virtual LCDFrame::Ptr processMonoPnP(const Frame& frame,
+                                       const PointsWithIdMap& W_points_with_ids,
+                                       const gtsam::Pose3& W_Pose_Blkf) = 0;
 
   /* ------------------------------------------------------------------------
    */
@@ -535,6 +535,8 @@ class LoopClosureDetector : public LoopClosureDetectorBase {
   std::unique_ptr<typename Database::GlobalDesc> latest_global_vec_;
 
   Tracker::UniquePtr tracker_;
+
+  std::unique_ptr<LcdLandmarkManager> landmark_manager_{nullptr};
 
   // Queue-checking callback
   int num_lc_unoptimized_;

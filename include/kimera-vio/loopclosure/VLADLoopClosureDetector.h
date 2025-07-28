@@ -39,11 +39,13 @@ struct XfeatNVWrapper : xfeat::XfeatNetVLADONNX {
     global_desc = Base::transform(M1, x_prep);
   }
 
-  template <typename... Args>
-  void add(Args&&... args) {
+  void add(const GlobalDesc& global_desc) {
     CHECK_NOTNULL(db_);
+    CHECK(not global_desc.empty());
+    faiss::idx_t id = id_to_desc_map_.size();
+    id_to_desc_map_.emplace(id, global_desc.clone());
     try {
-      db_->add(std::forward<Args>(args)...);
+      db_->add(global_desc);
     } catch (const std::exception& e) {
       LOG(ERROR) << "Failed to add to database: " << e.what();
       throw;
@@ -71,8 +73,17 @@ struct XfeatNVWrapper : xfeat::XfeatNetVLADONNX {
     }
   }
 
+  GlobalDesc get(const faiss::idx_t id) const {
+    if (id_to_desc_map_.count(id)) {
+      return id_to_desc_map_.at(id);
+    } else {
+      return GlobalDesc();  // Return an empty cv::Mat if id not found
+    }
+  }
+
  private:
   std::unique_ptr<Database> db_;
+  std::map<faiss::idx_t, cv::Mat> id_to_desc_map_;
 };
 
 // dummy feature detector that does nothing
@@ -149,6 +160,20 @@ class VLADLoopClosureDetector
   void detectLoop(const FrameId& frame_id,
                   const Database::GlobalDesc& bow_vec,
                   LoopResult* result) override;
+
+  void detectLoopOutsideLocalWindow(const FrameId& frame_id,
+                                    const Database::GlobalDesc& bow_vec,
+                                    LoopResult* result);
+
+  std::optional<FrameId> findFirstFrameIdOutsideLocalWindow(
+      const FrameId& frame_id) const {
+    if (frame_id <= static_cast<FrameId>(lcd_params_.local_window_size_)) {
+      return std::nullopt;  // No frames outside the local window.
+    } else {
+      return frame_id - lcd_params_.local_window_size_;
+      // Return the first frame ID outside the local window.
+    }
+  }
 
   void getNewFeaturesAndDescriptors(
       const cv::Mat& img,
@@ -250,30 +275,23 @@ class VLADLoopClosureDetector
       return;
     }
 
-    int num_landmarks = 0;
+    int num_landmarks_in_ref = 0;
     for (const auto& match : matches) {
       int ref_idx = match.trainIdx;
-      int cur_idx = match.queryIdx;
-      if (ref.keypoint_has_landmark_[ref_idx] &&
-          curr.keypoint_has_landmark_[cur_idx]) {
-        ++num_landmarks;
+      if (landmark_manager_->count(ref.landmark_ids[ref_idx]) > 0) {
+        ++num_landmarks_in_ref;
       }
     }
-    if (num_landmarks < 20) {
+    if (num_landmarks_in_ref < 50) {
       LOG(WARNING) << "VLADLCD: Not enough landmark matches "
-                   << "found: " << num_landmarks << ".";
-      size_t ref_kpts_have_lmk = std::count(ref.keypoint_has_landmark_.begin(),
-                                            ref.keypoint_has_landmark_.end(),
-                                            true);
-      size_t cur_kpts_have_lmk = std::count(curr.keypoint_has_landmark_.begin(),
-                                            curr.keypoint_has_landmark_.end(),
-                                            true);
+                   << "found: " << num_landmarks_in_ref << ".";
+
       LOG(WARNING) << "VLADLCD: ratio of keypoints with landmarks: "
                    << "ref: " << std::setprecision(2)
-                   << static_cast<double>(num_landmarks) / ref_kpts_have_lmk
-                   << ", cur: " << std::setprecision(2)
-                   << static_cast<double>(num_landmarks) / cur_kpts_have_lmk
+                   << static_cast<double>(num_landmarks_in_ref) /
+                          static_cast<double>(ref.keypoints_.size())
                    << ".";
+
       return;
     }
 
@@ -283,9 +301,9 @@ class VLADLoopClosureDetector
     }
   }
 
-  LCDFrame::Ptr poseRecoveryPnP(const Frame& frame,
-                                const PointsWithIdMap& W_points_with_ids,
-                                const gtsam::Pose3& W_Pose_Blkf) override;
+  LCDFrame::Ptr processMonoPnP(const Frame& frame,
+                               const PointsWithIdMap& W_points_with_ids,
+                               const gtsam::Pose3& W_Pose_Blkf) override;
 
   void cleanFrame(const LCDFrame::Ptr& frame) override {
     frame->descriptors_vec_.clear();

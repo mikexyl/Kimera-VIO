@@ -70,7 +70,6 @@ class GpuBFMatcher : public FeatureTracker {
     std::vector<cv::DMatch> matches_vec;
     matches_vec =
         gpu_matcher_->match(det0, det1, min_sim_, homography, search_radius);
-    std::cout << "Number of matches found: " << matches_vec.size() << std::endl;
 
     // copy matches to DMatchVec
     matches->clear();
