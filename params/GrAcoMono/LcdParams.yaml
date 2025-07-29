@@ -60,7 +60,7 @@ ransac_use_2point_2d2d: 0
 # pose_recovery_type options:
 #   0: 3d3d (Arun)
 #   1: PnP (opengv)
-pose_recovery_type: 2
+pose_recovery_type: 1
 ransac_max_iterations: 500
 ransac_probability: 0.995
 ransac_randomize: 0
@@ -78,3 +78,4 @@ lcd_lg_model_path: /workspaces/src/xfeat-cpp/onnx_model/lg_640x480_2000.onnx
 lcd_faiss_index_path: /workspaces/src/xfeat-cpp/onnx_model/faiss_ivfflat.index.bin
 xfeat_nv_head_model_path: /workspaces/src/xfeat-cpp/onnx_model/xfeat_nv.onnx
 netvlad_model_path: /workspaces/src/xfeat-cpp/onnx_model/netvlad.onnx
+local_window_size: 1

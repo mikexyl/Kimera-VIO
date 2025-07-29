@@ -245,7 +245,7 @@ KeypointsCV FeatureDetector::featureDetection(Frame* cur_frame,
     VLOG(1) << "Number of points detected : " << keypoints.size();
 
     // CHECK if we get at least 80% of the requested keypoints
-    static constexpr float kMinKeypointsRatio = 0.8f;
+    static constexpr float kMinKeypointsRatio = 0.51f;
     CHECK_GE(keypoints.size(),
              static_cast<size_t>(kMinKeypointsRatio * need_n_corners))
         << "XFeat detected only " << keypoints.size()

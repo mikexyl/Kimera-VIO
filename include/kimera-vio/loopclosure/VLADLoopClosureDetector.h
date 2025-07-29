@@ -282,7 +282,7 @@ class VLADLoopClosureDetector
         ++num_landmarks_in_ref;
       }
     }
-    if (num_landmarks_in_ref < 30) {
+    if (num_landmarks_in_ref < 40) {
       LOG(WARNING) << "VLADLCD: Not enough landmark matches "
                    << "found: " << num_landmarks_in_ref << ".";
 
