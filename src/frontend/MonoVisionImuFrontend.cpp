@@ -261,6 +261,10 @@ StatusMonoMeasurementsPtr MonoVisionImuFrontend::processFrame(
     //                               ref_frame_R_cur_frame,
     //                               frontend_params_.feature_detector_params_);
 
+    // Undistort keypoints:
+    mono_camera_->undistortKeypoints(mono_frame_k_->keypoints_,
+                                     &mono_frame_k_->keypoints_undistorted_);
+
     tracker_->featureTrackingDesc(mono_frame_lkf_.get(),
                                   mono_frame_k_.get(),
                                   keyframe_R_cur_frame,
@@ -276,6 +280,10 @@ StatusMonoMeasurementsPtr MonoVisionImuFrontend::processFrame(
     // TODO(mike): detection was after keyframe detection, we moved it here,
     // need to check if it causes bugs in the keyframe detection
     feature_detector_->featureDetection(mono_frame_k_.get());
+
+    // Undistort keypoints:
+    mono_camera_->undistortKeypoints(mono_frame_k_->keypoints_,
+                                     &mono_frame_k_->keypoints_undistorted_);
   }
 
   if (feature_tracks) {
@@ -318,9 +326,6 @@ StatusMonoMeasurementsPtr MonoVisionImuFrontend::processFrame(
     last_keyframe_timestamp_ = mono_frame_k_->timestamp_;
     mono_frame_k_->isKeyframe_ = true;
 
-    // Undistort keypoints:
-    mono_camera_->undistortKeypoints(mono_frame_k_->keypoints_,
-                                     &mono_frame_k_->keypoints_undistorted_);
     // Log images if needed.
     if (logger_ &&
         (FLAGS_visualize_frontend_images || FLAGS_save_frontend_images)) {
