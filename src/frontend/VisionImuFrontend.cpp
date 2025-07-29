@@ -177,7 +177,10 @@ void VisionImuFrontend::outlierRejectionPnP(
 bool VisionImuFrontend::shouldBeKeyframe(const Frame& frame,
                                          const Frame& frame_lkf) const {
   const Timestamp kf_diff_ns = frame.timestamp_ - frame_lkf.timestamp_;
-  const size_t nr_valid_features = frame.getNrValidKeypoints();
+
+  KeypointMatches matches_ref_cur;
+  tracker_->findMatchingKeypoints(frame_lkf, frame, &matches_ref_cur);
+  const size_t nr_valid_features = matches_ref_cur.size();
 
   const bool min_time_elapsed =
       kf_diff_ns >= frontend_params_.min_intra_keyframe_time_ns_;
@@ -185,9 +188,6 @@ bool VisionImuFrontend::shouldBeKeyframe(const Frame& frame,
       kf_diff_ns >= frontend_params_.max_intra_keyframe_time_ns_;
   const bool nr_features_low =
       nr_valid_features <= frontend_params_.min_number_features_;
-
-  KeypointMatches matches_ref_cur;
-  tracker_->findMatchingKeypoints(frame_lkf, frame, &matches_ref_cur);
 
   // check for large enough disparity
   double disparity;
