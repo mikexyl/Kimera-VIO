@@ -4,7 +4,7 @@ klt_win_size: 24
 klt_max_iter: 30
 klt_max_level: 4
 klt_eps: 0.1
-maxFeatureAge: 25
+maxFeatureAge: 100
 
 # Detector Params
 # 0: FAST
@@ -61,12 +61,12 @@ ransac_use_2point_mono: 1
 ransac_max_iterations: 100
 ransac_probability: 0.995
 ransac_randomize: 0
-min_intra_keyframe_time: 0.01
-max_intra_keyframe_time: 0.1
-max_disparity_since_lkf: 1000 #large value to disable
+min_intra_keyframe_time: 0.2
+max_intra_keyframe_time: 10.0
+max_disparity_since_lkf: 2000 #large value to disable
 minNumberFeatures: 300
 useStereoTracking: 0
-disparityThreshold: 5
+disparityThreshold: 3
 # Type of optical flow predictor to aid feature tracking:
 # 0: Static - assumes no optical flow between images (aka static camera).
 # 1: Rotational - use IMU gyro to estimate optical flow.
