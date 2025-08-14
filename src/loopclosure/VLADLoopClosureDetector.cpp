@@ -48,16 +48,13 @@ void VLADLoopClosureDetector::detectLoopOutsideLocalWindow(
     max_possible_match_id = 0;
   }
 
-  Database::Database::QueryResults query_result(lcd_params_.max_db_results_);
-  Database::Database::QueryDistances query_distance(
-      lcd_params_.max_db_results_, std::numeric_limits<float>::max());
+  int top_k = lcd_params_.max_db_results_ + lcd_params_.recent_frames_window_;
 
-  db_->search(global_desc,
-              50,  // TODO(mikexyl): here if we set it bigger than 50 or max
-                   // results + window size, it corrupts memory for some reason
-              query_result,
-              query_distance,
-              max_possible_match_id);
+  Database::Database::QueryResults query_result(top_k, -1);
+  Database::Database::QueryDistances query_distance(
+      top_k, std::numeric_limits<float>::max());
+
+  db_->search(global_desc, top_k, query_result, query_distance);
 
   // remove -1 from query_result
   for (size_t i = 0; i < query_result.size(); ++i) {

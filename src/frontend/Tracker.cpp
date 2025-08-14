@@ -1081,6 +1081,7 @@ cv::Mat Tracker::getTrackerImage(const Frame& ref_frame,
   // Add all keypoints in cur_frame with the tracks.
   for (size_t i = 0; i < cur_frame.keypoints_.size(); ++i) {
     const cv::Point2f& px_cur = cur_frame.keypoints_.at(i);
+    auto px_sigma = cur_frame.keypoint_stds.at(i);
     if (cur_frame.landmarks_.at(i) == -1) {  // Untracked landmarks are red.
       cv::circle(img_rgb, px_cur, 4, red, 2);
     } else {
@@ -1090,12 +1091,12 @@ cv::Mat Tracker::getTrackerImage(const Frame& ref_frame,
       if (it != ref_frame.landmarks_.end()) {
         // If feature was in previous frame, display tracked feature with
         // green circle/line:
-        cv::circle(img_rgb, px_cur, 6, green, 1);
+        cv::circle(img_rgb, px_cur, px_sigma, green, 1);
         int i = std::distance(ref_frame.landmarks_.begin(), it);
         const cv::Point2f& px_ref = ref_frame.keypoints_.at(i);
         cv::arrowedLine(img_rgb, px_ref, px_cur, green, 1);
       } else {  // New feature tracks are blue.
-        cv::circle(img_rgb, px_cur, 6, blue, 1);
+        cv::circle(img_rgb, px_cur, px_sigma, blue, 1);
       }
     }
   }
