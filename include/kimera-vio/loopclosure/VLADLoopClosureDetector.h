@@ -269,7 +269,7 @@ class VLADLoopClosureDetector
     feature_matcher_->match(
         cur_ret, image_size0, ref_ret, image_size0, matches);
 
-    if (matches.size() < 50) {
+    if (matches.size() < 30) {
       LOG(WARNING) << "VLADLoopClosureDetector: LG: Not enough matches found: "
                    << matches.size() << ".";
       return;
@@ -282,7 +282,7 @@ class VLADLoopClosureDetector
         ++num_landmarks_in_ref;
       }
     }
-    if (num_landmarks_in_ref < 40) {
+    if (num_landmarks_in_ref < 30) {
       LOG(WARNING) << "VLADLCD: Not enough landmark matches "
                    << "found: " << num_landmarks_in_ref << ".";
 
