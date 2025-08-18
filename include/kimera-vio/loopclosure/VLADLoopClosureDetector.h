@@ -269,29 +269,9 @@ class VLADLoopClosureDetector
     feature_matcher_->match(
         cur_ret, image_size0, ref_ret, image_size0, matches);
 
-    if (matches.size() < 30) {
+    if (matches.size() < 40) {
       LOG(WARNING) << "VLADLoopClosureDetector: LG: Not enough matches found: "
                    << matches.size() << ".";
-      return;
-    }
-
-    int num_landmarks_in_ref = 0;
-    for (const auto& match : matches) {
-      int ref_idx = match.trainIdx;
-      if (landmark_manager_->count(ref.landmark_ids[ref_idx]) > 0) {
-        ++num_landmarks_in_ref;
-      }
-    }
-    if (num_landmarks_in_ref < 30) {
-      LOG(WARNING) << "VLADLCD: Not enough landmark matches "
-                   << "found: " << num_landmarks_in_ref << ".";
-
-      LOG(WARNING) << "VLADLCD: ratio of keypoints with landmarks: "
-                   << "ref: " << std::setprecision(2)
-                   << static_cast<double>(num_landmarks_in_ref) /
-                          static_cast<double>(ref.keypoints_.size())
-                   << ".";
-
       return;
     }
 

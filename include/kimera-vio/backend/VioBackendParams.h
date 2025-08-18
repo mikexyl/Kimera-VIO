@@ -14,19 +14,18 @@
 
 #pragma once
 
+#include <glog/logging.h>
+#include <gtsam/base/Vector.h>
+#include <gtsam/nonlinear/ISAM2Params.h>
+#include <gtsam/slam/SmartFactorParams.h>
 #include <stdlib.h>
+
 #include <fstream>
 #include <iostream>
 #include <memory>
 #include <string>
 #include <unordered_map>
 #include <vector>
-
-#include <gtsam/base/Vector.h>
-#include <gtsam/nonlinear/ISAM2Params.h>
-#include <gtsam/slam/SmartFactorParams.h>
-
-#include <glog/logging.h>
 
 #include "kimera-vio/common/VioNavState.h"
 #include "kimera-vio/pipeline/PipelineParams.h"
@@ -151,6 +150,8 @@ class BackendParams : public PipelineParams {
   //! Source of the initial guess for the keyframe pose
   PoseGuessSource pose_guess_source_ = PoseGuessSource::IMU;
   double mono_translation_scale_factor_ = 0.1;
+
+  int min_num_obs_per_landmark_to_keep_ = 20;
 };
 
 }  // namespace VIO

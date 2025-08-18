@@ -169,14 +169,13 @@ class LoopClosureDetector : public LoopClosureDetectorBase {
       return;
     }
 
-    bool pose_valid = recoverPoseBody(*match_frame,
-                                      *query_frame,
-                                      camMatch_T_camQuery_2d,
-                                      matches_match_query,
-                                      &(result->relative_pose_),
-                                      &inliers);
-    result->status_ =
-        pose_valid ? LCDStatus::LOOP_DETECTED : LCDStatus::FAILED_POSE_RECOVERY;
+    auto status = recoverPoseBody(*match_frame,
+                                  *query_frame,
+                                  camMatch_T_camQuery_2d,
+                                  matches_match_query,
+                                  &(result->relative_pose_),
+                                  &inliers);
+    result->status_ = status;
   }
 
   virtual LcdOutput::UniquePtr spinOnce(const LcdInput& input) override;
@@ -397,12 +396,12 @@ class LoopClosureDetector : public LoopClosureDetectorBase {
    * determined at the geometricVerificationCam2d2d stage.
    * @return True if the pose is recovered successfully, false otherwise.
    */
-  bool recoverPoseBody(const LCDFrame& ref_frame,
-                       const LCDFrame& cur_frame,
-                       const gtsam::Pose3& camMatch_T_camQuery_2d,
-                       const KeypointMatches& matches_query_match,
-                       gtsam::Pose3* bodyMatch_T_bodyQuery_3d,
-                       std::vector<int>* inliers);
+  LCDStatus recoverPoseBody(const LCDFrame& ref_frame,
+                            const LCDFrame& cur_frame,
+                            const gtsam::Pose3& camMatch_T_camQuery_2d,
+                            const KeypointMatches& matches_query_match,
+                            gtsam::Pose3* bodyMatch_T_bodyQuery_3d,
+                            std::vector<int>* inliers);
 
   virtual LCDFrame::Ptr processMonoPnP(const Frame& frame,
                                        const PointsWithIdMap& W_points_with_ids,

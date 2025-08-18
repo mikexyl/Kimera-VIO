@@ -181,8 +181,7 @@ BackendOutput::UniquePtr VioBackend::spinOnce(const BackendInput& input) {
     // Generate extra optional backend ouputs.
     static const bool kOutputLmkMap =
         backend_output_params_.output_map_lmk_ids_to_3d_points_in_time_horizon_;
-    static const bool kMinLmkObs =
-        backend_output_params_.min_num_obs_for_lmks_in_time_horizon_;
+    const bool kMinLmkObs = backend_params_.min_num_obs_per_landmark_to_keep_;
     static const bool kOutputLmkTypeMap =
         backend_output_params_.output_lmk_id_to_lmk_type_map_;
     LmkIdToLmkTypeMap lmk_id_to_lmk_type_map;

@@ -40,6 +40,7 @@ enum class LoopClosureDetectorType {
 
 enum class LCDStatus : int {
   LOOP_DETECTED,
+  LOOP_DETECTED_ROT,
   NO_MATCHES,
   LOW_NSS_FACTOR,
   LOW_SCORE,
@@ -88,6 +89,7 @@ struct LCDFrame {
   cv::Mat descriptors_mat_;
   BearingVectors bearing_vectors_;
   Pose3 W_Pose_Blkf_;  // VIO pose of the frame in the world frame
+  CameraParams cam_params_;
 
  protected:
   virtual void saveBytes(std::ostream& buffer) const;
@@ -181,13 +183,20 @@ struct MatchIsland {
 };  // struct MatchIsland
 
 struct LoopResult {
-  inline bool isLoop() const { return status_ == LCDStatus::LOOP_DETECTED; }
+  inline bool isLoop() const {
+    return status_ == LCDStatus::LOOP_DETECTED or
+           status_ == LCDStatus::LOOP_DETECTED_ROT;
+  }
 
   static std::string asString(const LCDStatus& status) {
     std::string status_str = "";
     switch (status) {
       case LCDStatus::LOOP_DETECTED: {
         status_str = "LOOP_DETECTED";
+        break;
+      }
+      case LCDStatus::LOOP_DETECTED_ROT: {
+        status_str = "LOOP_DETECTED_ROT";
         break;
       }
       case LCDStatus::NO_MATCHES: {

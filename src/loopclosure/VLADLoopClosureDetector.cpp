@@ -17,8 +17,6 @@ void VLADLoopClosureDetector::detectLoop(const FrameId& frame_id,
     this->detectLoopOutsideLocalWindow(
         *query_frame_outside_local_window, bow_vec, result);
   }
-
-  db_->add(bow_vec);
 }
 
 void VLADLoopClosureDetector::detectLoopOutsideLocalWindow(
@@ -127,9 +125,8 @@ void VLADLoopClosureDetector::detectLoopOutsideLocalWindow(
   };
 
   // Remove high distances from the QueryResults based on nss.
-  static constexpr double kVLADNSSDistanceThreshold = 1.;
   for (size_t i = 0; i < query_result.size(); ++i) {
-    if (query_distance[i] > nss_distance * kVLADNSSDistanceThreshold) {
+    if (query_distance[i] > nss_distance / lcd_params_.alpha_) {
       query_result.erase(query_result.begin() + i);
       query_distance.erase(query_distance.begin() + i);
       --i;  // Adjust index after erasure.
@@ -245,6 +242,8 @@ LCDFrame::Ptr VLADLoopClosureDetector::processMonoPnP(
       undistorted_bearing_vectors,
       W_Pose_Blkf);
   lcd_frame->landmark_ids = frame.landmarks_;
+  lcd_frame->cam_params_ = frame.cam_param_;
+
   return lcd_frame;
 }
 

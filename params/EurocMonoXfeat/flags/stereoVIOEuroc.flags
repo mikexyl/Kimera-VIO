@@ -27,7 +27,7 @@
 # 1: pointcloud
 # 2: none
 --viz_type=1
---min_num_obs_for_mesher_points=3
+--min_num_obs_for_mesher_points=25
 --extract_planes_from_the_scene=false
 
 # For displaying/saving Frontend images:

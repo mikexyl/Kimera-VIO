@@ -80,6 +80,7 @@ class LoopClosureDetectorParams : public PipelineParams {
   bool refine_pose_ = true;
   PoseRecoveryType pose_recovery_type_ = PoseRecoveryType::k3d3d;
   static constexpr double max_pose_recovery_translation_ = 1e3;
+  int min_pnp_num_landmarks_ = 10;
   //////////////////////////////////////////////////////////////////////////////
 
   ///////////////////////// ORB feature matching params ////////////////////////
@@ -131,7 +132,9 @@ class LoopClosureDetectorParams : public PipelineParams {
   std::string netvlad_model_path_{};
 
   int local_window_size_ = 50;  // number of most recent keyframes to skip when
-                                // detecting loops
+  // detecting loops
+
+  double min_lmk_obs_ratio_ = 0.25;
 };
 
 }  // namespace VIO

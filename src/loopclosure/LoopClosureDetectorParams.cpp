@@ -48,6 +48,7 @@ bool LoopClosureDetectorParams::parseYAML(const std::string& filepath) {
   yaml_parser.getYamlParam("pose_recovery_type", &pose_recovery_type);
   pose_recovery_type_ = static_cast<PoseRecoveryType>(pose_recovery_type);
   yaml_parser.getYamlParam("lowe_ratio", &lowe_ratio_);
+  yaml_parser.getYamlParam("min_pnp_num_landmarks", &min_pnp_num_landmarks_);
 
   int matcher_type_id;
   yaml_parser.getYamlParam("matcher_type", &matcher_type_id);
@@ -171,6 +172,7 @@ bool LoopClosureDetectorParams::parseYAML(const std::string& filepath) {
                            &xfeat_nv_head_model_path_);
   yaml_parser.getYamlParam("netvlad_model_path", &netvlad_model_path_);
   yaml_parser.getYamlParam("local_window_size", &local_window_size_);
+  yaml_parser.getYamlParam("min_lmk_obs_ratio", &min_lmk_obs_ratio_);
 
   return true;
 }

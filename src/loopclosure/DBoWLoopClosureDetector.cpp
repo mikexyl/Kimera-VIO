@@ -204,9 +204,6 @@ void DBoWLoopClosureDetector::detectLoop(const FrameId& frame_id,
              lcd_params_.max_db_results_,
              max_possible_match_id);
 
-  // Add current BoW vector to database.
-  db_->add(bow_vec);
-
   if (query_result.empty()) {
     result->status_ = LCDStatus::NO_MATCHES;
     return;

@@ -52,7 +52,7 @@ zero_zone: -1
 
 subpixelRefinementStereo: 0
 useSuccessProbabilities: 1
-useRANSAC: 1
+useRANSAC: 0
 minNrMonoInliers: 10
 minNrStereoInliers: 5
 ransac_threshold_mono: 1e-06

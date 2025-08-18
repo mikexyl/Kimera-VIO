@@ -91,6 +91,13 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::spinOnce(
   CHECK(db_);
 
   landmark_manager_->updateLandmarks(input.W_points_with_ids_);
+  std::vector<LandmarkId> new_lmk_ids;
+  for (const auto& [lmk_id, lmk] : input.W_points_with_ids_) {
+    new_lmk_ids.push_back(lmk_id);
+  }
+  int culled = landmark_manager_->checkAndCullingLandmarks(
+      new_lmk_ids, cache_, lcd_params_.min_lmk_obs_ratio_);
+  VLOG(1) << "Culled landmarks: " << culled;
 
   // Update the PGO with the Backend VIO estimate.
   // TODO(marcus): only add factor if it's a set distance away from previous
@@ -160,6 +167,9 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::spinOnce(
 
   const auto curr_frame = cache_.getFrame(lcd_frame_id);
   CHECK(curr_frame) << "Invalid frame requested!";
+
+  landmark_manager_->updateObsFrames(curr_frame->id_, curr_frame->landmark_ids);
+
   typename Database::GlobalDesc curr_bow_vec;
   db_->transform(curr_frame->descriptors_vec_, curr_bow_vec);
 
@@ -168,6 +178,8 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::spinOnce(
   if (!FLAGS_lcd_no_detection) {
     detectLoop(lcd_frame_id, curr_bow_vec, &loop_result);
   }
+
+  db_->add(curr_bow_vec);
 
   // Update latest bowvec for normalized similarity scoring (NSS).
   if (static_cast<int>(lcd_frame_id + 1) > lcd_params_.recent_frames_window_) {
@@ -186,7 +198,7 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::spinOnce(
         "PGO Update/Optimization Timing [ms]");
     auto tic = utils::Timer::tic();
 
-    if (lcd_params_.pose_recovery_type_ == PoseRecoveryType::k5ptRotOnly) {
+    if (loop_result.status_ == LCDStatus::LOOP_DETECTED_ROT) {
       // Rotation part of the information matrix of the noise model
       // emphasized.
       gtsam::Matrix mat_info = gtsam::Matrix::Identity(6, 6);
@@ -211,7 +223,7 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::spinOnce(
                             loop_result.query_id_,
                             loop_result.relative_pose_,
                             noise_model_5pt_rotation_only));
-    } else {
+    } else if (loop_result.status_ == LCDStatus::LOOP_DETECTED) {
       addLoopClosureFactorAndOptimize(
           LoopClosureFactor(loop_result.match_id_,
                             loop_result.query_id_,
@@ -262,6 +274,7 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::spinOnce(
                                       curr_frame->bearing_vectors_,
                                       globalDescToMap(curr_bow_vec),
                                       curr_frame->descriptors_mat_);
+  output_payload->landmarks_ = landmark_manager_->getLandmarks();
   output_payload->timestamp_map_ = timestamp_map_;
 
   cleanFrame(lcd_frame_id);
@@ -638,18 +651,19 @@ void LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::
 
 /* ------------------------------------------------------------------------ */
 template <typename Database, typename FeatureDetector, typename FeatureMatcher>
-bool LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::
-    recoverPoseBody(const LCDFrame& ref_frame,
-                    const LCDFrame& cur_frame,
-                    const gtsam::Pose3& camMatch_T_camQuery_2d,
-                    const KeypointMatches& matches_match_query,
-                    gtsam::Pose3* bodyMatch_T_bodyQuery_3d,
-                    std::vector<int>* inliers) {
+LCDStatus
+LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::recoverPoseBody(
+    const LCDFrame& ref_frame,
+    const LCDFrame& cur_frame,
+    const gtsam::Pose3& camMatch_T_camQuery_2d,
+    const KeypointMatches& matches_match_query,
+    gtsam::Pose3* bodyMatch_T_bodyQuery_3d,
+    std::vector<int>* inliers) {
   CHECK_NOTNULL(bodyMatch_T_bodyQuery_3d);
   CHECK_NOTNULL(inliers);
 
   gtsam::Pose3 camMatch_T_camQuery_3d;
-  bool success = false;
+  LCDStatus status;
 
   const StereoLCDFrame* ref_stereo_lcd_frame = nullptr;
   const StereoLCDFrame* cur_stereo_lcd_frame = nullptr;
@@ -691,7 +705,9 @@ bool LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::
                                                     inliers);
         camMatch_T_camQuery_3d = result.second;
       }
-      if (result.first == TrackingStatus::VALID) success = true;
+      if (result.first == TrackingStatus::VALID) {
+        status = LCDStatus::LOOP_DETECTED;
+      }
     } break;
 
     case PoseRecoveryType::kPnP: {
@@ -722,11 +738,18 @@ bool LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::
         camMatch_points.push_back(camMatch_lmk);
       }
 
-      success = tracker_->pnp(camQuery_bearing_vectors,
-                              camMatch_points,
-                              &camMatch_T_camQuery_3d,
-                              inliers,
-                              &camMatch_T_camQuery_2d_copy);
+      bool success = false;
+      if (camMatch_points.size() > lcd_params_.min_pnp_num_landmarks_) {
+        success = tracker_->pnp(camQuery_bearing_vectors,
+                                camMatch_points,
+                                &camMatch_T_camQuery_3d,
+                                inliers,
+                                &camMatch_T_camQuery_2d_copy);
+        if (success and camMatch_T_camQuery_3d.translation().norm() >
+                            lcd_params_.max_pose_recovery_translation_) {
+          success = false;
+        }
+      }
 
       // Manually fail the result if the norm of the translation vector is above
       // a fixed maximum. This is not technically required; PCM should be able
@@ -734,17 +757,22 @@ bool LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::
       // are several of these candidates that obviously are outliers so to keep
       // the optimization clean and prevent numerical instabilities, we filter
       // here before PCM.
-      if (camMatch_T_camQuery_3d.translation().norm() >
-          lcd_params_.max_pose_recovery_translation_) {
-        success = false;
+      if (success) {
+        status = LCDStatus::LOOP_DETECTED;
+        break;
+      } else {
+        VLOG(1) << "pnp Pose recovery failed, fall back to 5ptRot";
+        status = LCDStatus::FAILED_POSE_RECOVERY;
+        // [[fallthrough]];
+        break;
       }
-    } break;
+    }
 
     case PoseRecoveryType::k5ptRotOnly: {
       // Passthrough the 2d2d pose to 3d3d, and the translation part will be
       // zeroed out in the noise model.
       camMatch_T_camQuery_3d = camMatch_T_camQuery_2d;
-      success = true;
+      status = LCDStatus::LOOP_DETECTED_ROT;
     } break;
 
     default: {
@@ -773,7 +801,7 @@ bool LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::
   transformCameraPoseToBodyPose(camMatch_T_camQuery_3d,
                                 bodyMatch_T_bodyQuery_3d);
 
-  return success;
+  return status;
 }
 
 template <typename Database, typename FeatureDetector, typename FeatureMatcher>

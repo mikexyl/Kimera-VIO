@@ -49,7 +49,7 @@ void BackendParams::setIsam2Params(const BackendParams& vio_params,
   isam_param->findUnusedFactorSlots = true;
   // isam_param->enablePartialRelinearizationCheck = true;
   isam_param->evaluateNonlinearError = false;  // only for debugging
-  isam_param->enableDetailedResults = false;     // only for debugging.
+  isam_param->enableDetailedResults = false;   // only for debugging.
   isam_param->factorization = gtsam::ISAM2Params::CHOLESKY;  // QR
 }
 
@@ -128,9 +128,12 @@ bool BackendParams::parseYAMLVioBackendParams(const YamlParser& yaml_parser) {
   // OPTIMIZATION PARAMS
   yaml_parser.getYamlParam("relinearizeThreshold", &relinearizeThreshold_);
   yaml_parser.getYamlParam("relinearizeSkip", &relinearizeSkip_);
-  yaml_parser.getYamlParam("zero_velocity_precision", &zero_velocity_precision_);
-  yaml_parser.getYamlParam("no_motion_position_precision", &no_motion_position_precision_);
-  yaml_parser.getYamlParam("no_motion_rotation_precision", &no_motion_rotation_precision_);
+  yaml_parser.getYamlParam("zero_velocity_precision",
+                           &zero_velocity_precision_);
+  yaml_parser.getYamlParam("no_motion_position_precision",
+                           &no_motion_position_precision_);
+  yaml_parser.getYamlParam("no_motion_rotation_precision",
+                           &no_motion_rotation_precision_);
   yaml_parser.getYamlParam("constant_vel_precision", &constant_vel_precision_);
   yaml_parser.getYamlParam("numOptimize", &numOptimize_);
   yaml_parser.getYamlParam("nr_states", &nr_states_);
@@ -169,6 +172,9 @@ bool BackendParams::parseYAMLVioBackendParams(const YamlParser& yaml_parser) {
   yaml_parser.getYamlParam("mono_translation_scale_factor",
                            &mono_translation_scale_factor_);
 
+  yaml_parser.getYamlParam("min_num_obs_per_landmark_to_keep",
+                           &min_num_obs_per_landmark_to_keep_);
+
   return true;
 }
 
@@ -204,8 +210,10 @@ bool BackendParams::equalsVioBackendParams(const BackendParams& vp2,
       (fabs(relinearizeThreshold_ - vp2.relinearizeThreshold_) <= tol) &&
       (relinearizeSkip_ == vp2.relinearizeSkip_) &&
       (fabs(zero_velocity_precision_ - vp2.zero_velocity_precision_) <= tol) &&
-      (fabs(no_motion_position_precision_ - vp2.no_motion_position_precision_) <= tol) &&
-      (fabs(no_motion_rotation_precision_ - vp2.no_motion_rotation_precision_) <= tol) &&
+      (fabs(no_motion_position_precision_ -
+            vp2.no_motion_position_precision_) <= tol) &&
+      (fabs(no_motion_rotation_precision_ -
+            vp2.no_motion_rotation_precision_) <= tol) &&
       (fabs(constant_vel_precision_ - vp2.constant_vel_precision_) <= tol) &&
       (numOptimize_ == vp2.numOptimize_) && (nr_states_ == vp2.nr_states_) &&
       (wildfire_threshold_ == vp2.wildfire_threshold_) &&

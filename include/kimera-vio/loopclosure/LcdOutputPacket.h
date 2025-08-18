@@ -80,6 +80,8 @@ struct LcdOutput : PipelinePayload {
   std::map<int, double> bow_vec_;
   cv::Mat descriptors_mat_;
   FrameIDTimestampMap timestamp_map_;
+
+  Landmarks landmarks_;
 };
 
 }  // namespace VIO
