@@ -4,7 +4,7 @@ klt_win_size: 24
 klt_max_iter: 30
 klt_max_level: 4
 klt_eps: 0.1
-maxFeatureAge: 25
+maxFeatureAge: 1000
 
 # Detector Params
 # 0: FAST
@@ -13,7 +13,7 @@ maxFeatureAge: 25
 # 3: GFTT, aka Good Features To Track
 # 4: XFEAT
 feature_detector_type: 4
-maxFeaturesPerFrame: 2000
+maxFeaturesPerFrame: 1000
 
 # Good Features To Track specific parameters
 quality_level: 0.001
@@ -64,10 +64,10 @@ ransac_probability: 0.995
 ransac_randomize: 0
 min_intra_keyframe_time: 0.2
 max_intra_keyframe_time: 10.0
-max_disparity_since_lkf: 200
-minNumberFeatures: 0
+max_disparity_since_lkf: 500
+minNumberFeatures: 300
 useStereoTracking: 0
-disparityThreshold: 0.5
+disparityThreshold: 2.5
 # Type of optical flow predictor to aid feature tracking:
 # 0: Static - assumes no optical flow between images (aka static camera).
 # 1: Rotational - use IMU gyro to estimate optical flow.
@@ -98,7 +98,7 @@ xfeat_use_gpu: 1
 matcher_type: 0 # 0: Brute Force, 1: FLANN, 2: LighterGlue
 
 feature_tracker_type: 3 # 0: OpticalFlow, 1: LighterGlue 2: Flann 3: GpuBFMatcher
-num_features: 2000
+num_features: 1000
 lg_model_path: /workspaces/src/xfeat-cpp/onnx_model/lg_640x480_1000.onnx
 gpu_bf_min_sim: 0.7 # Minimum similarity for GpuBFMatcher
 search_radius: 100

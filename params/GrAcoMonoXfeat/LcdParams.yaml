@@ -1,7 +1,7 @@
 %YAML:1.0
 # LoopClosureDetector parameters:
 use_nss: 1
-alpha: 0.2
+alpha: 0.9
 min_temporal_matches: 1
 recent_frames_window: 50
 max_db_results: 50
@@ -82,4 +82,4 @@ netvlad_model_path: /workspaces/src/xfeat-cpp/onnx_model/netvlad.onnx
 local_window_size: 50
 
 min_pnp_num_landmarks: 30
-min_lmk_obs_ratio: 0.25
+min_lmk_obs_ratio: 0.25 # map point cull, set to 0 to disable

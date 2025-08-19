@@ -96,7 +96,10 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::spinOnce(
     new_lmk_ids.push_back(lmk_id);
   }
   int culled = landmark_manager_->checkAndCullingLandmarks(
-      new_lmk_ids, cache_, lcd_params_.min_lmk_obs_ratio_);
+      new_lmk_ids,
+      cache_,
+      lcd_params_.min_lmk_obs_ratio_,
+      lcd_params_.min_lmk_parallex_);
   VLOG(1) << "Culled landmarks: " << culled;
 
   // Update the PGO with the Backend VIO estimate.

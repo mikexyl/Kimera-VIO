@@ -67,7 +67,8 @@ class LcdLandmarkManager : public std::unordered_map<LandmarkId, Landmark> {
 
   // Checks if a landmark is in the camera's field of view.
   bool isLandmarkInFov(const Point3& lmk_in_cam,
-                       const CameraParams& cam_params) const {
+                       const CameraParams& cam_params,
+                       cv::Point2f* uv) const {
     // Example implementation: checks if the landmark is in front of the camera
     // and within image bounds. You may need to adjust this logic based on your
     // CameraParams and projection model.
@@ -82,16 +83,21 @@ class LcdLandmarkManager : public std::unordered_map<LandmarkId, Landmark> {
     double u = fx * lmk_in_cam.x() / lmk_in_cam.z() + cx;
     double v = fy * lmk_in_cam.y() / lmk_in_cam.z() + cy;
 
+    if (uv) {
+      uv->x = static_cast<float>(u);
+      uv->y = static_cast<float>(v);
+    }
+
     return (u >= 0 && u < cam_params.image_size_.width) && v >= 0 &&
            v < cam_params.image_size_.height;
   }
 
-  bool shouldObserve(Landmark lmk, const LCDFrame& lcd_frame) {
+  bool shouldObserve(Landmark lmk, const LCDFrame& lcd_frame, cv::Point2f* uv) {
     Pose3 B_Pose_Cam = lcd_frame.cam_params_.body_Pose_cam_;
     Point3 lmk_in_cam = (lcd_frame.W_Pose_Blkf_ * B_Pose_Cam).inverse() * lmk;
 
     // check if lmk is in fov
-    if (isLandmarkInFov(lmk_in_cam, lcd_frame.cam_params_)) {
+    if (isLandmarkInFov(lmk_in_cam, lcd_frame.cam_params_, uv)) {
       return true;
     }
     return false;
@@ -99,7 +105,8 @@ class LcdLandmarkManager : public std::unordered_map<LandmarkId, Landmark> {
 
   int checkAndCullingLandmarks(const std::vector<LandmarkId>& lmk_ids,
                                const FrameCache& frame_cache,
-                               double min_obs_ratio) {
+                               double min_obs_ratio,
+                               float min_parallex) {
     int culled = 0;
     for (const auto& lmk_id : lmk_ids) {
       // already checked, and it's valid
@@ -132,33 +139,66 @@ class LcdLandmarkManager : public std::unordered_map<LandmarkId, Landmark> {
 
       int should_observe = 0;
 
-      for (FrameId q_frame = first_frame; q_frame <= last_frame; ++q_frame) {
-        // if already observed, count it and skip
-        if (obs_frames.find(q_frame) != obs_frames.end()) {
-          should_observe++;
-          continue;
-        }
+      std::vector<cv::Point2f> uvs;
 
+      for (FrameId q_frame = first_frame; q_frame <= last_frame; ++q_frame) {
         auto q_frame_ptr = frame_cache.getFrame(q_frame);
 
         // if not already observed, project to see if it should observe.
-        should_observe += shouldObserve(lmk, *q_frame_ptr);
+        cv::Point2f uv;
+        if (shouldObserve(lmk, *q_frame_ptr, &uv)) {
+          should_observe++;
+          uvs.emplace_back(uv);
+        }
       }
       VLOG(1) << "lmk: " << lmk_id
               << ", covis frame size: " << last_frame - first_frame
               << ", should observe: " << should_observe
               << ", observed: " << obs_frames.size();
 
-      double obs_ratio =
-          obs_frames.size() / static_cast<double>(should_observe);
-      if (obs_ratio < min_obs_ratio) {
+      if (should_observe != 0) {
+        double obs_ratio =
+            obs_frames.size() / static_cast<double>(should_observe);
+        if (obs_ratio < min_obs_ratio) {
+          // Cull the landmark
+          this->erase(lmk_id);
+          landmark_obs_frame_ids_.erase(lmk_id);
+          culled++;
+          continue;
+        }
+      } else {
         // Cull the landmark
         this->erase(lmk_id);
         landmark_obs_frame_ids_.erase(lmk_id);
         culled++;
-      } else {
-        landmarks_valid_[lmk_id] = true;
+        continue;
       }
+
+      CHECK((!uvs.empty()) or (uvs.empty() and should_observe == 0))
+          << "LoopClosureDetector: No uvs found for landmark " << lmk_id
+          << ", should_observe: " << should_observe;
+
+      // compute max parallex from uv
+      float max_u_diff = 0.0f, max_v_diff = 0.0f;
+      std::vector<float> us, vs;
+      for (const auto& uv : uvs) {
+        us.emplace_back(uv.x);
+        vs.emplace_back(uv.y);
+      }
+      max_u_diff = *std::max_element(us.begin(), us.end()) -
+                   *std::min_element(us.begin(), us.end());
+      max_v_diff = *std::max_element(vs.begin(), vs.end()) -
+                   *std::min_element(vs.begin(), vs.end());
+      if (max_u_diff < min_parallex and max_v_diff < min_parallex) {
+        // Cull the landmark
+        this->erase(lmk_id);
+        landmark_obs_frame_ids_.erase(lmk_id);
+        culled++;
+        continue;
+      }
+
+      // If we reach here, the landmark is valid
+      landmarks_valid_[lmk_id] = true;
     }
     return culled;
   }

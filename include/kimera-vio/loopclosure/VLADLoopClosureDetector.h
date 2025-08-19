@@ -269,8 +269,9 @@ class VLADLoopClosureDetector
     feature_matcher_->match(
         cur_ret, image_size0, ref_ret, image_size0, matches);
 
-    if (matches.size() < 40) {
-      LOG(WARNING) << "VLADLoopClosureDetector: LG: Not enough matches found: "
+    if (matches.size() <
+        static_cast<size_t>(lcd_params_.lcd_min_matched_features_)) {
+      LOG(WARNING) << "VLADLCD: LG: Not enough matches found: "
                    << matches.size() << ".";
       return;
     }

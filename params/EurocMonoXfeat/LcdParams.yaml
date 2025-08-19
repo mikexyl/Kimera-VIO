@@ -74,11 +74,14 @@ optimize_2d3d_pose_from_inliers: 0
 ransac_2d2d_algorithm: 0 # Stewenius
 ransac_2d3d_algorithm: 3 # EPNP
 
-lcd_lg_num_features: 2000
-lcd_lg_model_path: /workspaces/src/xfeat-cpp/onnx_model/lg_640x480_2000.onnx
+lcd_lg_num_features: 1000
+lcd_lg_model_path: /workspaces/src/xfeat-cpp/onnx_model/lg_640x480_1000.onnx
 lcd_faiss_index_path: /workspaces/src/xfeat-cpp/onnx_model/faiss_ivfflat.index.bin
 xfeat_nv_head_model_path: /workspaces/src/xfeat-cpp/onnx_model/xfeat_nv.onnx
 netvlad_model_path: /workspaces/src/xfeat-cpp/onnx_model/netvlad.onnx
 local_window_size: 60
-min_pnp_num_landmarks: 30
-min_lmk_obs_ratio: 0.25
+lcd_min_matched_features: 30
+
+min_pnp_num_landmarks: 20
+min_lmk_obs_ratio: 0.10
+min_lmk_parallex: 20
