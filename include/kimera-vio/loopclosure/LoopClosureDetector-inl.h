@@ -276,6 +276,7 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::spinOnce(
                                       curr_frame->descriptors_mat_);
   output_payload->landmarks_ = landmark_manager_->getLandmarks();
   output_payload->timestamp_map_ = timestamp_map_;
+  output_payload->covis_graph_ = landmark_manager_->getCovisGraph();
 
   cleanFrame(lcd_frame_id);
 

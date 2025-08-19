@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <memory>
 #include <opencv2/core.hpp>
+#include <set>
 #include <unordered_map>
 #include <utility>  // for forward
 #include <vector>
@@ -50,6 +51,9 @@ using DMatchVec = std::vector<cv::DMatch>;
 // Definitions relevant to frame types
 using FrameId = std::uint64_t;  // Frame id is used as the index of gtsam symbol
                                 // (not as a gtsam key).
+using FrameIdSet =
+    std::set<FrameId,
+             std::less<FrameId>>;  // stores FrameIds in ascending order
 using PlaneId = std::uint64_t;
 using LandmarkId = long int;  // -1 for invalid landmarks. // int would be too
                               // small if it is 16 bits!

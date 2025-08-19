@@ -92,4 +92,4 @@ useDogLeg: 0
 pose_guess_source: 0
 mono_translation_scale_factor: 0.1
 
-min_num_obs_per_landmark_to_keep: 30
+min_num_obs_per_landmark_to_keep: 4

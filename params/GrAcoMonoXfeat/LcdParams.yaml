@@ -80,3 +80,6 @@ xfeat_nv_head_model_path: /workspaces/src/xfeat-cpp/onnx_model/xfeat_nv.onnx
 netvlad_model_path: /workspaces/src/xfeat-cpp/onnx_model/netvlad.onnx
 
 local_window_size: 50
+
+min_pnp_num_landmarks: 30
+min_lmk_obs_ratio: 0.25

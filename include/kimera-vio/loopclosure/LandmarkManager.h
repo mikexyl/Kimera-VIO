@@ -171,9 +171,8 @@ class LcdLandmarkManager : public std::unordered_map<LandmarkId, Landmark> {
     return landmarks;
   }
 
-  using FrameIdSet =
-      std::set<FrameId,
-               std::less<FrameId>>;  // stores FrameIds in ascending order
+  auto const& getCovisGraph() const { return covis_graph_; }
+
   std::map<LandmarkId, bool> landmarks_valid_{};
   std::map<LandmarkId, FrameIdSet> landmark_obs_frame_ids_{};  // lcd frame ids
   std::map<FrameId, FrameIdSet> covis_graph_{};

@@ -82,6 +82,7 @@ struct LcdOutput : PipelinePayload {
   FrameIDTimestampMap timestamp_map_;
 
   Landmarks landmarks_;
+  std::map<FrameId, FrameIdSet> covis_graph_;
 };
 
 }  // namespace VIO
