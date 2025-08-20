@@ -190,7 +190,7 @@ void DBoWLoopClosureDetector::detectLoop(const FrameId& frame_id,
                                          const DBoW2::BowVector& bow_vec,
                                          LoopResult* result) {
   CHECK_NOTNULL(result);
-  result->query_id_ = frame_id;
+  result->query_id_ = {frame_id};
 
   int max_possible_match_id = frame_id - lcd_params_.recent_frames_window_;
   if (max_possible_match_id < 0) {
@@ -239,7 +239,7 @@ void DBoWLoopClosureDetector::detectLoop(const FrameId& frame_id,
   }
 
   // Set best candidate to highest scorer.
-  result->match_id_ = query_result[0].Id;
+  result->match_id_ = {query_result[0].Id};
 
   // Compute islands in the matches.
   // An island is a group of matches with close frame_ids.

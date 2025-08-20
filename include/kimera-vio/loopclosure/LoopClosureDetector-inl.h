@@ -192,48 +192,51 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::spinOnce(
   }
 
   // Build and add LC factor if result is a loop closure.
+
+  utils::StatsCollector stat_pgo_timing("PGO Update/Optimization Timing [ms]");
+  auto tic = utils::Timer::tic();
+  std::vector<Timestamp> timestamp_query, timestamp_match;
   if (loop_result.isLoop()) {
-    VLOG(1) << "LoopClosureDetector: LOOP CLOSURE detected from keyframe "
-            << loop_result.match_id_ << " to keyframe "
-            << loop_result.query_id_;
+    CHECK_EQ(loop_result.relative_pose_.size(), loop_result.query_id_.size());
+    CHECK_EQ(loop_result.relative_pose_.size(), loop_result.match_id_.size());
+    for (size_t loop_i = 0; loop_i < loop_result.query_id_.size(); loop_i++) {
+      auto match_id = loop_result.match_id_[loop_i];
+      auto query_id = loop_result.query_id_[loop_i];
+      auto relative_pose = loop_result.relative_pose_[loop_i];
+      timestamp_query.emplace_back(timestamp_map_.at(
+          query_id));  // Get the timestamp of the query frame.
+      timestamp_match.emplace_back(timestamp_map_.at(match_id));
+      VLOG(1) << "LoopClosureDetector: LOOP CLOSURE detected from keyframe "
+              << match_id << " to keyframe " << query_id;
 
-    utils::StatsCollector stat_pgo_timing(
-        "PGO Update/Optimization Timing [ms]");
-    auto tic = utils::Timer::tic();
+      if (loop_result.status_ == LCDStatus::LOOP_DETECTED_ROT) {
+        // Rotation part of the information matrix of the noise model
+        // emphasized.
+        gtsam::Matrix mat_info = gtsam::Matrix::Identity(6, 6);
+        gtsam::Matrix mat_info_rotation_part =
+            lcd_params_.betweenRotationPrecision_ *
+            gtsam::Matrix::Identity(3, 3);
+        mat_info.block<3, 3>(0, 0) = (mat_info_rotation_part);
 
-    if (loop_result.status_ == LCDStatus::LOOP_DETECTED_ROT) {
-      // Rotation part of the information matrix of the noise model
-      // emphasized.
-      gtsam::Matrix mat_info = gtsam::Matrix::Identity(6, 6);
-      gtsam::Matrix mat_info_rotation_part =
-          lcd_params_.betweenRotationPrecision_ * gtsam::Matrix::Identity(3, 3);
-      mat_info.block<3, 3>(0, 0) = (mat_info_rotation_part);
+        // Zero out the translation part of the noise model to only use the
+        // 2d2d pose for the loop closure factor. mat_info.block<3, 3>(3, 3) =
+        // gtsam::Matrix::Identity(3, 3) * 0.0;
+        mat_info.block<3, 3>(3, 3) = gtsam::Matrix::Identity(3, 3) * 1e-12;
 
-      // Zero out the translation part of the noise model to only use the
-      // 2d2d pose for the loop closure factor. mat_info.block<3, 3>(3, 3) =
-      // gtsam::Matrix::Identity(3, 3) * 0.0;
-      mat_info.block<3, 3>(3, 3) = gtsam::Matrix::Identity(3, 3) * 1e-12;
+        // Instantiate a noise model from the rotation-only information
+        // matrix.
+        gtsam::SharedNoiseModel noise_model_5pt_rotation_only =
+            gtsam::noiseModel::Diagonal::Information(mat_info);
 
-      // Instantiate a noise model from the rotation-only information
-      // matrix.
-      gtsam::SharedNoiseModel noise_model_5pt_rotation_only =
-          gtsam::noiseModel::Diagonal::Information(mat_info);
-
-      // Refresh timer because all previous stuff irrelevant to PGO timing.
-      tic = utils::Timer::tic();
-      addLoopClosureFactorAndOptimize(
-          LoopClosureFactor(loop_result.match_id_,
-                            loop_result.query_id_,
-                            loop_result.relative_pose_,
-                            noise_model_5pt_rotation_only));
-    } else if (loop_result.status_ == LCDStatus::LOOP_DETECTED) {
-      addLoopClosureFactorAndOptimize(
-          LoopClosureFactor(loop_result.match_id_,
-                            loop_result.query_id_,
-                            loop_result.relative_pose_,
-                            shared_noise_model_));
+        // Refresh timer because all previous stuff irrelevant to PGO timing.
+        tic = utils::Timer::tic();
+        addLoopClosureFactorAndOptimize(LoopClosureFactor(
+            match_id, query_id, relative_pose, noise_model_5pt_rotation_only));
+      } else if (loop_result.status_ == LCDStatus::LOOP_DETECTED) {
+        addLoopClosureFactorAndOptimize(LoopClosureFactor(
+            match_id, query_id, relative_pose, shared_noise_model_));
+      }
     }
-
     auto update_duration = utils::Timer::toc(tic).count();
     stat_pgo_timing.AddSample(update_duration);
   } else {
@@ -255,14 +258,13 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::spinOnce(
 
   LcdOutput::UniquePtr output_payload = nullptr;
   if (loop_result.isLoop()) {
-    output_payload =
-        std::make_unique<LcdOutput>(loop_result.status_,
-                                    input.timestamp_,
-                                    timestamp_map_.at(loop_result.query_id_),
-                                    timestamp_map_.at(loop_result.match_id_),
-                                    loop_result.match_id_,
-                                    loop_result.query_id_,
-                                    loop_result.relative_pose_);
+    output_payload = std::make_unique<LcdOutput>(loop_result.status_,
+                                                 input.timestamp_,
+                                                 timestamp_query,
+                                                 timestamp_match,
+                                                 loop_result.match_id_,
+                                                 loop_result.query_id_,
+                                                 loop_result.relative_pose_);
   } else {
     output_payload =
         std::make_unique<LcdOutput>(loop_result.status_, input.timestamp_);
@@ -283,25 +285,26 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::spinOnce(
 
   cleanFrame(lcd_frame_id);
 
-  if (logger_) {
-    debug_info_.timestamp_ = output_payload->timestamp_;
-    debug_info_.loop_result_ = loop_result;
-    debug_info_.pgo_size_ = pgo_->size();
-    debug_info_.pgo_lc_count_ = pgo_->getNumLC();
-    debug_info_.pgo_lc_inliers_ = pgo_->getNumLCInliers();
+  // if (logger_) {
+  //   debug_info_.timestamp_ = output_payload->timestamp_;
+  //   debug_info_.loop_result_ = loop_result;
+  //   debug_info_.pgo_size_ = pgo_->size();
+  //   debug_info_.pgo_lc_count_ = pgo_->getNumLC();
+  //   debug_info_.pgo_lc_inliers_ = pgo_->getNumLCInliers();
 
-    debug_info_.mono_input_size_ = tracker_->debug_info_.nrMonoPutatives_;
-    debug_info_.mono_inliers_ = tracker_->debug_info_.nrMonoInliers_;
-    debug_info_.mono_iter_ = tracker_->debug_info_.monoRansacIters_;
+  //   debug_info_.mono_input_size_ = tracker_->debug_info_.nrMonoPutatives_;
+  //   debug_info_.mono_inliers_ = tracker_->debug_info_.nrMonoInliers_;
+  //   debug_info_.mono_iter_ = tracker_->debug_info_.monoRansacIters_;
 
-    debug_info_.stereo_input_size_ = tracker_->debug_info_.nrStereoPutatives_;
-    debug_info_.stereo_inliers_ = tracker_->debug_info_.nrStereoInliers_;
-    debug_info_.stereo_iter_ = tracker_->debug_info_.stereoRansacIters_;
+  //   debug_info_.stereo_input_size_ =
+  //   tracker_->debug_info_.nrStereoPutatives_; debug_info_.stereo_inliers_ =
+  //   tracker_->debug_info_.nrStereoInliers_; debug_info_.stereo_iter_ =
+  //   tracker_->debug_info_.stereoRansacIters_;
 
-    logger_->logTimestampMap(timestamp_map_);
-    logger_->logDebugInfo(debug_info_);
-    logger_->logLCDResult(*output_payload);
-  }
+  //   logger_->logTimestampMap(timestamp_map_);
+  //   logger_->logDebugInfo(debug_info_);
+  //   logger_->logLCDResult(*output_payload);
+  // }
 
   return output_payload;
 }
@@ -662,11 +665,13 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::recoverPoseBody(
     const gtsam::Pose3& camMatch_T_camQuery_2d,
     const KeypointMatches& matches_match_query,
     gtsam::Pose3* bodyMatch_T_bodyQuery_3d,
+    gtsam::Pose3* bodyQuery_T_bodyMatch_3d,
     std::vector<int>* inliers) {
   CHECK_NOTNULL(bodyMatch_T_bodyQuery_3d);
   CHECK_NOTNULL(inliers);
 
   gtsam::Pose3 camMatch_T_camQuery_3d;
+  gtsam::Pose3 camQuery_T_camMatch_3d;
   LCDStatus status;
 
   const StereoLCDFrame* ref_stereo_lcd_frame = nullptr;
@@ -733,9 +738,7 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::recoverPoseBody(
             << ".";
         auto ref_lmk_id = ref_frame.landmark_ids.at(it.first);
         auto lmk = landmark_manager_->getLandmark(ref_lmk_id);
-        if (!lmk) {
-          continue;
-        }
+        if (!lmk) continue;
         Landmark camMatch_lmk =
             (ref_frame.W_Pose_Blkf_ * B_Pose_Cam_).inverse() * (*lmk);
         camQuery_bearing_vectors.push_back(query_bearing);
@@ -750,6 +753,37 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::recoverPoseBody(
                                 inliers,
                                 &camMatch_T_camQuery_2d_copy);
         if (success and camMatch_T_camQuery_3d.translation().norm() >
+                            lcd_params_.max_pose_recovery_translation_) {
+          success = false;
+        }
+      }
+
+      if (success) {
+        BearingVectors camMatch_bearing_vectors;
+        Landmarks camQuery_points;
+        for (const KeypointMatch& it : matches_match_query) {
+          const BearingVector& match_bearing =
+              ref_frame.bearing_vectors_.at(it.first);
+          LandmarkId query_lmk_id = cur_frame.landmark_ids.at(it.second);
+          auto lmk = landmark_manager_->getLandmark(query_lmk_id);
+          if (!lmk) continue;
+          Landmark camQuery_lmk =
+              (cur_frame.W_Pose_Blkf_ * B_Pose_Cam_).inverse() * (*lmk);
+          camMatch_bearing_vectors.push_back(match_bearing);
+          camQuery_points.push_back(camQuery_lmk);
+        }
+
+        if (camMatch_points.size() > lcd_params_.min_pnp_num_landmarks_) {
+          Pose3 camQuery_T_camMatch_2d_copy = camMatch_T_camQuery_2d.inverse();
+          success = tracker_->pnp(camMatch_bearing_vectors,
+                                  camQuery_points,
+                                  &camQuery_T_camMatch_3d,
+                                  inliers,
+                                  &camQuery_T_camMatch_2d_copy);
+        } else {
+          success = false;
+        }
+        if (success and camQuery_T_camMatch_3d.translation().norm() >
                             lcd_params_.max_pose_recovery_translation_) {
           success = false;
         }
@@ -804,6 +838,9 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::recoverPoseBody(
 
   transformCameraPoseToBodyPose(camMatch_T_camQuery_3d,
                                 bodyMatch_T_bodyQuery_3d);
+
+  transformCameraPoseToBodyPose(camQuery_T_camMatch_3d,
+                                bodyQuery_T_bodyMatch_3d);
 
   return status;
 }

@@ -615,19 +615,21 @@ void LoopClosureDetectorLogger::logLoopClosure(const LcdOutput& lcd_output) {
     is_header_written = true;
   }
 
-  const gtsam::Point3& rel_trans = lcd_output.relative_pose_.translation();
-  const gtsam::Quaternion& rel_quat =
-      lcd_output.relative_pose_.rotation().toQuaternion();
+  // const gtsam::Point3& rel_trans = lcd_output.relative_pose_.translation();
+  // const gtsam::Quaternion& rel_quat =
+  // lcd_output.relative_pose_.rotation().toQuaternion();
 
   output_stream_lcd << lcd_output.timestamp_ << ","
-                    << lcd_output.timestamp_query_ << ","
-                    << lcd_output.timestamp_match_ << ","
+                    // << lcd_output.timestamp_query_ << ","
+                    // << lcd_output.timestamp_match_ << ","
                     << static_cast<int>(lcd_output.lcd_status_) << ","
-                    << lcd_output.id_match_ << "," << lcd_output.id_recent_
-                    << "," << rel_trans.x() << "," << rel_trans.y() << ","
-                    << rel_trans.z() << "," << rel_quat.w() << ","
-                    << rel_quat.x() << "," << rel_quat.y() << ","
-                    << rel_quat.z() << std::endl;
+                    // << lcd_output.id_match_ << ","
+                    // << lcd_output.id_recent_
+                    // << "," << rel_trans.x() << "," << rel_trans.y() << ","
+                    // << rel_trans.z() << "," << rel_quat.w() << ","
+                    // << rel_quat.x() << "," << rel_quat.y() << ","
+                    // << rel_quat.z()
+                    << std::endl;
 }
 
 void LoopClosureDetectorLogger::logGeometricVerification(
@@ -720,8 +722,8 @@ void LoopClosureDetectorLogger::logDebugInfo(const LcdDebugInfo& debug_info) {
 
   output_stream_status << debug_info.timestamp_ << ","
                        << LoopResult::asString(debug_info.loop_result_.status_)
-                       << "," << debug_info.loop_result_.query_id_ << ","
-                       << debug_info.loop_result_.match_id_ << ","
+                       //  << "," << debug_info.loop_result_.query_id_ << ","
+                       //  << debug_info.loop_result_.match_id_ << ","
                        << debug_info.mono_input_size_ << ","
                        << debug_info.mono_inliers_ << ","
                        << debug_info.mono_iter_ << ","

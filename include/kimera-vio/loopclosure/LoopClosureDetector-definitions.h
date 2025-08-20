@@ -232,9 +232,9 @@ struct LoopResult {
   }
 
   LCDStatus status_ = LCDStatus::NO_MATCHES;
-  FrameId query_id_;
-  FrameId match_id_;
-  gtsam::Pose3 relative_pose_;
+  std::vector<FrameId> query_id_;
+  std::vector<FrameId> match_id_;
+  std::vector<gtsam::Pose3> relative_pose_;
 };  // struct LoopResult
 
 struct LcdDebugInfo {

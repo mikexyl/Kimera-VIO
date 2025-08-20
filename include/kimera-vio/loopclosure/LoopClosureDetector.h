@@ -77,8 +77,8 @@ class LoopClosureDetector : public LoopClosureDetectorBase {
    */
   LoopResult registerFrames(FrameId query_id, FrameId match_id) override {
     LoopResult result;
-    result.query_id_ = query_id;
-    result.match_id_ = match_id;
+    result.query_id_ = {query_id};
+    result.match_id_ = {match_id};
     verifyAndRecoverPose(&result);
     return result;
   }
@@ -135,13 +135,18 @@ class LoopClosureDetector : public LoopClosureDetectorBase {
 
   void verifyAndRecoverPose(LoopResult* result) {
     CHECK_NOTNULL(result);
+    CHECK_EQ(result->match_id_.size(), 1u) << "not impleeented yet";
 
-    const auto match_frame = cache_.getFrame(result->match_id_);
-    const auto query_frame = cache_.getFrame(result->query_id_);
+    result->match_id_.emplace_back(result->query_id_[0]);
+    result->query_id_.emplace_back(result->match_id_[0]);
+    result->relative_pose_.resize(2);
+
+    const auto match_frame = cache_.getFrame(result->match_id_[0]);
+    const auto query_frame = cache_.getFrame(result->query_id_[0]);
     if (!match_frame || !query_frame) {
       VLOG(1) << "LoopClosureDetector: No match or query frame found for "
-              << "match_id: " << result->match_id_
-              << ", query_id: " << result->query_id_;
+              << "match_id: " << result->match_id_[0]
+              << ", query_id: " << result->query_id_[0];
       result->status_ = LCDStatus::NO_MATCHES;
       return;
     }
@@ -151,8 +156,8 @@ class LoopClosureDetector : public LoopClosureDetectorBase {
     computeDescriptorMatches(
         *match_frame, *query_frame, &matches_match_query, true);
     VLOG(1) << "LoopClosureDetector: Found " << matches_match_query.size()
-            << " kp matches between frames " << result->match_id_ << " and "
-            << result->query_id_;
+            << " kp matches between frames " << result->match_id_[0] << " and "
+            << result->query_id_[0];
 
     // Perform geometric verification check.
     gtsam::Pose3 camMatch_T_camQuery_2d;
@@ -173,7 +178,8 @@ class LoopClosureDetector : public LoopClosureDetectorBase {
                                   *query_frame,
                                   camMatch_T_camQuery_2d,
                                   matches_match_query,
-                                  &(result->relative_pose_),
+                                  &(result->relative_pose_[0]),
+                                  &(result->relative_pose_[1]),
                                   &inliers);
     result->status_ = status;
   }
@@ -401,6 +407,7 @@ class LoopClosureDetector : public LoopClosureDetectorBase {
                             const gtsam::Pose3& camMatch_T_camQuery_2d,
                             const KeypointMatches& matches_query_match,
                             gtsam::Pose3* bodyMatch_T_bodyQuery_3d,
+                            gtsam::Pose3* bodyQuery_T_bodyMatch_3d,
                             std::vector<int>* inliers);
 
   virtual LCDFrame::Ptr processMonoPnP(const Frame& frame,

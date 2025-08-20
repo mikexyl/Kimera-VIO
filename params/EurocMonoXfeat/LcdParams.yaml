@@ -2,14 +2,14 @@
 # LoopClosureDetector parameters:
 use_nss: 1
 alpha: 1
-min_temporal_matches: 1
+min_temporal_matches: 0
 recent_frames_window: 60
 max_db_results: 50
 min_nss_factor: 0.05
 min_matches_per_island: 1
 max_intraisland_gap: 3
 max_nrFrames_between_islands: 3
-max_nrFrames_between_queries: 2
+max_nrFrames_between_queries: 0
 
 refine_pose: 0
 
@@ -26,14 +26,14 @@ score_type_id: 0
 patch_sze: 31
 fast_threshold: 20
 
-betweenRotationPrecision: 0.1 # 1/(0.01*0.01)
-betweenTranslationPrecision: 0.01 # 1/(0.1*0.1)
+betweenRotationPrecision: 0.0001 # 1/(0.01*0.01)
+betweenTranslationPrecision: 0.0001 # 1/(0.1*0.1)
 
 odom_rot_threshold: 0.005
 odom_trans_threshold: 0.05
-pcm_rot_threshold: -1
-pcm_trans_threshold: -1
-gnc_alpha: 0.7
+pcm_rot_threshold: 0.01
+pcm_trans_threshold: 0.01
+gnc_alpha: 0.5
 
 max_lc_cached_before_optimize: 10
 
@@ -79,9 +79,9 @@ lcd_lg_model_path: /workspaces/src/xfeat-cpp/onnx_model/lg_640x480_1000.onnx
 lcd_faiss_index_path: /workspaces/src/xfeat-cpp/onnx_model/faiss_ivfflat.index.bin
 xfeat_nv_head_model_path: /workspaces/src/xfeat-cpp/onnx_model/xfeat_nv.onnx
 netvlad_model_path: /workspaces/src/xfeat-cpp/onnx_model/netvlad.onnx
-local_window_size: 60
+local_window_size: 110
 lcd_min_matched_features: 30
 
-min_pnp_num_landmarks: 20
-min_lmk_obs_ratio: 0.10
+min_pnp_num_landmarks: 10
+min_lmk_obs_ratio: 0.5
 min_lmk_parallex: 20

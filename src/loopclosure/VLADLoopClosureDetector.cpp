@@ -25,7 +25,7 @@ void VLADLoopClosureDetector::detectLoopOutsideLocalWindow(
     LoopResult* result) {
   CHECK_NOTNULL(result);
   CHECK_NOTNULL(db_);
-  result->query_id_ = frame_id;
+  result->query_id_ = {frame_id};
 
   cv::Mat global_desc = db_->get(frame_id);
   CHECK(!global_desc.empty())
@@ -143,12 +143,7 @@ void VLADLoopClosureDetector::detectLoopOutsideLocalWindow(
   }
 
   // Set best candidate to the lowest label index
-  if (query_result.size() > 5)
-    result->match_id_ =
-        *std::min_element(query_result.begin(), query_result.begin() + 5);
-  else
-    result->match_id_ =
-        *std::min_element(query_result.begin(), query_result.end());
+  result->match_id_ = {static_cast<unsigned long>(query_result[0])};
 
   // Compute islands in the matches.
   // An island is a group of matches with close frame_ids.

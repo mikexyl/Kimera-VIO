@@ -41,11 +41,11 @@ struct LcdOutput : PipelinePayload {
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
   LcdOutput(LCDStatus lcd_status,
             const Timestamp& timestamp_kf,
-            const Timestamp& timestamp_query,
-            const Timestamp& timestamp_match,
-            const FrameId& id_match,
-            const FrameId& id_recent,
-            const gtsam::Pose3& relative_pose);
+            const std::vector<Timestamp>& timestamp_query,
+            const std::vector<Timestamp>& timestamp_match,
+            const std::vector<FrameId>& id_match,
+            const std::vector<FrameId>& id_recent,
+            const std::vector<gtsam::Pose3>& relative_pose);
 
   explicit LcdOutput(const Timestamp& timestamp_kf);
 
@@ -63,11 +63,11 @@ struct LcdOutput : PipelinePayload {
 
   // TODO(marcus): inlude stats/score of match
   LCDStatus lcd_status_;
-  Timestamp timestamp_query_;
-  Timestamp timestamp_match_;
-  FrameId id_match_;
-  FrameId id_recent_;
-  gtsam::Pose3 relative_pose_;
+  std::vector<Timestamp> timestamp_query_;
+  std::vector<Timestamp> timestamp_match_;
+  std::vector<FrameId> id_match_;
+  std::vector<FrameId> id_recent_;
+  std::vector<gtsam::Pose3> relative_pose_;
   // map information
   gtsam::Pose3 W_Pose_Map_;
   gtsam::Pose3 Map_Pose_Odom_;  // Map frame is the optimal (RPGO) global frame

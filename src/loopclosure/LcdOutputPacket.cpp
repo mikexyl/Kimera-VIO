@@ -24,11 +24,11 @@ namespace VIO {
 
 LcdOutput::LcdOutput(LCDStatus lcd_status,
                      const Timestamp& timestamp_kf,
-                     const Timestamp& timestamp_query,
-                     const Timestamp& timestamp_match,
-                     const FrameId& id_match,
-                     const FrameId& id_recent,
-                     const gtsam::Pose3& relative_pose)
+                     const std::vector<Timestamp>& timestamp_query,
+                     const std::vector<Timestamp>& timestamp_match,
+                     const std::vector<FrameId>& id_match,
+                     const std::vector<FrameId>& id_recent,
+                     const std::vector<gtsam::Pose3>& relative_pose)
     : PipelinePayload(timestamp_kf),
       lcd_status_(lcd_status),
       timestamp_query_(timestamp_query),
@@ -40,18 +40,18 @@ LcdOutput::LcdOutput(LCDStatus lcd_status,
 LcdOutput::LcdOutput(const Timestamp& timestamp_kf)
     : PipelinePayload(timestamp_kf),
       lcd_status_(LCDStatus::NO_MATCHES),
-      timestamp_query_(0),
-      timestamp_match_(0),
-      id_match_(0),
-      id_recent_(0) {}
+      timestamp_query_({}),
+      timestamp_match_({}),
+      id_match_({}),
+      id_recent_({}) {}
 
 LcdOutput::LcdOutput(LCDStatus lcd_status, const Timestamp& timestamp_kf)
     : PipelinePayload(timestamp_kf),
       lcd_status_(lcd_status),
-      timestamp_query_(0),
-      timestamp_match_(0),
-      id_match_(0),
-      id_recent_(0) {}
+      timestamp_query_({}),
+      timestamp_match_({}),
+      id_match_({}),
+      id_recent_({}) {}
 
 void LcdOutput::setMapInformation(const gtsam::Pose3& W_Pose_Map,
                                   const gtsam::Pose3& Map_Pose_Odom,
