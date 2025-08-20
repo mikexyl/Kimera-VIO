@@ -99,7 +99,9 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::spinOnce(
       new_lmk_ids,
       cache_,
       lcd_params_.min_lmk_obs_ratio_,
-      lcd_params_.min_lmk_parallex_);
+      lcd_params_.min_lmk_parallex_,
+      lcd_params_.max_lmk_reproj_error,
+      lcd_params_.min_lmk_obs_cnt_);
   VLOG(1) << "Culled landmarks: " << culled;
 
   // Update the PGO with the Backend VIO estimate.
@@ -799,8 +801,8 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::recoverPoseBody(
         status = LCDStatus::LOOP_DETECTED;
         break;
       } else {
-        VLOG(1) << "pnp Pose recovery failed, fall back to 5ptRot";
         status = LCDStatus::FAILED_POSE_RECOVERY;
+        // VLOG(1) << "pnp Pose recovery failed, fall back to 5ptRot";
         // [[fallthrough]];
         break;
       }

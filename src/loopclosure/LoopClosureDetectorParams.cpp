@@ -173,10 +173,11 @@ bool LoopClosureDetectorParams::parseYAML(const std::string& filepath) {
   yaml_parser.getYamlParam("netvlad_model_path", &netvlad_model_path_);
   yaml_parser.getYamlParam("local_window_size", &local_window_size_);
   yaml_parser.getYamlParam("min_lmk_obs_ratio", &min_lmk_obs_ratio_);
+  yaml_parser.getYamlParam("min_lmk_obs_count", &min_lmk_obs_cnt_);
   yaml_parser.getYamlParam("min_lmk_parallex", &min_lmk_parallex_);
   yaml_parser.getYamlParam("lcd_min_matched_features",
                            &lcd_min_matched_features_);
-
+  yaml_parser.getYamlParam("max_lmk_reproj_error", &max_lmk_reproj_error);
   return true;
 }
 

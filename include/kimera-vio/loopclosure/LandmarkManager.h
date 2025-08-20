@@ -5,6 +5,7 @@
 
 #include "kimera-vio/backend/VioBackend-definitions.h"
 #include "kimera-vio/frontend/Frame.h"
+#include "kimera-vio/frontend/UndistorterRectifier.h"
 
 namespace VIO {
 class LcdLandmarkManager : public std::unordered_map<LandmarkId, Landmark> {
@@ -106,8 +107,10 @@ class LcdLandmarkManager : public std::unordered_map<LandmarkId, Landmark> {
   int checkAndCullingLandmarks(const std::vector<LandmarkId>& lmk_ids,
                                const FrameCache& frame_cache,
                                double min_obs_ratio,
-                               float min_parallex) {
-    int culled = 0;
+                               float min_parallex,
+                               float max_reproj_error,
+                               int min_obs_cnt) {
+    int culled_obs_ratio = 0, culled_parallex = 0, culled_reproj_error = 0;
     for (const auto& lmk_id : lmk_ids) {
       // already checked, and it's valid
       if (landmarks_valid_.find(lmk_id) != landmarks_valid_.end() and
@@ -123,7 +126,7 @@ class LcdLandmarkManager : public std::unordered_map<LandmarkId, Landmark> {
         continue;  // skip if no observation frames
       }
       Landmark lmk = this->at(lmk_id);
-      FrameIdSet& obs_frames = landmark_obs_frame_ids_[lmk_id];
+      FrameIdSet obs_frames = landmark_obs_frame_ids_[lmk_id];
       FrameIdSet covis_frames;
       // collect all covis frames
       for (const auto& obs_frame : obs_frames) {
@@ -140,6 +143,7 @@ class LcdLandmarkManager : public std::unordered_map<LandmarkId, Landmark> {
       int should_observe = 0;
 
       std::vector<cv::Point2f> uvs;
+      double reproj_error = 0;
 
       for (FrameId q_frame = first_frame; q_frame <= last_frame; ++q_frame) {
         auto q_frame_ptr = frame_cache.getFrame(q_frame);
@@ -149,28 +153,57 @@ class LcdLandmarkManager : public std::unordered_map<LandmarkId, Landmark> {
         if (shouldObserve(lmk, *q_frame_ptr, &uv)) {
           should_observe++;
           uvs.emplace_back(uv);
+
+          auto obs_it = obs_frames.find(q_frame);
+          if (obs_it != obs_frames.end()) {
+            auto obs_frame_ptr = frame_cache.getFrame(*obs_it);
+            std::vector<cv::Point2f> kp;
+            bool found_kp = false;
+            for (size_t lmk_i = 0; lmk_i < obs_frame_ptr->landmark_ids.size();
+                 lmk_i++) {
+              if (obs_frame_ptr->landmark_ids[lmk_i] == lmk_id) {
+                UndistorterRectifier::UndistortRectifyKeypoints(
+                    {obs_frame_ptr->keypoints_[lmk_i].pt},
+                    &kp,
+                    obs_frame_ptr->cam_params_);
+                kp[0].x =
+                    kp[0].x * obs_frame_ptr->cam_params_.K_.at<double>(0, 0) +
+                    obs_frame_ptr->cam_params_.K_.at<double>(0, 2);
+                kp[0].y =
+                    kp[0].y * obs_frame_ptr->cam_params_.K_.at<double>(1, 1) +
+                    obs_frame_ptr->cam_params_.K_.at<double>(1, 2);
+                found_kp = true;
+                break;
+              }
+            }
+            CHECK(found_kp);
+            reproj_error += (uv - kp[0]).dot(uv - kp[0]);  // squared error
+          }
         }
       }
-      VLOG(1) << "lmk: " << lmk_id
-              << ", covis frame size: " << last_frame - first_frame
-              << ", should observe: " << should_observe
-              << ", observed: " << obs_frames.size();
+      reproj_error /= obs_frames.size();
 
       if (should_observe != 0) {
         double obs_ratio =
             obs_frames.size() / static_cast<double>(should_observe);
-        if (obs_ratio < min_obs_ratio) {
+        if (obs_ratio < min_obs_ratio or
+            obs_frames.size() < static_cast<size_t>(min_obs_cnt)) {
           // Cull the landmark
           this->erase(lmk_id);
           landmark_obs_frame_ids_.erase(lmk_id);
-          culled++;
+          culled_obs_ratio++;
+          VLOG(1) << "Culled landmark " << lmk_id
+                  << " obs cnt: " << obs_frames.size()
+                  << ", covis: " << should_observe
+                  << ", obs ratio: " << obs_ratio
+                  << " threshold: " << min_obs_ratio << " , " << min_obs_cnt;
           continue;
         }
       } else {
         // Cull the landmark
         this->erase(lmk_id);
         landmark_obs_frame_ids_.erase(lmk_id);
-        culled++;
+        culled_obs_ratio++;
         continue;
       }
 
@@ -189,18 +222,26 @@ class LcdLandmarkManager : public std::unordered_map<LandmarkId, Landmark> {
                    *std::min_element(us.begin(), us.end());
       max_v_diff = *std::max_element(vs.begin(), vs.end()) -
                    *std::min_element(vs.begin(), vs.end());
-      if (max_u_diff < min_parallex and max_v_diff < min_parallex) {
+      if ((max_u_diff < min_parallex and max_v_diff < min_parallex) or
+          reproj_error >= max_reproj_error) {
         // Cull the landmark
         this->erase(lmk_id);
         landmark_obs_frame_ids_.erase(lmk_id);
-        culled++;
+        if (reproj_error >= max_reproj_error) {
+          culled_reproj_error++;
+        } else {
+          culled_parallex++;
+        }
         continue;
       }
 
       // If we reach here, the landmark is valid
       landmarks_valid_[lmk_id] = true;
     }
-    return culled;
+    VLOG(1) << "culled_obs_ratio: " << culled_obs_ratio
+            << ", culled_parallex: " << culled_parallex
+            << ", culled_reproj_error: " << culled_reproj_error;
+    return culled_obs_ratio + culled_parallex + culled_reproj_error;
   }
 
   Landmarks getLandmarks() const {

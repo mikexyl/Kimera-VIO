@@ -152,6 +152,7 @@ class BackendParams : public PipelineParams {
   double mono_translation_scale_factor_ = 0.1;
 
   int min_num_obs_per_landmark_to_keep_ = 20;
+  int max_lmk_reproj_error_to_keep_ = 6;
 };
 
 }  // namespace VIO

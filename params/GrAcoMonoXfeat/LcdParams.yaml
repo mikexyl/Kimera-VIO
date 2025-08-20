@@ -26,8 +26,8 @@ score_type_id: 0
 patch_sze: 31
 fast_threshold: 20
 
-betweenRotationPrecision: 1 # 1/(0.01*0.01)
-betweenTranslationPrecision: 1 # 1/(0.1*0.1)
+betweenRotationPrecision: 0.1 # 1/(0.01*0.01)
+betweenTranslationPrecision: 0.1 # 1/(0.1*0.1)
 
 odom_rot_threshold: 1
 odom_trans_threshold: 20
@@ -79,9 +79,11 @@ lcd_faiss_index_path: /workspaces/src/xfeat-cpp/onnx_model/faiss_ivfflat.index.b
 xfeat_nv_head_model_path: /workspaces/src/xfeat-cpp/onnx_model/xfeat_nv.onnx
 netvlad_model_path: /workspaces/src/xfeat-cpp/onnx_model/netvlad.onnx
 
-local_window_size: 50
+local_window_size: 110
 
 min_pnp_num_landmarks: 20
-min_lmk_obs_ratio: 0.20 # map point cull, set to 0 to disable
-min_lmk_parallex: 40
+min_lmk_obs_ratio: 0.1 # map point cull, set to 0 to disable
+min_lmk_obs_count: 2 # map point cull, set to 0 to disable
+min_lmk_parallex: 20
 lcd_min_matched_features: 30
+max_lmk_reproj_error: 400

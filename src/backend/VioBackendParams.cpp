@@ -175,6 +175,9 @@ bool BackendParams::parseYAMLVioBackendParams(const YamlParser& yaml_parser) {
   yaml_parser.getYamlParam("min_num_obs_per_landmark_to_keep",
                            &min_num_obs_per_landmark_to_keep_);
 
+  yaml_parser.getYamlParam("max_lmk_reproj_error_to_keep",
+                           &max_lmk_reproj_error_to_keep_);
+
   return true;
 }
 
