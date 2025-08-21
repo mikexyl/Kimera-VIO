@@ -98,6 +98,6 @@ matcher_type: 0 # 0: Brute Force, 1: FLANN, 2: LighterGlue
 
 feature_tracker_type: 3 # 0: OpticalFlow, 1: LighterGlue 2: Flann 3: GpuBFMatcher
 num_features: 2000
-lg_model_path: /workspaces/src/xfeat-cpp/onnx_model/lg_640x480_1000.onnx
-gpu_bf_min_sim: 0.5 # Minimum similarity for GpuBFMatcher
+lg_model_path: /workspaces/src/xfeat-cpp/onnx_model/lg_640x480_2000.onnx
+gpu_bf_min_sim: 0.3 # Minimum similarity for GpuBFMatcher
 search_radius: 30

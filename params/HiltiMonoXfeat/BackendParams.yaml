@@ -6,12 +6,12 @@ backend_modality: 0
 #INITIALIZATION PARAMETERS
 autoInitialize: 1
 roundOnAutoInitialize: 0
-initialPositionSigma: 1e-04
+initialPositionSigma: 1e-02
 initialRollPitchSigma: 0.174533 # 10.0/180.0*M_PI
-initialYawSigma: 0.001
-initialVelocitySigma: 0.001
-initialAccBiasSigma: 0.0001
-initialGyroBiasSigma: 0.001
+initialYawSigma: 0.01
+initialVelocitySigma: 0.01
+initialAccBiasSigma: 0.001
+initialGyroBiasSigma: 0.01
 
 # VISION PARAMETERS ###########################################################
 ## Smart Factors ##
@@ -91,3 +91,5 @@ useDogLeg: 0
 #   EXTERNAL_ODOM = 4
 pose_guess_source: 0
 mono_translation_scale_factor: 0.1
+min_num_obs_per_landmark_to_keep: 10
+max_lmk_reproj_error_to_keep: 6

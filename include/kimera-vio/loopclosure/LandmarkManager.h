@@ -143,8 +143,7 @@ class LcdLandmarkManager : public std::unordered_map<LandmarkId, Landmark> {
       int should_observe = 0;
 
       std::vector<cv::Point2f> uvs;
-      double reproj_error = 0;
-
+      bool bad_reproj = false;
       for (FrameId q_frame = first_frame; q_frame <= last_frame; ++q_frame) {
         auto q_frame_ptr = frame_cache.getFrame(q_frame);
 
@@ -177,11 +176,15 @@ class LcdLandmarkManager : public std::unordered_map<LandmarkId, Landmark> {
               }
             }
             CHECK(found_kp);
-            reproj_error += (uv - kp[0]).dot(uv - kp[0]);  // squared error
+            double reproj_error =
+                (uv - kp[0]).dot(uv - kp[0]);  // squared error
+            if (std::sqrt(reproj_error) >= max_reproj_error) {
+              bad_reproj = true;
+              break;
+            }
           }
         }
       }
-      reproj_error /= obs_frames.size();
 
       if (should_observe != 0) {
         double obs_ratio =
@@ -223,11 +226,11 @@ class LcdLandmarkManager : public std::unordered_map<LandmarkId, Landmark> {
       max_v_diff = *std::max_element(vs.begin(), vs.end()) -
                    *std::min_element(vs.begin(), vs.end());
       if ((max_u_diff < min_parallex and max_v_diff < min_parallex) or
-          reproj_error >= max_reproj_error) {
+          bad_reproj) {
         // Cull the landmark
         this->erase(lmk_id);
         landmark_obs_frame_ids_.erase(lmk_id);
-        if (reproj_error >= max_reproj_error) {
+        if (bad_reproj) {
           culled_reproj_error++;
         } else {
           culled_parallex++;
