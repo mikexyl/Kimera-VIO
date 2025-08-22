@@ -142,7 +142,9 @@ class DBoWLoopClosureDetector
    */
   void detectLoop(const FrameId& frame_id,
                   const DBoW2::BowVector& bow_vec,
-                  LoopResult* result) override;
+                  LoopResult* result,
+                  FrameId* query_frame = nullptr,
+                  FrameIdSet* global_candidates = nullptr) override;
 
  public:
   /* ------------------------------------------------------------------------ */
@@ -173,8 +175,8 @@ class DBoWLoopClosureDetector
   }
 
   LCDFrame::Ptr processMonoPnP(const Frame& frame,
-                                const PointsWithIdMap& W_points_with_ids,
-                                const gtsam::Pose3& W_Pose_Blkf) override {
+                               const PointsWithIdMap& W_points_with_ids,
+                               const gtsam::Pose3& W_Pose_Blkf) override {
     // We use existing features instead of new ORB ones like in the stereo
     // case because we have to use existing 3D points from the backend as
     // in Mono mode we cannot compute 3D points via stereo reconstruction.

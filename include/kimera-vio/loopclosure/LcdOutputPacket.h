@@ -83,6 +83,8 @@ struct LcdOutput : PipelinePayload {
 
   Landmarks landmarks_;
   std::map<FrameId, FrameIdSet> covis_graph_;
+  FrameId query_frame_;
+  FrameIdSet global_candidates_;
 };
 
 }  // namespace VIO

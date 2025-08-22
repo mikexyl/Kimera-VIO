@@ -180,8 +180,14 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::spinOnce(
 
   LoopResult loop_result;
   loop_result.status_ = LCDStatus::NO_MATCHES;
+  FrameId query_frame_id;
+  FrameIdSet global_candidates;
   if (!FLAGS_lcd_no_detection) {
-    detectLoop(lcd_frame_id, curr_bow_vec, &loop_result);
+    detectLoop(lcd_frame_id,
+               curr_bow_vec,
+               &loop_result,
+               &query_frame_id,
+               &global_candidates);
   }
 
   db_->add(curr_bow_vec);
@@ -284,6 +290,8 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::spinOnce(
   output_payload->landmarks_ = landmark_manager_->getLandmarks();
   output_payload->timestamp_map_ = timestamp_map_;
   output_payload->covis_graph_ = landmark_manager_->getCovisGraph();
+  output_payload->query_frame_ = query_frame_id;
+  output_payload->global_candidates_ = global_candidates;
 
   cleanFrame(lcd_frame_id);
 
@@ -760,36 +768,36 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::recoverPoseBody(
         }
       }
 
-      if (success) {
-        BearingVectors camMatch_bearing_vectors;
-        Landmarks camQuery_points;
-        for (const KeypointMatch& it : matches_match_query) {
-          const BearingVector& match_bearing =
-              ref_frame.bearing_vectors_.at(it.first);
-          LandmarkId query_lmk_id = cur_frame.landmark_ids.at(it.second);
-          auto lmk = landmark_manager_->getLandmark(query_lmk_id);
-          if (!lmk) continue;
-          Landmark camQuery_lmk =
-              (cur_frame.W_Pose_Blkf_ * B_Pose_Cam_).inverse() * (*lmk);
-          camMatch_bearing_vectors.push_back(match_bearing);
-          camQuery_points.push_back(camQuery_lmk);
-        }
+      // if (success) {
+      //   BearingVectors camMatch_bearing_vectors;
+      //   Landmarks camQuery_points;
+      //   for (const KeypointMatch& it : matches_match_query) {
+      //     const BearingVector& match_bearing =
+      //         ref_frame.bearing_vectors_.at(it.first);
+      //     LandmarkId query_lmk_id = cur_frame.landmark_ids.at(it.second);
+      //     auto lmk = landmark_manager_->getLandmark(query_lmk_id);
+      //     if (!lmk) continue;
+      //     Landmark camQuery_lmk =
+      //         (cur_frame.W_Pose_Blkf_ * B_Pose_Cam_).inverse() * (*lmk);
+      //     camMatch_bearing_vectors.push_back(match_bearing);
+      //     camQuery_points.push_back(camQuery_lmk);
+      //   }
 
-        if (camMatch_points.size() > lcd_params_.min_pnp_num_landmarks_) {
-          Pose3 camQuery_T_camMatch_2d_copy = camMatch_T_camQuery_2d.inverse();
-          success = tracker_->pnp(camMatch_bearing_vectors,
-                                  camQuery_points,
-                                  &camQuery_T_camMatch_3d,
-                                  inliers,
-                                  &camQuery_T_camMatch_2d_copy);
-        } else {
-          success = false;
-        }
-        if (success and camQuery_T_camMatch_3d.translation().norm() >
-                            lcd_params_.max_pose_recovery_translation_) {
-          success = false;
-        }
-      }
+      //   if (camMatch_points.size() > lcd_params_.min_pnp_num_landmarks_) {
+      //     Pose3 camQuery_T_camMatch_2d_copy = camMatch_T_camQuery_2d.inverse();
+      //     success = tracker_->pnp(camMatch_bearing_vectors,
+      //                             camQuery_points,
+      //                             &camQuery_T_camMatch_3d,
+      //                             inliers,
+      //                             &camQuery_T_camMatch_2d_copy);
+      //   } else {
+      //     success = false;
+      //   }
+      //   if (success and camQuery_T_camMatch_3d.translation().norm() >
+      //                       lcd_params_.max_pose_recovery_translation_) {
+      //     success = false;
+      //   }
+      // }
 
       // Manually fail the result if the norm of the translation vector is above
       // a fixed maximum. This is not technically required; PCM should be able

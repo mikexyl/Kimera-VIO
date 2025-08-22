@@ -159,11 +159,16 @@ class VLADLoopClosureDetector
 
   void detectLoop(const FrameId& frame_id,
                   const Database::GlobalDesc& bow_vec,
-                  LoopResult* result) override;
+                  LoopResult* result,
+                  FrameId* query_frame = nullptr,
+                  FrameIdSet* global_candidates = nullptr) override;
 
-  void detectLoopOutsideLocalWindow(const FrameId& frame_id,
-                                    const Database::GlobalDesc& bow_vec,
-                                    LoopResult* result);
+  void detectLoopOutsideLocalWindow(
+      const FrameId& frame_id,
+      const Database::GlobalDesc& bow_vec,
+      LoopResult* result,
+      FrameId* query_frame = nullptr,
+      FrameIdSet* global_candidates = nullptr);
 
   std::optional<FrameId> findFirstFrameIdOutsideLocalWindow(
       const FrameId& frame_id) const {

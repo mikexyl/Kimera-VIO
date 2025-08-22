@@ -9,23 +9,40 @@ DEFINE_double(max_nss_vlad_distance,
 
 void VLADLoopClosureDetector::detectLoop(const FrameId& frame_id,
                                          const Database::GlobalDesc& bow_vec,
-                                         LoopResult* result) {
+                                         LoopResult* result,
+                                         FrameId* query_frame,
+                                         FrameIdSet* global_candidates) {
   CHECK_NOTNULL(result);
   auto query_frame_outside_local_window =
       this->findFirstFrameIdOutsideLocalWindow(frame_id);
   if (query_frame_outside_local_window) {
-    this->detectLoopOutsideLocalWindow(
-        *query_frame_outside_local_window, bow_vec, result);
+    this->detectLoopOutsideLocalWindow(*query_frame_outside_local_window,
+                                       bow_vec,
+                                       result,
+                                       query_frame,
+                                       global_candidates);
+  } else {
+    if (query_frame) {
+      *query_frame = 0;
+    }
+    if (global_candidates) {
+      global_candidates->clear();
+    }
   }
 }
 
 void VLADLoopClosureDetector::detectLoopOutsideLocalWindow(
     const FrameId& frame_id,
     const Database::GlobalDesc&,  // not used, leave it here for compatibility
-    LoopResult* result) {
+    LoopResult* result,
+    FrameId* query_frame,
+    FrameIdSet* global_candidates) {
   CHECK_NOTNULL(result);
   CHECK_NOTNULL(db_);
   result->query_id_ = {frame_id};
+  if (query_frame) {
+    *query_frame = frame_id;
+  }
 
   cv::Mat global_desc = db_->get(frame_id);
   CHECK(!global_desc.empty())
@@ -144,6 +161,12 @@ void VLADLoopClosureDetector::detectLoopOutsideLocalWindow(
 
   // Set best candidate to the lowest label index
   result->match_id_ = {static_cast<unsigned long>(query_result[0])};
+  if (global_candidates) {
+    global_candidates->clear();
+    for (const auto& id : query_result) {
+      global_candidates->insert(static_cast<FrameId>(id));
+    }
+  }
 
   // Compute islands in the matches.
   // An island is a group of matches with close frame_ids.

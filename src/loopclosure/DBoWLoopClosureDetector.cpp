@@ -188,7 +188,9 @@ void DBoWLoopClosureDetector::detectLoopById(const FrameId& frame_id,
 /* ------------------------------------------------------------------------ */
 void DBoWLoopClosureDetector::detectLoop(const FrameId& frame_id,
                                          const DBoW2::BowVector& bow_vec,
-                                         LoopResult* result) {
+                                         LoopResult* result,
+                                         FrameId* query_frame,
+                                         FrameIdSet* global_candidates) {
   CHECK_NOTNULL(result);
   result->query_id_ = {frame_id};
 

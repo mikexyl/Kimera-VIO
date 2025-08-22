@@ -481,7 +481,9 @@ class LoopClosureDetector : public LoopClosureDetectorBase {
    */
   virtual void detectLoop(const FrameId& frame_id,
                           const typename Database::GlobalDesc& bow_vec,
-                          LoopResult* result) = 0;
+                          LoopResult* result,
+                          FrameId* query_frame = nullptr,
+                          FrameIdSet* global_candidates = nullptr) = 0;
 
   virtual void print() const {
     lcd_params_.print();
