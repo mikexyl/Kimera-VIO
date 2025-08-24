@@ -24,7 +24,8 @@ enum class FeatureDetectorType {
   ORB = 1,
   AGAST = 2,
   GFTT = 3,
-  XFEAT = 4
+  XFEAT = 4,
+  GFTT_XFEAT = 5
 };
 
 }  // namespace VIO

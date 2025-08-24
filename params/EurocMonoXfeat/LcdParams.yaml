@@ -84,5 +84,6 @@ lcd_min_matched_features: 30
 
 min_pnp_num_landmarks: 10
 min_lmk_obs_ratio: 0.1
-min_lmk_parallex: 20
+min_lmk_parallax: 20
+min_lmk_obs_count: 3
 max_lmk_reproj_error: 400

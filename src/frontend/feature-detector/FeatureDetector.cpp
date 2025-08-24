@@ -97,6 +97,32 @@ FeatureDetector::FeatureDetector(
       xfeat_params.interp_nearest_path =
           feature_detector_params_.interp_nearest_path_;
       xfeat_params.use_gpu = feature_detector_params_.xfeat_use_gpu_;
+      xfeat_params.anms = feature_detector_params.enable_non_max_suppression_;
+      xfeat_params.nkpts_before_anms =
+          feature_detector_params_.max_nr_keypoints_before_anms_;
+      xfeat_params.keypoint_detection = 0;  // Use xfeat to detect keypoints
+
+      auto xfeat = xfeat::XFeatCV::create(*env, xfeat_params);
+      xfeat->warmup();
+      feature_detector_ = xfeat;
+      break;
+    }
+    case FeatureDetectorType::GFTT_XFEAT: {
+      xfeat::XFeatCV::Params xfeat_params;
+      xfeat_params.max_features =
+          feature_detector_params_.max_features_per_frame_;
+      xfeat_params.xfeat_path = feature_detector_params_.xfeat_path_;
+      xfeat_params.interp_bicubic_path =
+          feature_detector_params_.interp_bicubic_path_;
+      xfeat_params.interp_bilinear_path =
+          feature_detector_params_.interp_bilinear_path_;
+      xfeat_params.interp_nearest_path =
+          feature_detector_params_.interp_nearest_path_;
+      xfeat_params.use_gpu = feature_detector_params_.xfeat_use_gpu_;
+      xfeat_params.anms = feature_detector_params.enable_non_max_suppression_;
+      xfeat_params.nkpts_before_anms =
+          feature_detector_params_.max_nr_keypoints_before_anms_;
+      xfeat_params.keypoint_detection = 1;  // Use GFTT to detect keypoints
 
       auto xfeat = xfeat::XFeatCV::create(*env, xfeat_params);
       xfeat->warmup();
@@ -226,7 +252,7 @@ KeypointsCV FeatureDetector::featureDetection(Frame* cur_frame,
 
   // Actual raw feature detection
   std::vector<cv::KeyPoint> keypoints;
-  if (feature_detector_params_.feature_detector_type_ ==
+  if (feature_detector_params_.feature_detector_type_ >=
       FeatureDetectorType::XFEAT) {
     // when using xfeat, we detect features and compute descriptors
     auto xfeat_detector =
@@ -273,6 +299,11 @@ KeypointsCV FeatureDetector::featureDetection(Frame* cur_frame,
       CHECK_EQ(keypoint_stds.size(), need_n_corners)
           << "keypoint_stds size: " << keypoint_stds.size()
           << ", need_n_corners: " << need_n_corners;
+    } else {
+      // if there is more than need, discard last n kpts
+      keypoints.resize(need_n_corners);
+      cur_frame->descriptors_.resize(need_n_corners);
+      keypoint_stds.resize(need_n_corners);
     }
 
     for (size_t i = 0; i < keypoints.size(); ++i) {
@@ -281,6 +312,20 @@ KeypointsCV FeatureDetector::featureDetection(Frame* cur_frame,
     }
   } else {
     keypoints = rawFeatureDetection(cur_frame->img_, mask);
+    VLOG(1) << "Need n corners: " << need_n_corners;
+    // Tolerance of the number of returned points in percentage.
+    if (non_max_suppression_) {
+      static constexpr float tolerance = 0.1;
+      keypoints = non_max_suppression_->suppressNonMax(
+          keypoints,
+          need_n_corners,
+          tolerance,
+          cur_frame->img_.cols,
+          cur_frame->img_.rows,
+          feature_detector_params_.nr_horizontal_bins_,
+          feature_detector_params_.nr_vertical_bins_,
+          feature_detector_params_.binning_mask_);
+    }
   }
 
   /*{
@@ -295,21 +340,6 @@ KeypointsCV FeatureDetector::featureDetection(Frame* cur_frame,
    cv::waitKey(0);
   }*/
 
-  VLOG(1) << "Need n corners: " << need_n_corners;
-  // Tolerance of the number of returned points in percentage.
-  std::vector<cv::KeyPoint>& max_keypoints = keypoints;
-  if (non_max_suppression_) {
-    static constexpr float tolerance = 0.1;
-    max_keypoints = non_max_suppression_->suppressNonMax(
-        keypoints,
-        need_n_corners,
-        tolerance,
-        cur_frame->img_.cols,
-        cur_frame->img_.rows,
-        feature_detector_params_.nr_horizontal_bins_,
-        feature_detector_params_.nr_vertical_bins_,
-        feature_detector_params_.binning_mask_);
-  }
   // NOTE: if we don't use max_suppression we may end with more corners than
   // requested...
 
@@ -352,7 +382,7 @@ KeypointsCV FeatureDetector::featureDetection(Frame* cur_frame,
 
   // TODO(Toni): we should be using cv::KeyPoint... not cv::Point2f...
   KeypointsCV new_corners;
-  cv::KeyPoint::convert(max_keypoints, new_corners);
+  cv::KeyPoint::convert(keypoints, new_corners);
 
   // TODO(Toni) this takes a ton of time 27ms each time...
   // Change window_size, and term_criteria to improve timing
@@ -376,7 +406,7 @@ KeypointsCV FeatureDetector::featureDetection(Frame* cur_frame,
 
 void FeatureDetector::featureDetection(Frame* cur_frame,
                                        std::optional<cv::Mat> R) {
-  bool use_tracked_features = feature_detector_params_.feature_detector_type_ !=
+  bool use_tracked_features = feature_detector_params_.feature_detector_type_ <
                               FeatureDetectorType::XFEAT;
   // if we use XFEAT we always detect all new features and then match them
   if (use_tracked_features) {

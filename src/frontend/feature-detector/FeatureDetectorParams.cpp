@@ -127,6 +127,10 @@ bool FeatureDetectorParams::parseYAML(const std::string& filepath) {
       feature_detector_type_ = FeatureDetectorType::XFEAT;
       break;
     }
+    case VIO::to_underlying(FeatureDetectorType::GFTT_XFEAT): {
+      feature_detector_type_ = FeatureDetectorType::GFTT_XFEAT;
+      break;
+    }
     default: {
       LOG(FATAL) << "Unknown Feature Detector Type: " << feature_detector_type;
     }
@@ -229,15 +233,11 @@ bool FeatureDetectorParams::parseYAML(const std::string& filepath) {
   yaml_parser.getYamlParam("interp_nearest_path", &interp_nearest_path_);
   yaml_parser.getYamlParam("xfeat_use_gpu", &xfeat_use_gpu_);
 
-  if (feature_detector_type_ == FeatureDetectorType::XFEAT) {
+  if (feature_detector_type_ >= FeatureDetectorType::XFEAT) {
     if (xfeat_path_.empty() || interp_bilinear_path_.empty() ||
         interp_bicubic_path_.empty() || interp_nearest_path_.empty()) {
       LOG(FATAL) << "XFEAT feature detector requires paths to ONNX models.";
     }
-
-    CHECK(not enable_non_max_suppression_)
-        << "XFEAT feature detector has its own non-maximum suppression, do not "
-           "enable non_max_suppression in FeatureDetectorParams.";
   }
 
   return true;

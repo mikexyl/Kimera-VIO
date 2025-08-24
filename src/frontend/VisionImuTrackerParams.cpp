@@ -138,10 +138,14 @@ bool TrackerParams::parseYAML(const std::string& filepath) {
 
   yaml_parser.getYamlParam("feature_tracker_type", &tracker_type_);
   yaml_parser.getYamlParam("num_features", &num_features_);
+  yaml_parser.getYamlParam("track_on_keyframe", &track_on_keyframe_);
   yaml_parser.getYamlParam("lg_model_path", &lighterglue_model_path_);
 
   yaml_parser.getYamlParam("gpu_bf_min_sim", &gpu_bf_min_sim_);
   yaml_parser.getYamlParam("search_radius", &search_radius_);
+
+  yaml_parser.getYamlParam("max_lmk_merge_px", &max_lmk_merge_px_);
+  yaml_parser.getYamlParam("min_lmk_merge_sim", &min_lmk_merge_sim_);
 
   return true;
 }

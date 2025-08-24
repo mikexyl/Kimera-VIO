@@ -107,10 +107,10 @@ class LcdLandmarkManager : public std::unordered_map<LandmarkId, Landmark> {
   int checkAndCullingLandmarks(const std::vector<LandmarkId>& lmk_ids,
                                const FrameCache& frame_cache,
                                double min_obs_ratio,
-                               float min_parallex,
+                               float min_parallax,
                                float max_reproj_error,
                                int min_obs_cnt) {
-    int culled_obs_ratio = 0, culled_parallex = 0, culled_reproj_error = 0;
+    int culled_obs_ratio = 0, culled_parallax = 0, culled_reproj_error = 0;
     for (const auto& lmk_id : lmk_ids) {
       // already checked, and it's valid
       if (landmarks_valid_.find(lmk_id) != landmarks_valid_.end() and
@@ -214,7 +214,7 @@ class LcdLandmarkManager : public std::unordered_map<LandmarkId, Landmark> {
           << "LoopClosureDetector: No uvs found for landmark " << lmk_id
           << ", should_observe: " << should_observe;
 
-      // compute max parallex from uv
+      // compute max parallax from uv
       float max_u_diff = 0.0f, max_v_diff = 0.0f;
       std::vector<float> us, vs;
       for (const auto& uv : uvs) {
@@ -225,7 +225,7 @@ class LcdLandmarkManager : public std::unordered_map<LandmarkId, Landmark> {
                    *std::min_element(us.begin(), us.end());
       max_v_diff = *std::max_element(vs.begin(), vs.end()) -
                    *std::min_element(vs.begin(), vs.end());
-      if ((max_u_diff < min_parallex and max_v_diff < min_parallex) or
+      if ((max_u_diff < min_parallax and max_v_diff < min_parallax) or
           bad_reproj) {
         // Cull the landmark
         this->erase(lmk_id);
@@ -233,7 +233,7 @@ class LcdLandmarkManager : public std::unordered_map<LandmarkId, Landmark> {
         if (bad_reproj) {
           culled_reproj_error++;
         } else {
-          culled_parallex++;
+          culled_parallax++;
         }
         continue;
       }
@@ -242,9 +242,9 @@ class LcdLandmarkManager : public std::unordered_map<LandmarkId, Landmark> {
       landmarks_valid_[lmk_id] = true;
     }
     VLOG(1) << "culled_obs_ratio: " << culled_obs_ratio
-            << ", culled_parallex: " << culled_parallex
+            << ", culled_parallax: " << culled_parallax
             << ", culled_reproj_error: " << culled_reproj_error;
-    return culled_obs_ratio + culled_parallex + culled_reproj_error;
+    return culled_obs_ratio + culled_parallax + culled_reproj_error;
   }
 
   Landmarks getLandmarks() const {

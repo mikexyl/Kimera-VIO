@@ -107,8 +107,18 @@ Tracker::Tracker(const TrackerParams& tracker_params,
       break;
     }
     case TrackerParams::TrackerType::GPU_BF: {
-      feature_tracker_ = std::make_shared<GpuBFMatcher>(
-          tracker_params_.num_features_, tracker_params_.gpu_bf_min_sim_);
+      feature_tracker_ =
+          std::make_shared<GpuBFMatcher>(tracker_params_.num_features_,
+                                         tracker_params_.gpu_bf_min_sim_,
+                                         false);
+      break;
+    }
+    case TrackerParams::TrackerType::GPU_BF_RANSAC: {
+      feature_tracker_ =
+          std::make_shared<GpuBFMatcher>(tracker_params_.num_features_,
+                                         tracker_params_.gpu_bf_min_sim_,
+                                         true,
+                                         camera_->getCamParams());
       break;
     }
   }
@@ -1384,6 +1394,14 @@ void Tracker::featureTrackingDesc(
 
   std::set<LandmarkId> tracked_lmk_ids;
 
+  cv::flann::KDTreeIndexParams kdtree_params(5);
+  cv::Mat ref_kp_mat(ref_frame->keypoints_.size(), 2, CV_32F);
+  for (size_t i = 0; i < ref_frame->keypoints_.size(); ++i) {
+    ref_kp_mat.at<float>(i, 0) = ref_frame->keypoints_[i].x;
+    ref_kp_mat.at<float>(i, 1) = ref_frame->keypoints_[i].y;
+  }
+  cv::flann::Index ref_kp_kdtree(ref_kp_mat, kdtree_params);
+
   for (auto match : matches) {
     auto ref_i = match.queryIdx;
     auto cur_i = match.trainIdx;
@@ -1396,8 +1414,10 @@ void Tracker::featureTrackingDesc(
     }
 
     if (ref_frame->landmarks_.at(ref_i) == -1) {
-      // This is a new feature, assign a new landmark id.
-      ref_frame->landmarks_.at(ref_i) = FeatureDetector::lmk_id++;
+      if (not mergeLandmark(ref_frame, ref_i, &ref_kp_kdtree)) {
+        // This is a new feature, assign a new landmark id.
+        ref_frame->landmarks_.at(ref_i) = FeatureDetector::lmk_id++;
+      }
     }
     cur_frame->landmarks_.at(cur_i) = ref_frame->landmarks_.at(ref_i);
     tracked_lmk_ids.insert(ref_frame->landmarks_.at(ref_i));
@@ -1446,6 +1466,50 @@ void Tracker::featureTrackingDesc(
   // Fill debug information
   debug_info_.nrTrackerFeatures_ = cur_frame->keypoints_.size();
   debug_info_.featureTrackingTime_ = utils::Timer::toc(tic).count();
+}
+
+bool Tracker::mergeLandmark(Frame* frame,
+                            int q_kp_i,
+                            cv::flann::Index* kd_tree_ptr) {
+  if (tracker_params_.min_lmk_merge_sim_ < 0 and
+      tracker_params_.max_lmk_merge_px_ < 0) {
+    return false;
+  }
+  CHECK_NOTNULL(frame);
+  CHECK_NOTNULL(kd_tree_ptr);
+
+  // build a kd tree of the ref frame's keypoints
+  auto ref_keypoints = frame->keypoints_;
+
+  auto q_kp = frame->keypoints_.at(q_kp_i);
+
+  // find the nearest neighbor in the ref frame for the current keypoint
+  std::vector<int> indices(1);
+  std::vector<float> dists(1);
+  cv::Mat query_mat(1, 2, CV_32F);
+  query_mat.at<float>(0, 0) = q_kp.x;
+  query_mat.at<float>(0, 1) = q_kp.y;
+  kd_tree_ptr->knnSearch(query_mat, indices, dists, 5);
+
+  cv::Mat q_desc = frame->descriptors_.row(q_kp_i);
+
+  for (size_t i = 0; i < indices.size(); ++i) {
+    int match_kp_i = indices[i];
+    if (match_kp_i == q_kp_i) continue;  // don't match to itself
+
+    LandmarkId match_lmk_id = frame->landmarks_.at(match_kp_i);
+    if (match_lmk_id == -1) continue;
+
+    cv::Mat match_desc = frame->descriptors_.row(match_kp_i);
+    if (cv::norm(q_desc, match_desc, cv::NORM_L2) <
+        tracker_params_.min_lmk_merge_sim_) {
+      // If the descriptors are similar enough, merge the landmarks.
+      frame->landmarks_.at(q_kp_i) = match_lmk_id;
+      return 1;
+    }
+  }
+
+  return 0;
 }
 
 }  // namespace VIO

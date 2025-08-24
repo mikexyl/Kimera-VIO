@@ -137,7 +137,7 @@ class LoopClosureDetectorParams : public PipelineParams {
 
   double min_lmk_obs_ratio_ = 0.25;
   double min_lmk_obs_cnt_ = 4;
-  float min_lmk_parallex_ = 20;
+  float min_lmk_parallax_ = 20;
   float max_lmk_reproj_error = 36;
 };
 

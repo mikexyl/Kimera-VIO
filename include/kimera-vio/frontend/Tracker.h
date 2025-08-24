@@ -70,6 +70,10 @@ class Tracker {
   cv::Mat cam_mask_;
 
  public:
+  bool mergeLandmark(Frame* frame,
+                     int q_kp_i,
+                     cv::flann::Index* kd_tree = nullptr);
+
   void featureTracking(Frame* ref_frame,
                        Frame* cur_frame,
                        const gtsam::Rot3& inter_frame_rotation,
