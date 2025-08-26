@@ -97,7 +97,7 @@ FeatureDetector::FeatureDetector(
       xfeat_params.interp_nearest_path =
           feature_detector_params_.interp_nearest_path_;
       xfeat_params.use_gpu = feature_detector_params_.xfeat_use_gpu_;
-      xfeat_params.anms = feature_detector_params.enable_non_max_suppression_;
+      xfeat_params.anms = feature_detector_params_.enable_non_max_suppression_;
       xfeat_params.nkpts_before_anms =
           feature_detector_params_.max_nr_keypoints_before_anms_;
       xfeat_params.keypoint_detection = 0;  // Use xfeat to detect keypoints
@@ -119,7 +119,7 @@ FeatureDetector::FeatureDetector(
       xfeat_params.interp_nearest_path =
           feature_detector_params_.interp_nearest_path_;
       xfeat_params.use_gpu = feature_detector_params_.xfeat_use_gpu_;
-      xfeat_params.anms = feature_detector_params.enable_non_max_suppression_;
+      xfeat_params.anms = feature_detector_params_.enable_non_max_suppression_;
       xfeat_params.nkpts_before_anms =
           feature_detector_params_.max_nr_keypoints_before_anms_;
       xfeat_params.keypoint_detection = 1;  // Use GFTT to detect keypoints
@@ -391,7 +391,9 @@ KeypointsCV FeatureDetector::featureDetection(Frame* cur_frame,
       const auto& subpixel_params =
           feature_detector_params_.subpixel_corner_finder_params_;
       auto tic = utils::Timer::tic();
-      cv::cornerSubPix(cur_frame->img_,
+      cv::Mat gray_image;
+      cv::cvtColor(cur_frame->img_, gray_image, cv::COLOR_BGR2GRAY);
+      cv::cornerSubPix(gray_image,
                        new_corners,
                        subpixel_params.window_size_,
                        subpixel_params.zero_zone_,

@@ -12,7 +12,7 @@ maxFeatureAge: 100
 # 2: AGAST
 # 3: GFTT, aka Good Features To Track
 feature_detector_type: 4
-maxFeaturesPerFrame: 2000
+maxFeaturesPerFrame: 500
 
 # Good Features To Track specific parameters
 quality_level: 0.001
@@ -43,15 +43,15 @@ nr_vertical_bins: 5
 binning_mask: []
 
 # Subpixel corner refinement for the monocular case
-enable_subpixel_corner_finder: 0
+enable_subpixel_corner_finder: 1
 max_iters: 40
 epsilon_error: 0.001
-window_size: 10
+window_size: 16
 zero_zone: -1
 
 subpixelRefinementStereo: 0
 useSuccessProbabilities: 1
-useRANSAC: 1
+useRANSAC: 0
 minNrMonoInliers: 10
 minNrStereoInliers: 5
 ransac_threshold_mono: 1e-06
@@ -63,8 +63,8 @@ ransac_probability: 0.995
 ransac_randomize: 0
 min_intra_keyframe_time: 0.2
 max_intra_keyframe_time: 10.0
-max_disparity_since_lkf: 2000 #large value to disable
-minNumberFeatures: 300
+max_disparity_since_lkf: 200 #large value to disable
+minNumberFeatures: 100
 useStereoTracking: 0
 disparityThreshold: 3
 # Type of optical flow predictor to aid feature tracking:
@@ -96,8 +96,12 @@ interp_nearest_path: /workspaces/src/xfeat-cpp/onnx_model/interpolator_nearest_6
 xfeat_use_gpu: 1
 matcher_type: 0 # 0: Brute Force, 1: FLANN, 2: LighterGlue
 
-feature_tracker_type: 3 # 0: OpticalFlow, 1: LighterGlue 2: Flann 3: GpuBFMatcher
-num_features: 2000
-lg_model_path: /workspaces/src/xfeat-cpp/onnx_model/lg_640x480_2000.onnx
-gpu_bf_min_sim: 0.5 # Minimum similarity for GpuBFMatcher
+feature_tracker_type: 1 # 0: OpticalFlow, 1: LighterGlue 2: Flann 3: GpuBFMatcher
+num_features: 500
+lg_model_path: /workspaces/src/xfeat-cpp/onnx_model/lg_640x480_500.onnx
+gpu_bf_min_sim: 0.7 # Minimum similarity for GpuBFMatcher
 search_radius: 30
+
+track_on_keyframe: 1
+min_lmk_merge_sim: 0.8
+max_lmk_merge_px: 10

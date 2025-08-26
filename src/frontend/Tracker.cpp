@@ -1072,8 +1072,7 @@ cv::Mat Tracker::getTrackerImage(const Frame& ref_frame,
                                  const Frame& cur_frame,
                                  const KeypointsCV& extra_corners_gray,
                                  const KeypointsCV& extra_corners_blue) const {
-  cv::Mat img_rgb(cur_frame.img_.size(), CV_8U);
-  cv::cvtColor(cur_frame.img_, img_rgb, cv::COLOR_GRAY2RGB);
+  cv::Mat img_rgb = cur_frame.img_.clone();
 
   static const cv::Scalar gray(0, 255, 255);
   static const cv::Scalar red(0, 0, 255);
@@ -1492,17 +1491,28 @@ bool Tracker::mergeLandmark(Frame* frame,
   kd_tree_ptr->knnSearch(query_mat, indices, dists, 5);
 
   cv::Mat q_desc = frame->descriptors_.row(q_kp_i);
+  // normalize q_desc
+  cv::normalize(q_desc, q_desc);
 
   for (size_t i = 0; i < indices.size(); ++i) {
     int match_kp_i = indices[i];
     if (match_kp_i == q_kp_i) continue;  // don't match to itself
 
+    if (dists[i] >
+        tracker_params_.max_lmk_merge_px_ * tracker_params_.max_lmk_merge_px_) {
+      continue;  // too far away
+    }
+
     LandmarkId match_lmk_id = frame->landmarks_.at(match_kp_i);
     if (match_lmk_id == -1) continue;
 
     cv::Mat match_desc = frame->descriptors_.row(match_kp_i);
-    if (cv::norm(q_desc, match_desc, cv::NORM_L2) <
-        tracker_params_.min_lmk_merge_sim_) {
+    // normalize match_desc
+    cv::normalize(match_desc, match_desc);
+
+    float dist = cv::norm(q_desc, match_desc, cv::NORM_L2);  // in [0,2]
+    float sim = 1.0f - (dist / 2.0f);                        // sim in [0,1]
+    if (sim > tracker_params_.min_lmk_merge_sim_) {
       // If the descriptors are similar enough, merge the landmarks.
       frame->landmarks_.at(q_kp_i) = match_lmk_id;
       return 1;

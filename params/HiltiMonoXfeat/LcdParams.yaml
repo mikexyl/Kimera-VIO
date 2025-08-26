@@ -7,7 +7,7 @@ recent_frames_window: 50
 max_db_results: 50
 min_nss_factor: 0.05
 min_matches_per_island: 1
-max_intraisland_gap: 5
+max_intraisland_gap: 3
 max_nrFrames_between_islands: 3
 max_nrFrames_between_queries: 2
 
@@ -73,17 +73,17 @@ optimize_2d3d_pose_from_inliers: 0
 ransac_2d2d_algorithm: 0 # Stewenius
 ransac_2d3d_algorithm: 3 # EPNP
 
-lcd_lg_num_features: 2000
-lcd_lg_model_path: /workspaces/src/xfeat-cpp/onnx_model/lg_640x480_2000.onnx
+lcd_lg_num_features: 500
+lcd_lg_model_path: /workspaces/src/xfeat-cpp/onnx_model/lg_640x480_500.onnx
 lcd_faiss_index_path: /workspaces/src/xfeat-cpp/onnx_model/faiss_ivfflat.index.bin
 xfeat_nv_head_model_path: /workspaces/src/xfeat-cpp/onnx_model/xfeat_nv.onnx
 netvlad_model_path: /workspaces/src/xfeat-cpp/onnx_model/netvlad.onnx
 
-local_window_size: 5 
+local_window_size: 10
 
 min_pnp_num_landmarks: 20
-min_lmk_obs_ratio: 0.00 # map point cull, set to 0 to disable
+min_lmk_obs_ratio: 0.01 # map point cull, set to 0 to disable
 min_lmk_obs_count: 2 # map point cull, set to 0 to disable
-min_lmk_parallax: 10
+min_lmk_parallax: 5
 lcd_min_matched_features: 30
-max_lmk_reproj_error: 50
+max_lmk_reproj_error: 40

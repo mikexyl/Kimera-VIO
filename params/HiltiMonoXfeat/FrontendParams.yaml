@@ -4,15 +4,15 @@ klt_win_size: 24
 klt_max_iter: 30
 klt_max_level: 4
 klt_eps: 0.1
-maxFeatureAge: 100
+maxFeatureAge: 20
 
 # Detector Params
 # 0: FAST
 # 1: ORB
 # 2: AGAST
 # 3: GFTT, aka Good Features To Track
-feature_detector_type: 4
-maxFeaturesPerFrame: 2000
+feature_detector_type: 5
+maxFeaturesPerFrame: 500
 
 # Good Features To Track specific parameters
 quality_level: 0.001
@@ -35,7 +35,7 @@ maxPointDist: 10
 bidirectionalMatching: 0
 
 # Non-maximum suppression params
-max_nr_keypoints_before_anms: 2000
+max_nr_keypoints_before_anms: 1000
 enable_non_max_suppression: 0
 non_max_suppression_type: 6
 nr_horizontal_bins: 7
@@ -51,7 +51,7 @@ zero_zone: -1
 
 subpixelRefinementStereo: 0
 useSuccessProbabilities: 1
-useRANSAC: 1
+useRANSAC: 0
 minNrMonoInliers: 10
 minNrStereoInliers: 5
 ransac_threshold_mono: 1e-06
@@ -61,10 +61,10 @@ ransac_use_2point_mono: 1
 ransac_max_iterations: 100
 ransac_probability: 0.995
 ransac_randomize: 0
-min_intra_keyframe_time: 0.1
+min_intra_keyframe_time: 0.2
 max_intra_keyframe_time: 10.0
 max_disparity_since_lkf: 500 #large value to disable
-minNumberFeatures: 100
+minNumberFeatures: 50
 useStereoTracking: 0
 disparityThreshold: 2.5
 # Type of optical flow predictor to aid feature tracking:
@@ -96,8 +96,13 @@ interp_nearest_path: /workspaces/src/xfeat-cpp/onnx_model/interpolator_nearest_6
 xfeat_use_gpu: 1
 matcher_type: 0 # 0: Brute Force, 1: FLANN, 2: LighterGlue
 
-feature_tracker_type: 4 # 0: OpticalFlow, 1: LighterGlue 2: Flann 3: GpuBFMatcher
-num_features: 2000
+feature_tracker_type: 1 # 0: OpticalFlow, 1: LighterGlue 2: Flann 3: GpuBFMatcher
+num_features: 500
 lg_model_path: /workspaces/src/xfeat-cpp/onnx_model/lg_640x480_500.onnx
 gpu_bf_min_sim: 0.5 # Minimum similarity for GpuBFMatcher
-search_radius: 5
+search_radius: 15
+
+track_on_keyframe: 1
+
+min_lmk_merge_sim: 0.5
+max_lmk_merge_px: 10

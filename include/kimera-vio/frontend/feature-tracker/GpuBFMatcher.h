@@ -109,8 +109,8 @@ class GpuBFMatcher : public FeatureTracker {
       }
       det1.descriptors = cur_frame->descriptors_;
 
-      matches_vec =
-          gpu_matcher_->match(det0, det1, min_sim_, homography, search_radius);
+      matches_vec = gpu_matcher_->match(
+          det0, det1, min_sim_, homography, search_radius, 1);
     }
 
     // copy matches to DMatchVec
