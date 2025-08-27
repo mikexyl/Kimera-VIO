@@ -145,11 +145,14 @@ void Tracker::featureTracking(
 
   // Fill up structure for reference pixels and their labels.
   const size_t& n_ref_kpts = ref_frame->keypoints_.size();
+  CHECK_EQ(n_ref_kpts, feature_detector_params.max_features_per_frame_);
   KeypointsCV px_ref;
   std::vector<size_t> indices_of_valid_landmarks;
   px_ref.reserve(n_ref_kpts);
   indices_of_valid_landmarks.reserve(n_ref_kpts);
   for (size_t i = 0; i < ref_frame->keypoints_.size(); ++i) {
+    CHECK_NE(ref_frame->landmarks_[i],
+             -1);  // should not be tracking keypoints without landmarks
     if (ref_frame->landmarks_[i] != -1) {
       // Current reference frame keypoint has a valid landmark.
       px_ref.push_back(ref_frame->keypoints_[i]);
@@ -1424,6 +1427,8 @@ void Tracker::featureTrackingDesc(
     ref_kp_mat.at<float>(i, 1) = ref_frame->keypoints_[i].y;
   }
   cv::flann::Index ref_kp_kdtree(ref_kp_mat, kdtree_params);
+  std::set<LandmarkId> ref_lmk_ids(ref_frame->landmarks_.begin(),
+                                   ref_frame->landmarks_.end());
 
   for (auto match : matches) {
     auto ref_i = match.queryIdx;
@@ -1433,6 +1438,12 @@ void Tracker::featureTrackingDesc(
     if (lmk_age > tracker_params_.max_feature_track_age_) {
       // If the feature is too old, we do not track it anymore.
       ref_frame->landmarks_.at(ref_i) = -1;
+      continue;
+    }
+
+    LandmarkId cur_lmk_id = cur_frame->landmarks_.at(cur_i);
+    if (ref_lmk_ids.count(cur_lmk_id)) {
+      // This landmark is already in the reference frame, skip it.
       continue;
     }
 

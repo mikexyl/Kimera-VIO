@@ -258,7 +258,6 @@ StatusMonoMeasurementsPtr MonoVisionImuFrontend::processFrame(
   CHECK(feature_detector_);
   // if we are using lighter glue, detect all features first, and track features
   // by matching descriptors
-  VLOG(1) << "lmk id " << FeatureDetector::lmk_id;
   // tracker_->featureTracking(mono_frame_km1_.get(),
   //                           mono_frame_k_.get(),
   //                           ref_frame_R_cur_frame,
@@ -267,14 +266,10 @@ StatusMonoMeasurementsPtr MonoVisionImuFrontend::processFrame(
   //                           false,
   //                           true);
 
-  VLOG(1) << "finish" << FeatureDetector::lmk_id;
-
   // TODO(mike): detection was after keyframe detection, we moved it here,
   // need to check if it causes bugs in the keyframe detection
   feature_detector_->featureDetection(
       mono_frame_k_.get(), std::nullopt, mono_frame_km1_.get());
-
-  VLOG(1) << "finish" << FeatureDetector::lmk_id;
 
   // Undistort keypoints:
   mono_camera_->undistortKeypoints(mono_frame_k_->keypoints_,
@@ -287,8 +282,6 @@ StatusMonoMeasurementsPtr MonoVisionImuFrontend::processFrame(
                                 std::nullopt,
                                 false);
 
-  VLOG(1) << "Finished feature tracking.";
-
   // TODO(marcus): need another structure for monocular slam
   tracker_status_summary_.kfTrackingStatus_mono_ = TrackingStatus::INVALID;
   tracker_status_summary_.kfTrackingStatus_stereo_ = TrackingStatus::DISABLED;
@@ -299,6 +292,13 @@ StatusMonoMeasurementsPtr MonoVisionImuFrontend::processFrame(
   const bool new_keyframe = shouldBeKeyframe(*mono_frame_k_, *mono_frame_lkf_);
   if (new_keyframe) {
     ++keyframe_count_;
+
+    // tracker_->featureTrackingDesc(mono_frame_lkf_.get(),
+    //                               mono_frame_k_.get(),
+    //                               keyframe_R_cur_frame,
+    //                               frontend_params_.feature_detector_params_,
+    //                               std::nullopt,
+    //                               false);
 
     if (frontend_params_.useRANSAC_) {
       TrackingStatusPose status_pose_mono;

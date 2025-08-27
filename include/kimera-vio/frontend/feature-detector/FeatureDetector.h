@@ -60,7 +60,7 @@ class FeatureDetector {
   KeypointsCV featureDetection(Frame* cur_frame,
                                Frame* ref_frame,
                                const int& need_n_corners,
-                               int* n_prev_lmk);
+                               std::vector<int>* tracked_kp_id);
 
   void featureDetectionTracked(Frame* cur_frame,
                                Frame* ref_frame,

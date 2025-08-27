@@ -6,10 +6,10 @@ backend_modality: 0
 #INITIALIZATION PARAMETERS
 autoInitialize: 1
 roundOnAutoInitialize: 0
-initialPositionSigma: 1e-05
+initialPositionSigma: 1e-4
 initialRollPitchSigma: 0.174533 # 10.0/180.0*M_PI
-initialYawSigma: 0.0017
-initialVelocitySigma: 0.001
+initialYawSigma: 0.017
+initialVelocitySigma: 0.01
 initialAccBiasSigma: 0.1
 initialGyroBiasSigma: 0.01
 
@@ -18,7 +18,7 @@ initialGyroBiasSigma: 0.01
 #
 # How to linearize the factor:
 # 0: Hessian, 1: Implicit Schur, 2:Jacobian_Q, 3:Jacobian_SVD
-linearizationMode: 0
+linearizationMode: 1
 # How to manage degeneracy
 # 0: Ignore degeneracy, 1: Zero on degeneracy, 2: handle infinity
 degeneracyMode: 1
@@ -59,8 +59,8 @@ addBetweenStereoFactors: 0
 betweenRotationPrecision: 0 # Inverse of variance.
 betweenTranslationPrecision: 100 # 1/(0.1*0.1)
 
-# OPTIMIZATION PARAMETERS #####################################################
-relinearizeThreshold: 0.05
+# OPTIMIZATION PARAMETERS ####################################################
+relinearizeThreshold: 0.01
 relinearizeSkip: 1
 zero_velocity_precision: 1000
 no_motion_position_precision: 1000
@@ -91,5 +91,5 @@ useDogLeg: 0
 #   EXTERNAL_ODOM = 4
 pose_guess_source: 0
 mono_translation_scale_factor: 0.1
-min_num_obs_per_landmark_to_keep: 1
+min_num_obs_per_landmark_to_keep: 0
 max_lmk_reproj_error_to_keep: 1000000

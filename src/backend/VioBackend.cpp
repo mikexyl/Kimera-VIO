@@ -568,7 +568,8 @@ PointsWithIdMap VioBackend::getMapLmkIdsTo3dPointsInTimeHorizon(
 
   // old_smart_factors_ has all smart factors included so far.
   // Retrieve lmk ids from smart factors in state.
-  size_t nr_valid_smart_lmks = 0, nr_smart_lmks = 0;
+  size_t nr_valid_smart_lmks = 0, nr_smart_lmks = 0,
+         nr_smart_lmks_in_smoother = 0, nr_lmks_invalid = 0;
   for (SmartFactorMap::iterator old_smart_factor_it =
            old_smart_factors_.begin();
        old_smart_factor_it !=
@@ -612,6 +613,7 @@ PointsWithIdMap VioBackend::getMapLmkIdsTo3dPointsInTimeHorizon(
       CHECK(deleteLmkFromFeatureTracks(lmk_id));
       continue;
     } else {
+      nr_smart_lmks_in_smoother++;
       VLOG(20) << "Slot id: " << slot_id
                << " for smart factor of lmk id: " << lmk_id;
     }
@@ -625,7 +627,7 @@ PointsWithIdMap VioBackend::getMapLmkIdsTo3dPointsInTimeHorizon(
       // not make any sense, since we are using lmk_id which comes from
       // smart_factor and result which comes from graph[slot_id], we should
       // use smart_factor_ptr instead then...
-      LOG(ERROR) << "The factor with slot id: " << slot_id
+      LOG(FATAL) << "The factor with slot id: " << slot_id
                  << " in the graph does not match the old_smart_factor of "
                  << "lmk with id: " << lmk_id << "\n."
                  << "Deleting old_smart_factor of lmk id: " << lmk_id;
@@ -665,6 +667,7 @@ PointsWithIdMap VioBackend::getMapLmkIdsTo3dPointsInTimeHorizon(
                  << ", vs min_age of " << min_age << ".";
       }  // gsf->measured().size() >= min_age ?
     } else {
+      nr_lmks_invalid++;
       VLOG(20) << "Triangulation result for smart factor of lmk with id "
                << lmk_id << " is not initialized...";
     }
@@ -700,12 +703,13 @@ PointsWithIdMap VioBackend::getMapLmkIdsTo3dPointsInTimeHorizon(
   // enforcing the regularities on the points that are out of current frame
   // in the Backend currently...
 
-  VLOG(10) << "Landmark typology to be used for the mesh:\n"
-           << "Number of valid smart factors " << nr_valid_smart_lmks
-           << " out of " << nr_smart_lmks << "\n"
-           << "Number of landmarks (not involved in a smart factor) "
-           << nr_proj_lmks << ".\n Total number of landmarks: "
-           << (nr_valid_smart_lmks + nr_proj_lmks);
+  VLOG(1) << "Landmark typology to be used for the mesh:\n"
+          << "Number of valid smart factors " << nr_valid_smart_lmks << ", "
+          << nr_lmks_invalid << ", " << nr_smart_lmks_in_smoother << " out of "
+          << nr_smart_lmks << "\n"
+          << "Number of landmarks (not involved in a smart factor) "
+          << nr_proj_lmks << ".\n Total number of landmarks: "
+          << (nr_valid_smart_lmks + nr_proj_lmks);
   return points_with_id;
 }
 

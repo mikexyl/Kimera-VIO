@@ -224,8 +224,7 @@ std::vector<cv::KeyPoint> FeatureDetector::rawFeatureDetection(
 KeypointsCV FeatureDetector::featureDetection(Frame* cur_frame,
                                               Frame* ref_frame,
                                               const int& need_n_corners,
-                                              int* n_prev_lmk) {
-  VLOG(1) << "lmk id " << FeatureDetector::lmk_id;
+                                              std::vector<int>* tracked_kp_id) {
   // cv::namedWindow("Input Image", cv::WINDOW_AUTOSIZE);
   // cv::imshow("Input Image", cur_frame.img_);
 
@@ -236,10 +235,50 @@ KeypointsCV FeatureDetector::featureDetection(Frame* cur_frame,
   // keypoints nearby by! The mask is interpreted as: 255 -> consider, 0 ->
   // don't consider.
   // Actual raw feature detection
+  CHECK_NOTNULL(cur_frame);
+  CHECK_NOTNULL(tracked_kp_id);
+
   if (ref_frame) {
     CHECK_NE(cur_frame->id_, ref_frame->id_);
   }
   std::vector<cv::KeyPoint> keypoints;
+
+  cv::Mat mask;
+  if (cur_frame->detection_mask_.empty()) {
+    mask = cv::Mat(cur_frame->img_.size(), CV_8U, cv::Scalar(255));
+  } else {
+    mask = cur_frame->detection_mask_;
+  }
+
+  std::set<LandmarkId> existing_lmks;
+  if (ref_frame) {
+    existing_lmks.insert(ref_frame->landmarks_.begin(),
+                         ref_frame->landmarks_.end());
+    VLOG(1) << "prev lmk id range: "
+            << *std::minmax_element(ref_frame->landmarks_.begin(),
+                                    ref_frame->landmarks_.end())
+                    .first
+            << " - "
+            << *std::minmax_element(ref_frame->landmarks_.begin(),
+                                    ref_frame->landmarks_.end())
+                    .second;
+  }
+
+  for (size_t i = 0u; i < cur_frame->keypoints_.size(); ++i) {
+    if (cur_frame->landmarks_.at(i) != -1 and
+        existing_lmks.count(cur_frame->landmarks_.at(i)) > 0) {
+      tracked_kp_id->push_back(i);
+
+      // Only mask keypoints that are being triangulated (I guess
+      // feature tracks? should be made more explicit)
+      cv::circle(mask,
+                 cur_frame->keypoints_.at(i),
+                 feature_detector_params_
+                     .min_distance_btw_tracked_and_detected_features_,
+                 cv::Scalar(0),
+                 CV_FILLED);
+    }
+  }
   if (feature_detector_params_.feature_detector_type_ >=
       FeatureDetectorType::XFEAT) {
     // when using xfeat, we detect features and compute descriptors
@@ -247,30 +286,14 @@ KeypointsCV FeatureDetector::featureDetection(Frame* cur_frame,
         std::dynamic_pointer_cast<xfeat::XFeatCV>(feature_detector_);
     CHECK_NOTNULL(xfeat_detector);
     std::vector<cv::Vec2d> keypoint_stds;
-    std::set<LandmarkId> existing_lmks;
-    if (ref_frame) {
-      existing_lmks.insert(ref_frame->landmarks_.begin(),
-                           ref_frame->landmarks_.end());
-      VLOG(1) << "prev lmk id range: "
-              << *std::minmax_element(ref_frame->landmarks_.begin(),
-                                      ref_frame->landmarks_.end())
-                      .first
-              << " - "
-              << *std::minmax_element(ref_frame->landmarks_.begin(),
-                                      ref_frame->landmarks_.end())
-                      .second;
-    }
+
     for (size_t i = 0; i < cur_frame->keypoints_.size(); i++) {
       LandmarkId lmk_id = cur_frame->landmarks_.at(i);
       if (lmk_id != -1 and existing_lmks.count(lmk_id) > 0) {
         keypoints.emplace_back(cv::KeyPoint(cur_frame->keypoints_.at(i), 1.0));
       }
     }
-    if (n_prev_lmk) {
-      *n_prev_lmk = keypoints.size();
-    }
-    VLOG(1) << "Number of points remaining: " << keypoints.size();
-    VLOG(1) << "prev lmks: " << existing_lmks.size();
+
     if (not keypoints.empty()) {
       VLOG(1) << "cur lmk id range: "
               << *std::minmax_element(cur_frame->landmarks_.begin(),
@@ -282,6 +305,11 @@ KeypointsCV FeatureDetector::featureDetection(Frame* cur_frame,
                       .second;
     }
 
+    auto input_kpts = keypoints;
+    if (input_kpts.size()) {
+      VLOG(1) << input_kpts[0].pt;
+    }
+
     xfeat_detector->detectAndCompute(cur_frame->img_,
                                      {},
                                      keypoints,
@@ -290,8 +318,8 @@ KeypointsCV FeatureDetector::featureDetection(Frame* cur_frame,
                                      &cur_frame->xfeat_M1_,
                                      &cur_frame->xfeat_x_prep_,
                                      &keypoint_stds);
-
-    VLOG(1) << "Number of points detected : " << keypoints.size();
+    // check the first elements of the input_kpts the same as keypoints
+    CHECK_LE(input_kpts.size(), keypoints.size());
 
     // if doesn't get enough keypoints, we copy the top keypoints and their
     // descriptors
@@ -309,26 +337,6 @@ KeypointsCV FeatureDetector::featureDetection(Frame* cur_frame,
 
     VLOG(1) << "finish xfeat detection " << keypoints.size();
   } else {
-    cv::Mat mask;
-    if (cur_frame->detection_mask_.empty()) {
-      mask = cv::Mat(cur_frame->img_.size(), CV_8U, cv::Scalar(255));
-    } else {
-      mask = cur_frame->detection_mask_;
-    }
-
-    for (size_t i = 0u; i < cur_frame->keypoints_.size(); ++i) {
-      if (cur_frame->landmarks_.at(i) != -1) {
-        // Only mask keypoints that are being triangulated (I guess
-        // feature tracks? should be made more explicit)
-        cv::circle(mask,
-                   cur_frame->keypoints_.at(i),
-                   feature_detector_params_
-                       .min_distance_btw_tracked_and_detected_features_,
-                   cv::Scalar(0),
-                   CV_FILLED);
-      }
-    }
-
     keypoints = rawFeatureDetection(cur_frame->img_, mask);
     VLOG(1) << "Need n corners: " << need_n_corners;
     // Tolerance of the number of returned points in percentage.
@@ -347,7 +355,6 @@ KeypointsCV FeatureDetector::featureDetection(Frame* cur_frame,
   }
 
   // TODO(Toni): we should be using cv::KeyPoint... not cv::Point2f...
-  VLOG(1) << "keypoitns: " << keypoints.size();
   KeypointsCV new_corners;
   cv::KeyPoint::convert(keypoints, new_corners);
 
@@ -370,8 +377,6 @@ KeypointsCV FeatureDetector::featureDetection(Frame* cur_frame,
     }
   }
 
-  VLOG(1) << "new corners: " << new_corners.size();
-
   return new_corners;
 }
 
@@ -387,8 +392,6 @@ void FeatureDetector::featureDetection(Frame* cur_frame,
     // If we don't use tracked features, we just detect new features
     featureDetectionNew(cur_frame, ref_frame, R);
   }
-  VLOG(1) << "finish";
-  VLOG(1) << "cur frame has " << cur_frame->keypoints_.size() << " keypoints";
 }
 
 void FeatureDetector::featureDetectionNew(Frame* cur_frame,
@@ -396,26 +399,49 @@ void FeatureDetector::featureDetectionNew(Frame* cur_frame,
                                           std::optional<cv::Mat> R) {
   CHECK_NOTNULL(cur_frame);
 
+  LandmarkIds old_lmk_ids = cur_frame->landmarks_;
+  auto old_keypoints = cur_frame->keypoints_;
+  auto old_scores = cur_frame->scores_;
+  auto old_versors = cur_frame->versors_;
+  auto old_lmk_age = cur_frame->landmarks_age_;
+
   int nr_corners_needed = feature_detector_params_.max_features_per_frame_;
 
-  int nr_corners_prev;
+  std::vector<int> tracked_corners;
 
   auto corners = featureDetection(
-      cur_frame, ref_frame, nr_corners_needed, &nr_corners_prev);
-  VLOG(1) << "finish feature detection " << corners.size() << " "
-          << nr_corners_prev;
+      cur_frame, ref_frame, nr_corners_needed, &tracked_corners);
+  VLOG(1) << "tracked corners: " << tracked_corners.size();
 
   const size_t& n_corners = corners.size();
 
+  cur_frame->landmarks_.clear();
   cur_frame->landmarks_.reserve(n_corners);
+
+  cur_frame->landmarks_age_.clear();
   cur_frame->landmarks_age_.reserve(n_corners);
+
+  cur_frame->keypoints_.clear();
   cur_frame->keypoints_.reserve(n_corners);
+  cur_frame->scores_.clear();
   cur_frame->scores_.reserve(n_corners);
+  cur_frame->versors_.clear();
   cur_frame->versors_.reserve(n_corners);
 
   // Incremental id assigned to new landmarks
   const CameraParams& cam_param = cur_frame->cam_param_;
-  for (size_t i = nr_corners_prev; i < n_corners; i++) {
+  for (size_t i = 0; i < tracked_corners.size(); i++) {
+    int old_kp_id = tracked_corners[i];
+    cur_frame->landmarks_.push_back(old_lmk_ids[old_kp_id]);
+    cur_frame->landmarks_age_.push_back(old_lmk_age[old_kp_id]);
+    cur_frame->keypoints_.push_back(corners[i]);
+    cur_frame->scores_.push_back(old_scores[old_kp_id]);
+    cur_frame->versors_.push_back(old_versors[old_kp_id]);
+    // check the versor's norm is not nan
+    CHECK(!std::isnan(cur_frame->versors_.back().norm()));
+  }
+
+  for (size_t i = tracked_corners.size(); i < n_corners; i++) {
     cur_frame->landmarks_.push_back(FeatureDetector::lmk_id);
     // New keypoint, so seen in a single (key)frame so far.
     cur_frame->landmarks_age_.push_back(1u);
@@ -423,10 +449,12 @@ void FeatureDetector::featureDetectionNew(Frame* cur_frame,
     cur_frame->scores_.push_back(0.0);  // NOT IMPLEMENTED
     cur_frame->versors_.push_back(
         UndistorterRectifier::GetBearingVector(corners[i], cam_param, R));
+    CHECK(!std::isnan(cur_frame->versors_.back().norm()));
     FeatureDetector::lmk_id++;
   }
 
-  VLOG(1) << "finish " << n_corners << " " << FeatureDetector::lmk_id;
+  CHECK_EQ(cur_frame->keypoints_.size(), cur_frame->descriptors_.rows);
+
   // here we only detect and compute keypoints and descriptors
   // matching is done afterwards by the lighterglue matcher
 }
