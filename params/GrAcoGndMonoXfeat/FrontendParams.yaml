@@ -4,7 +4,7 @@ klt_win_size: 24
 klt_max_iter: 30
 klt_max_level: 4
 klt_eps: 0.1
-maxFeatureAge: 50
+maxFeatureAge: 1000
 
 # Detector Params
 # 0: FAST
@@ -104,5 +104,5 @@ search_radius: 100
 
 track_on_keyframe: 1
 
-min_lmk_merge_sim: 0.9
+min_lmk_merge_sim: 0.7
 max_lmk_merge_px: 10

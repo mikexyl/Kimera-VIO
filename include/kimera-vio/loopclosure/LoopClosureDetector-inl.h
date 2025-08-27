@@ -90,9 +90,10 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::spinOnce(
   CHECK(landmark_manager_);
   CHECK(db_);
 
-  landmark_manager_->updateLandmarks(input.W_points_with_ids_);
+  landmark_manager_->updateLandmarks(input.smoother_points_with_ids_,
+                                     input.W_Pose_smoother_);
   std::vector<LandmarkId> new_lmk_ids;
-  for (const auto& [lmk_id, lmk] : input.W_points_with_ids_) {
+  for (const auto& [lmk_id, lmk] : input.smoother_points_with_ids_) {
     new_lmk_ids.push_back(lmk_id);
   }
   int culled = landmark_manager_->checkAndCullingLandmarks(
@@ -139,7 +140,7 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::spinOnce(
       if (lcd_params_.pose_recovery_type_ == PoseRecoveryType::kPnP ||
           lcd_params_.pose_recovery_type_ == PoseRecoveryType::k5ptRotOnly) {
         lcd_frame_id = processAndAddMonoFrame(mono_frontend_output->frame_lkf_,
-                                              input.W_points_with_ids_,
+                                              input.smoother_points_with_ids_,
                                               input.W_Pose_Blkf_);
       } else {
         LOG(FATAL) << "We have a mono frontend but no PnP pose recovery in LCD "
@@ -784,8 +785,9 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::recoverPoseBody(
       //   }
 
       //   if (camMatch_points.size() > lcd_params_.min_pnp_num_landmarks_) {
-      //     Pose3 camQuery_T_camMatch_2d_copy = camMatch_T_camQuery_2d.inverse();
-      //     success = tracker_->pnp(camMatch_bearing_vectors,
+      //     Pose3 camQuery_T_camMatch_2d_copy =
+      //     camMatch_T_camQuery_2d.inverse(); success =
+      //     tracker_->pnp(camMatch_bearing_vectors,
       //                             camQuery_points,
       //                             &camQuery_T_camMatch_3d,
       //                             inliers,

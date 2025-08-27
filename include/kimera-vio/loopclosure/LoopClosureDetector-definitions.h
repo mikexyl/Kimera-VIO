@@ -291,20 +291,23 @@ struct LcdInput : public PipelinePayload {
            const FrontendOutputPacketBase::Ptr& frontend_output,
            const FrameId& cur_kf_id,
            const PointsWithIdMap& W_points_with_ids,
-           const gtsam::Pose3& W_Pose_Blkf)
+           const gtsam::Pose3& W_Pose_Blkf,
+           const gtsam::Pose3& W_Pose_smoother = gtsam::Pose3())
       : PipelinePayload(timestamp),
         frontend_output_(frontend_output),
         cur_kf_id_(cur_kf_id),
-        W_points_with_ids_(W_points_with_ids),
-        W_Pose_Blkf_(W_Pose_Blkf) {
+        smoother_points_with_ids_(W_points_with_ids),
+        W_Pose_Blkf_(W_Pose_Blkf),
+        W_Pose_smoother_(W_Pose_smoother) {
     CHECK(frontend_output);
     CHECK_EQ(timestamp, frontend_output->timestamp_);
   }
 
   const FrontendOutputPacketBase::Ptr frontend_output_;
   const FrameId cur_kf_id_;
-  const PointsWithIdMap W_points_with_ids_;
+  const PointsWithIdMap smoother_points_with_ids_;
   const gtsam::Pose3 W_Pose_Blkf_;
+  const gtsam::Pose3 W_Pose_smoother_;
 };
 
 }  // namespace VIO

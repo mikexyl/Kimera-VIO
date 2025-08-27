@@ -19,16 +19,17 @@ class LcdLandmarkManager : public std::unordered_map<LandmarkId, Landmark> {
   LcdLandmarkManager() : Base() {}
   virtual ~LcdLandmarkManager() = default;
 
-  void updateLandmarks(const PointsWithIdMap& W_points_with_ids) {
-    for (auto const& point_with_id : W_points_with_ids) {
+  void updateLandmarks(const PointsWithIdMap& smoother_points_with_ids,
+                       const gtsam::Pose3& W_Pose_smoother = gtsam::Pose3()) {
+    for (auto const& point_with_id : smoother_points_with_ids) {
       LandmarkId lmk_id = point_with_id.first;
-      Landmark lmk = point_with_id.second;
+      Landmark lmk_in_smoother = point_with_id.second;
       if (this->find(lmk_id) == this->end()) {
         // If the landmark does not exist, add it.
-        this->emplace(lmk_id, lmk);
+        this->emplace(lmk_id, W_Pose_smoother * lmk_in_smoother);
       } else {
         // If it exists, update the landmark.
-        this->at(lmk_id) = lmk;
+        this->at(lmk_id) = W_Pose_smoother * lmk_in_smoother;
       }
     }
   }

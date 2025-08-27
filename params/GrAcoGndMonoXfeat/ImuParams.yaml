@@ -24,8 +24,8 @@ gyroscope_random_walk: 1.5212086e-05       # [ rad / s^2 / sqrt(Hz) ] ( gyro bia
 
 # other parameters
 do_imu_rate_time_alignment: 1
-time_alignment_window_size_s: 20.0
-time_alignment_variance_threshold_scaling: 30.0
+time_alignment_window_size_s: 5
+time_alignment_variance_threshold_scaling: 1
 imu_integration_sigma: 1e-06
 imu_time_shift: 0.0  # in seconds
 n_gravity: [0.00000000,  0.00000000, -9.81000000]  # [m/s^2] (gravity vectory in "world" frame)

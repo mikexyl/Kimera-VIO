@@ -322,7 +322,7 @@ VisualizerOutput::UniquePtr OpenCvVisualizer3D::spinOnce(
       planes_prev = input.mesher_output_->planes_;
       vertices_mesh_prev = input.mesher_output_->vertices_mesh_;
       polygons_mesh_prev = input.mesher_output_->polygons_mesh_;
-      points_with_id_VIO_prev = input.backend_output_->landmarks_with_id_map_;
+      points_with_id_VIO_prev = input.backend_output_->landmarks_out_local_window_;
       lmk_id_to_lmk_type_map_prev =
           input.backend_output_->lmk_id_to_lmk_type_map_;
       LOG_IF(WARNING, mesh3d_viz_properties_callback_)
@@ -352,7 +352,7 @@ VisualizerOutput::UniquePtr OpenCvVisualizer3D::spinOnce(
       // Do not color the cloud, send empty lmk id to lmk type map
       // TODO(Toni): don't use the backend's maps, instead, build these maps,
       // in the visualizer using the state and the factor graph.
-      visualizePoints3D(input.backend_output_->landmarks_with_id_map_,
+      visualizePoints3D(input.backend_output_->landmarks_out_local_window_,
                         input.backend_output_->lmk_id_to_lmk_type_map_,
                         &output->widgets_);
       break;

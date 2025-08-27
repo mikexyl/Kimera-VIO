@@ -306,7 +306,9 @@ struct BackendOutput : public PipelinePayload {
                 const int& landmark_count,
                 const DebugVioInfo& debug_info,
                 const PointsWithIdMap& landmarks_with_id_map,
-                const LmkIdToLmkTypeMap& lmk_id_to_lmk_type_map)
+                const LmkIdToLmkTypeMap& lmk_id_to_lmk_type_map,
+                const PointsWithIdMap& landmarks_in_local_window = {},
+                const gtsam::Pose3& W_Pose_smoother = gtsam::Pose3())
       : PipelinePayload(timestamp_kf),
         W_State_Blkf_(timestamp_kf, W_Pose_Blkf, W_Vel_Blkf, imu_bias_lkf),
         state_(state),
@@ -315,8 +317,10 @@ struct BackendOutput : public PipelinePayload {
         cur_kf_id_(cur_kf_id),
         landmark_count_(landmark_count),
         debug_info_(debug_info),
-        landmarks_with_id_map_(landmarks_with_id_map),
-        lmk_id_to_lmk_type_map_(lmk_id_to_lmk_type_map) {}
+        landmarks_out_local_window_(landmarks_with_id_map),
+        landmarks_in_local_window_(landmarks_in_local_window),
+        lmk_id_to_lmk_type_map_(lmk_id_to_lmk_type_map),
+        W_Pose_smoother_(W_Pose_smoother) {}
 
   BackendOutput(const VioNavStateTimestamped& vio_navstate_timestamped,
                 const gtsam::Values& state,
@@ -326,7 +330,9 @@ struct BackendOutput : public PipelinePayload {
                 const int& landmark_count,
                 const DebugVioInfo& debug_info,
                 const PointsWithIdMap& landmarks_with_id_map,
-                const LmkIdToLmkTypeMap& lmk_id_to_lmk_type_map)
+                const LmkIdToLmkTypeMap& lmk_id_to_lmk_type_map,
+                const PointsWithIdMap& landmarks_in_local_window = {},
+                const gtsam::Pose3& W_Pose_smoother = gtsam::Pose3())
       : PipelinePayload(vio_navstate_timestamped.timestamp_),
         W_State_Blkf_(vio_navstate_timestamped),
         state_(state),
@@ -335,8 +341,10 @@ struct BackendOutput : public PipelinePayload {
         cur_kf_id_(cur_kf_id),
         landmark_count_(landmark_count),
         debug_info_(debug_info),
-        landmarks_with_id_map_(landmarks_with_id_map),
-        lmk_id_to_lmk_type_map_(lmk_id_to_lmk_type_map) {}
+        landmarks_out_local_window_(landmarks_with_id_map),
+        landmarks_in_local_window_(landmarks_in_local_window),
+        lmk_id_to_lmk_type_map_(lmk_id_to_lmk_type_map),
+        W_Pose_smoother_(W_Pose_smoother) {}
 
   const VioNavStateTimestamped W_State_Blkf_;
   const gtsam::Values state_;
@@ -345,8 +353,10 @@ struct BackendOutput : public PipelinePayload {
   const FrameId cur_kf_id_;
   const int landmark_count_;
   const DebugVioInfo debug_info_;
-  const PointsWithIdMap landmarks_with_id_map_;
+  const PointsWithIdMap landmarks_out_local_window_;
+  const PointsWithIdMap landmarks_in_local_window_;
   const LmkIdToLmkTypeMap lmk_id_to_lmk_type_map_;
+  const gtsam::Pose3 W_Pose_smoother_;
 };
 
 ////////////////////////////////////////////////////////////////////////////////

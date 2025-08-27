@@ -293,37 +293,9 @@ KeypointsCV FeatureDetector::featureDetection(Frame* cur_frame,
 
     VLOG(1) << "Number of points detected : " << keypoints.size();
 
-    // CHECK if we get at least 80% of the requested keypoints
-    static constexpr float kMinKeypointsRatio = 0.51f;
-    CHECK_GE(keypoints.size(),
-             static_cast<size_t>(kMinKeypointsRatio * need_n_corners))
-        << "XFeat detected only " << keypoints.size()
-        << " keypoints, but need at least "
-        << static_cast<size_t>(kMinKeypointsRatio * need_n_corners);
-
     // if doesn't get enough keypoints, we copy the top keypoints and their
     // descriptors
-    if (keypoints.size() < static_cast<size_t>(need_n_corners)) {
-      LOG(WARNING) << "XFeat detected only " << keypoints.size()
-                   << " keypoints, but need at least " << need_n_corners
-                   << ". Copying top keypoints and descriptors.";
-      int n_kpts_to_copy = need_n_corners - keypoints.size();
-      keypoints.insert(keypoints.end(),
-                       keypoints.begin(),
-                       keypoints.begin() + n_kpts_to_copy);
-      CHECK(not cur_frame->descriptors_.empty());
-      cur_frame->descriptors_.push_back(
-          cur_frame->descriptors_.rowRange(0, n_kpts_to_copy).clone());
-      keypoint_stds.insert(keypoint_stds.end(),
-                           keypoint_stds.begin(),
-                           keypoint_stds.begin() + n_kpts_to_copy);
-
-      CHECK_EQ(keypoints.size(), need_n_corners);
-      CHECK_EQ(cur_frame->descriptors_.rows, need_n_corners);
-      CHECK_EQ(keypoint_stds.size(), need_n_corners)
-          << "keypoint_stds size: " << keypoint_stds.size()
-          << ", need_n_corners: " << need_n_corners;
-    } else {
+    if (keypoints.size() > static_cast<size_t>(need_n_corners)) {
       // if there is more than need, discard last n kpts
       keypoints.resize(need_n_corners);
       cur_frame->descriptors_.resize(need_n_corners);

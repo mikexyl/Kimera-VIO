@@ -1397,7 +1397,6 @@ void Tracker::featureTrackingDesc(
   // Initialize to old locations
   LOG_IF(ERROR, px_ref.size() == 0u) << "No keypoints in reference frame!";
 
-  CHECK_EQ(ref_frame->keypoints_.size(), cur_frame->keypoints_.size());
   CHECK(not ref_frame->descriptors_.empty());
   CHECK(not cur_frame->descriptors_.empty());
 

@@ -185,26 +185,32 @@ BackendOutput::UniquePtr VioBackend::spinOnce(const BackendInput& input) {
     static const bool kOutputLmkTypeMap =
         backend_output_params_.output_lmk_id_to_lmk_type_map_;
     LmkIdToLmkTypeMap lmk_id_to_lmk_type_map;
-    PointsWithIdMap lmk_ids_to_3d_points_in_time_horizon;
+    PointsWithIdMap lmks_out_local_window, lmks_in_local_window;
     if (kOutputLmkMap) {
       // Generate this map only if requested, since costly.
       // Also, if lmk type requested, fill lmk id to lmk type object.
       // WARNING this also cleans the lmks inside the old_smart_factors map!
-      lmk_ids_to_3d_points_in_time_horizon =
-          getMapLmkIdsTo3dPointsOutTimeHorizon(
-              smoother_->getFactors(),
-              kOutputLmkTypeMap ? &lmk_id_to_lmk_type_map : nullptr,
-              kMinLmkObs);
+      lmks_out_local_window = getMapLmkIdsTo3dPointsOutTimeHorizon(
+          smoother_->getFactors(),
+          kOutputLmkTypeMap ? &lmk_id_to_lmk_type_map : nullptr,
+          kMinLmkObs);
+      lmks_in_local_window = getMapLmkIdsTo3dPointsInTimeHorizon(
+          smoother_->getFactors(), nullptr, kMinLmkObs);
     }
 
     if (map_update_callback_) {
-      map_update_callback_(lmk_ids_to_3d_points_in_time_horizon);
+      map_update_callback_(lmks_out_local_window);
     } else {
       LOG(FATAL) << "Did you forget to register the Map "
                     "Update callback for at least the "
                     "Frontend? Do so by using "
                     "registerMapUpdateCallback function.";
     }
+
+    gtsam::Pose3 smoother_P_cur = state_.at<gtsam::Pose3>(gtsam::Symbol(
+        kPoseSymbolChar, curr_kf_id_));  // Body pose from smoother.
+    gtsam::Pose3 W_P_cur = W_Pose_B_lkf_from_increments_;
+    gtsam::Pose3 W_P_smoother = W_P_cur * smoother_P_cur.inverse();
 
     // Create Backend Output Payload.
     output_payload = std::make_unique<BackendOutput>(
@@ -221,8 +227,10 @@ BackendOutput::UniquePtr VioBackend::spinOnce(const BackendInput& input) {
         curr_kf_id_,
         landmark_count_,
         debug_info_,
-        lmk_ids_to_3d_points_in_time_horizon,
-        lmk_id_to_lmk_type_map);
+        lmks_out_local_window,
+        lmk_id_to_lmk_type_map,
+        lmks_in_local_window,
+        W_P_smoother);
 
     if (logger_) {
       logger_->logBackendOutput(*output_payload);
