@@ -66,8 +66,8 @@ class LighterGlueCV : public FeatureTracker {
     }
     det1.descriptors = cur_desc;
 
-    cv::Size image_size0(640, 352);  // Default size, can be changed
-    cv::Size image_size1(640, 352);  // Default size, can be changed
+    cv::Size image_size0(640, 480);  // Default size, can be changed
+    cv::Size image_size1(640, 480);  // Default size, can be changed
 
     lg_matcher_.match(det0, image_size0, det1, image_size1, matches);
 
@@ -80,6 +80,7 @@ class LighterGlueCV : public FeatureTracker {
     // set status
     for (auto match : matches) {
       status_vec[match.queryIdx] = 1;  // Mark as found
+      VLOG(1) << "Match found: " << match.queryIdx << " -> " << match.trainIdx;
     }
 
     std::vector<float>& err_vec =

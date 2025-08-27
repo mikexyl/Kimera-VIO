@@ -87,6 +87,8 @@ Tracker::Tracker(const TrackerParams& tracker_params,
   stereo_ransac_.max_iterations_ = tracker_params_.ransac_max_iterations_;
   stereo_ransac_.probability_ = tracker_params_.ransac_probability_;
 
+  optical_flow_tracker_ = OpticalFlowCV::Create();
+
   switch (tracker_params.tracker_type_) {
     case TrackerParams::TrackerType::OPTICAL_FLOW: {
       feature_tracker_ = OpticalFlowCV::Create();
@@ -133,10 +135,13 @@ void Tracker::featureTracking(
     Frame* cur_frame,
     const gtsam::Rot3& ref_R_cur,
     const FeatureDetectorParams& feature_detector_params,
-    std::optional<cv::Mat> R) {
+    std::optional<cv::Mat> R,
+    bool invalidate_landmarks,
+    bool use_optical_flow) {
   CHECK_NOTNULL(ref_frame);
   CHECK_NOTNULL(cur_frame);
   auto tic = utils::Timer::tic();
+  VLOG(1) << "lmk id " << FeatureDetector::lmk_id;
 
   // Fill up structure for reference pixels and their labels.
   const size_t& n_ref_kpts = ref_frame->keypoints_.size();
@@ -173,16 +178,29 @@ void Tracker::featureTracking(
   std::vector<uchar> status;
   std::vector<float> error;
   auto time_lukas_kanade_tic = utils::Timer::tic();
-  feature_tracker_->track(ref_frame,
-                          cur_frame,
-                          px_ref,
-                          px_cur,
-                          status,
-                          error,
-                          klt_window_size,
-                          tracker_params_.klt_max_level_,
-                          kTerminationCriteria,
-                          cv::OPTFLOW_USE_INITIAL_FLOW);
+  if (use_optical_flow) {
+    optical_flow_tracker_->track(ref_frame,
+                                 cur_frame,
+                                 px_ref,
+                                 px_cur,
+                                 status,
+                                 error,
+                                 klt_window_size,
+                                 tracker_params_.klt_max_level_,
+                                 kTerminationCriteria,
+                                 cv::OPTFLOW_USE_INITIAL_FLOW);
+  } else {
+    feature_tracker_->track(ref_frame,
+                            cur_frame,
+                            px_ref,
+                            px_cur,
+                            status,
+                            error,
+                            klt_window_size,
+                            tracker_params_.klt_max_level_,
+                            kTerminationCriteria,
+                            cv::OPTFLOW_USE_INITIAL_FLOW);
+  }
   VLOG(1) << "Optical Flow Timing [ms]: "
           << utils::Timer::toc(time_lukas_kanade_tic).count();
 
@@ -214,22 +232,23 @@ void Tracker::featureTracking(
   cur_frame->keypoints_.reserve(px_ref.size());
   cur_frame->scores_.reserve(px_ref.size());
   cur_frame->versors_.reserve(px_ref.size());
-  for (size_t i = 0u; i < indices_of_valid_landmarks.size(); ++i) {
+  for (size_t i = 0u; i < ref_frame->keypoints_.size(); ++i) {
+    if (not status[i]) continue;
     // If we failed to track mark off that landmark
-    const size_t& idx_valid_lmk = indices_of_valid_landmarks[i];
-    const size_t& lmk_age = ref_frame->landmarks_age_[idx_valid_lmk];
-    const LandmarkId& lmk_id = ref_frame->landmarks_[idx_valid_lmk];
+    const size_t& lmk_age = ref_frame->landmarks_age_[i];
+    const LandmarkId& lmk_id = ref_frame->landmarks_[i];
 
     // if we tracked keypoint and feature track is not too long
-    if (!status[i] || lmk_age > tracker_params_.max_feature_track_age_) {
+    if (invalidate_landmarks and
+        (!status[i] || lmk_age > tracker_params_.max_feature_track_age_)) {
       // we are marking this bad in the ref_frame since features
       // in the ref frame guide feature detection later on
-      ref_frame->landmarks_[idx_valid_lmk] = -1;
+      ref_frame->landmarks_[i] = -1;
       continue;
     }
     cur_frame->landmarks_.push_back(lmk_id);
     cur_frame->landmarks_age_.push_back(lmk_age);
-    cur_frame->scores_.push_back(ref_frame->scores_[idx_valid_lmk]);
+    cur_frame->scores_.push_back(ref_frame->scores_[i]);
     cur_frame->keypoints_.push_back(px_cur[i]);
     gtsam::Vector3 bearing_vector = UndistorterRectifier::GetBearingVector(
         px_cur[i], ref_frame->cam_param_, R);
@@ -237,6 +256,12 @@ void Tracker::featureTracking(
         << "Versor norm: " << bearing_vector.norm();
     cur_frame->versors_.push_back(bearing_vector);
   }
+  VLOG(1) << "cur lmk range after track "
+          << *std::min_element(cur_frame->landmarks_.begin(),
+                               cur_frame->landmarks_.end())
+          << " - "
+          << *std::max_element(cur_frame->landmarks_.begin(),
+                               cur_frame->landmarks_.end());
 
   // max number of frames in which a feature is seen
   VLOG(5) << "featureTracking: frame " << cur_frame->id_

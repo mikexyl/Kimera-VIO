@@ -40,7 +40,8 @@ class FeatureDetector {
 
  public:
   void featureDetection(Frame* cur_frame,
-                        std::optional<cv::Mat> R = std::nullopt);
+                        std::optional<cv::Mat> R = std::nullopt,
+                        Frame* ref_frame = nullptr);
 
   /**
    * @brief rawFeatureDetection Raw feature detection: in image, out keypoints
@@ -56,11 +57,17 @@ class FeatureDetector {
  private:
   // Returns landmark_count (updated from the new keypoints),
   // and nr or extracted corners.
-  KeypointsCV featureDetection(Frame* cur_frame, const int& need_n_corners);
+  KeypointsCV featureDetection(Frame* cur_frame,
+                               Frame* ref_frame,
+                               const int& need_n_corners,
+                               int* n_prev_lmk);
 
   void featureDetectionTracked(Frame* cur_frame,
+                               Frame* ref_frame,
                                std::optional<cv::Mat> R = std::nullopt);
+
   void featureDetectionNew(Frame* cur_frame,
+                           Frame* ref_frame,
                            std::optional<cv::Mat> R = std::nullopt);
 
   // Parameters.

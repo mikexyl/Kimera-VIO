@@ -78,7 +78,9 @@ class Tracker {
                        Frame* cur_frame,
                        const gtsam::Rot3& inter_frame_rotation,
                        const FeatureDetectorParams& feature_detector_params,
-                       std::optional<cv::Mat> R = std::nullopt);
+                       std::optional<cv::Mat> R = std::nullopt,
+                       bool invalidate_landmarks = true,
+                       bool use_optical_flow = true);
 
   void featureTrackingDesc(Frame* ref_frame,
                            Frame* cur_frame,
@@ -362,6 +364,7 @@ class Tracker {
   LandmarksMap landmarks_map_;
 
   FeatureTracker::Ptr feature_tracker_ = nullptr;
+  OpticalFlowCV::Ptr optical_flow_tracker_ = nullptr;
 };
 
 }  // namespace VIO

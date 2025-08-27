@@ -40,7 +40,7 @@ class OpticalFlowCV : public FeatureTracker {
                              minEigThreshold);
   }
 
-  static FeatureTracker::Ptr Create() {
+  static OpticalFlowCV::Ptr Create() {
     return std::make_shared<OpticalFlowCV>();
   }
 };

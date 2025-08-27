@@ -141,6 +141,7 @@ FeatureDetector::FeatureDetector(
 // NOTE: for stereo cameras we pass R to ensure we rectify the versors
 // and 3D points of the features we detect.
 void FeatureDetector::featureDetectionTracked(Frame* cur_frame,
+                                              Frame* ref_frame,
                                               std::optional<cv::Mat> R) {
   CHECK_NOTNULL(cur_frame);
 
@@ -168,7 +169,8 @@ void FeatureDetector::featureDetectionTracked(Frame* cur_frame,
   // Actual feature detection: detects new keypoints where there are no
   // currently tracked ones
   // auto start_time_tic = utils::Timer::tic();
-  const KeypointsCV& corners = featureDetection(cur_frame, nr_corners_needed);
+  const KeypointsCV& corners =
+      featureDetection(cur_frame, ref_frame, nr_corners_needed, nullptr);
   const size_t& n_corners = corners.size();
 
   // debug_info_.featureDetectionTime_ =
@@ -220,7 +222,10 @@ std::vector<cv::KeyPoint> FeatureDetector::rawFeatureDetection(
 }
 
 KeypointsCV FeatureDetector::featureDetection(Frame* cur_frame,
-                                              const int& need_n_corners) {
+                                              Frame* ref_frame,
+                                              const int& need_n_corners,
+                                              int* n_prev_lmk) {
+  VLOG(1) << "lmk id " << FeatureDetector::lmk_id;
   // cv::namedWindow("Input Image", cv::WINDOW_AUTOSIZE);
   // cv::imshow("Input Image", cur_frame.img_);
 
@@ -230,27 +235,10 @@ KeypointsCV FeatureDetector::featureDetection(Frame* cur_frame,
   // longer good quality or visible early on if they don't have detected
   // keypoints nearby by! The mask is interpreted as: 255 -> consider, 0 ->
   // don't consider.
-  cv::Mat mask;
-  if (cur_frame->detection_mask_.empty()) {
-    mask = cv::Mat(cur_frame->img_.size(), CV_8U, cv::Scalar(255));
-  } else {
-    mask = cur_frame->detection_mask_;
-  }
-
-  for (size_t i = 0u; i < cur_frame->keypoints_.size(); ++i) {
-    if (cur_frame->landmarks_.at(i) != -1) {
-      // Only mask keypoints that are being triangulated (I guess
-      // feature tracks? should be made more explicit)
-      cv::circle(mask,
-                 cur_frame->keypoints_.at(i),
-                 feature_detector_params_
-                     .min_distance_btw_tracked_and_detected_features_,
-                 cv::Scalar(0),
-                 CV_FILLED);
-    }
-  }
-
   // Actual raw feature detection
+  if (ref_frame) {
+    CHECK_NE(cur_frame->id_, ref_frame->id_);
+  }
   std::vector<cv::KeyPoint> keypoints;
   if (feature_detector_params_.feature_detector_type_ >=
       FeatureDetectorType::XFEAT) {
@@ -259,11 +247,46 @@ KeypointsCV FeatureDetector::featureDetection(Frame* cur_frame,
         std::dynamic_pointer_cast<xfeat::XFeatCV>(feature_detector_);
     CHECK_NOTNULL(xfeat_detector);
     std::vector<cv::Vec2d> keypoint_stds;
+    std::set<LandmarkId> existing_lmks;
+    if (ref_frame) {
+      existing_lmks.insert(ref_frame->landmarks_.begin(),
+                           ref_frame->landmarks_.end());
+      VLOG(1) << "prev lmk id range: "
+              << *std::minmax_element(ref_frame->landmarks_.begin(),
+                                      ref_frame->landmarks_.end())
+                      .first
+              << " - "
+              << *std::minmax_element(ref_frame->landmarks_.begin(),
+                                      ref_frame->landmarks_.end())
+                      .second;
+    }
+    for (size_t i = 0; i < cur_frame->keypoints_.size(); i++) {
+      LandmarkId lmk_id = cur_frame->landmarks_.at(i);
+      if (lmk_id != -1 and existing_lmks.count(lmk_id) > 0) {
+        keypoints.emplace_back(cv::KeyPoint(cur_frame->keypoints_.at(i), 1.0));
+      }
+    }
+    if (n_prev_lmk) {
+      *n_prev_lmk = keypoints.size();
+    }
+    VLOG(1) << "Number of points remaining: " << keypoints.size();
+    VLOG(1) << "prev lmks: " << existing_lmks.size();
+    if (not keypoints.empty()) {
+      VLOG(1) << "cur lmk id range: "
+              << *std::minmax_element(cur_frame->landmarks_.begin(),
+                                      cur_frame->landmarks_.end())
+                      .first
+              << " - "
+              << *std::minmax_element(cur_frame->landmarks_.begin(),
+                                      cur_frame->landmarks_.end())
+                      .second;
+    }
+
     xfeat_detector->detectAndCompute(cur_frame->img_,
-                                     mask,
+                                     {},
                                      keypoints,
                                      cur_frame->descriptors_,
-                                     false,
+                                     true,
                                      &cur_frame->xfeat_M1_,
                                      &cur_frame->xfeat_x_prep_,
                                      &keypoint_stds);
@@ -288,6 +311,7 @@ KeypointsCV FeatureDetector::featureDetection(Frame* cur_frame,
       keypoints.insert(keypoints.end(),
                        keypoints.begin(),
                        keypoints.begin() + n_kpts_to_copy);
+      CHECK(not cur_frame->descriptors_.empty());
       cur_frame->descriptors_.push_back(
           cur_frame->descriptors_.rowRange(0, n_kpts_to_copy).clone());
       keypoint_stds.insert(keypoint_stds.end(),
@@ -310,7 +334,29 @@ KeypointsCV FeatureDetector::featureDetection(Frame* cur_frame,
       cur_frame->keypoint_stds.push_back(
           std::max(keypoint_stds[i][0], keypoint_stds[i][1]));
     }
+
+    VLOG(1) << "finish xfeat detection " << keypoints.size();
   } else {
+    cv::Mat mask;
+    if (cur_frame->detection_mask_.empty()) {
+      mask = cv::Mat(cur_frame->img_.size(), CV_8U, cv::Scalar(255));
+    } else {
+      mask = cur_frame->detection_mask_;
+    }
+
+    for (size_t i = 0u; i < cur_frame->keypoints_.size(); ++i) {
+      if (cur_frame->landmarks_.at(i) != -1) {
+        // Only mask keypoints that are being triangulated (I guess
+        // feature tracks? should be made more explicit)
+        cv::circle(mask,
+                   cur_frame->keypoints_.at(i),
+                   feature_detector_params_
+                       .min_distance_btw_tracked_and_detected_features_,
+                   cv::Scalar(0),
+                   CV_FILLED);
+      }
+    }
+
     keypoints = rawFeatureDetection(cur_frame->img_, mask);
     VLOG(1) << "Need n corners: " << need_n_corners;
     // Tolerance of the number of returned points in percentage.
@@ -328,59 +374,8 @@ KeypointsCV FeatureDetector::featureDetection(Frame* cur_frame,
     }
   }
 
-  /*{
-   cv::Mat fastDetectionResults;  // draw FAST detections
-   cv::drawKeypoints(cur_frame.img_,
-                   keypoints,
-                   fastDetectionResults,
-                   cv::Scalar(94.0, 206.0, 165.0, 0.0));
-   cv::namedWindow("FAST Detections", cv::WINDOW_AUTOSIZE);
-   cv::imshow("FAST Detections", fastDetectionResults);
-   cv::imshow("MASK Detections", mask);
-   cv::waitKey(0);
-  }*/
-
-  // NOTE: if we don't use max_suppression we may end with more corners than
-  // requested...
-
-  /*{
-    cv::Mat fastDetectionResults;  // draw FAST detections
-    cv::drawKeypoints(cur_frame.img_,
-                      keypoints,
-                      fastDetectionResults,
-                      cv::Scalar(234.0, 60.0, 5.0));
-    int nrVerticalBins = feature_detector_params_.nr_vertical_bins_;
-    int nrHorizontalBins = feature_detector_params_.nr_horizontal_bins_;
-    float binRowSize = float(cur_frame.img_.rows) / float(nrVerticalBins);
-    float binColSize = float(cur_frame.img_.cols) / float(nrHorizontalBins);
-    for (int binRowInd = 0; binRowInd < nrVerticalBins; binRowInd++) {
-      float xmin = 0;
-      float xmax = cur_frame.img_.cols;
-      float y = binRowInd * binRowSize;
-      cv::line(fastDetectionResults,
-               cv::Point2f(xmin, y),
-               cv::Point2f(xmax, y),
-               cv::Scalar(94.0, 206.0, 165.0),
-               2,
-               cv::LINE_AA);
-    }
-    for (int binColInd = 0; binColInd < nrHorizontalBins; binColInd++) {
-      float ymin = 0;
-      float ymax = cur_frame.img_.rows;
-      float x = binColInd * binColSize;
-      cv::line(fastDetectionResults,
-               cv::Point2f(x, ymin),
-               cv::Point2f(x, ymax),
-               cv::Scalar(94.0, 206.0, 165.0),
-               2,
-               cv::LINE_AA);
-    }
-    cv::namedWindow("After NMS", cv::WINDOW_AUTOSIZE);
-    cv::imshow("After NMS", fastDetectionResults);
-    cv::waitKey(0);
-  }*/
-
   // TODO(Toni): we should be using cv::KeyPoint... not cv::Point2f...
+  VLOG(1) << "keypoitns: " << keypoints.size();
   KeypointsCV new_corners;
   cv::KeyPoint::convert(keypoints, new_corners);
 
@@ -403,29 +398,40 @@ KeypointsCV FeatureDetector::featureDetection(Frame* cur_frame,
     }
   }
 
+  VLOG(1) << "new corners: " << new_corners.size();
+
   return new_corners;
 }
 
 void FeatureDetector::featureDetection(Frame* cur_frame,
-                                       std::optional<cv::Mat> R) {
+                                       std::optional<cv::Mat> R,
+                                       Frame* ref_frame) {
   bool use_tracked_features = feature_detector_params_.feature_detector_type_ <
                               FeatureDetectorType::XFEAT;
   // if we use XFEAT we always detect all new features and then match them
   if (use_tracked_features) {
-    featureDetectionTracked(cur_frame, R);
+    featureDetectionTracked(cur_frame, ref_frame, R);
   } else {
     // If we don't use tracked features, we just detect new features
-    featureDetectionNew(cur_frame, R);
+    featureDetectionNew(cur_frame, ref_frame, R);
   }
+  VLOG(1) << "finish";
+  VLOG(1) << "cur frame has " << cur_frame->keypoints_.size() << " keypoints";
 }
 
 void FeatureDetector::featureDetectionNew(Frame* cur_frame,
+                                          Frame* ref_frame,
                                           std::optional<cv::Mat> R) {
   CHECK_NOTNULL(cur_frame);
 
   int nr_corners_needed = feature_detector_params_.max_features_per_frame_;
 
-  auto corners = featureDetection(cur_frame, nr_corners_needed);
+  int nr_corners_prev;
+
+  auto corners = featureDetection(
+      cur_frame, ref_frame, nr_corners_needed, &nr_corners_prev);
+  VLOG(1) << "finish feature detection " << corners.size() << " "
+          << nr_corners_prev;
 
   const size_t& n_corners = corners.size();
 
@@ -437,15 +443,18 @@ void FeatureDetector::featureDetectionNew(Frame* cur_frame,
 
   // Incremental id assigned to new landmarks
   const CameraParams& cam_param = cur_frame->cam_param_;
-  for (const KeypointCV& corner : corners) {
-    cur_frame->landmarks_.push_back(-1);
+  for (size_t i = nr_corners_prev; i < n_corners; i++) {
+    cur_frame->landmarks_.push_back(FeatureDetector::lmk_id);
     // New keypoint, so seen in a single (key)frame so far.
-    cur_frame->landmarks_age_.push_back(0u);
-    cur_frame->keypoints_.push_back(corner);
+    cur_frame->landmarks_age_.push_back(1u);
+    cur_frame->keypoints_.push_back(corners[i]);
     cur_frame->scores_.push_back(0.0);  // NOT IMPLEMENTED
     cur_frame->versors_.push_back(
-        UndistorterRectifier::GetBearingVector(corner, cam_param, R));
+        UndistorterRectifier::GetBearingVector(corners[i], cam_param, R));
+    FeatureDetector::lmk_id++;
   }
+
+  VLOG(1) << "finish " << n_corners << " " << FeatureDetector::lmk_id;
   // here we only detect and compute keypoints and descriptors
   // matching is done afterwards by the lighterglue matcher
 }
