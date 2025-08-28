@@ -101,6 +101,8 @@ class MonoVisionImuFrontend : public VisionImuFrontend {
   Frame::Ptr mono_frame_km1_;
   // Last keyframe
   Frame::Ptr mono_frame_lkf_;
+  Frame::Ptr mono_frame_lkfm1_;
+  Frame::Ptr mono_frame_lkfm2_;
 
   gtsam::Rot3 keyframe_R_ref_frame_;
 

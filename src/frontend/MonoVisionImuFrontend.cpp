@@ -45,6 +45,8 @@ MonoVisionImuFrontend::MonoVisionImuFrontend(
       mono_frame_k_(nullptr),
       mono_frame_km1_(nullptr),
       mono_frame_lkf_(nullptr),
+      mono_frame_lkfm1_(nullptr),
+      mono_frame_lkfm2_(nullptr),
       keyframe_R_ref_frame_(gtsam::Rot3()),
       feature_detector_(nullptr),
       mono_camera_(camera) {
@@ -293,6 +295,16 @@ StatusMonoMeasurementsPtr MonoVisionImuFrontend::processFrame(
   if (new_keyframe) {
     ++keyframe_count_;
 
+    if (mono_frame_lkfm1_) {
+      // track from lkfm1 to k
+      tracker_->featureTrackingDesc(mono_frame_lkfm1_.get(),
+                                    mono_frame_k_.get(),
+                                    {},
+                                    frontend_params_.feature_detector_params_,
+                                    std::nullopt,
+                                    false);
+    }
+
     // tracker_->featureTrackingDesc(mono_frame_lkf_.get(),
     //                               mono_frame_k_.get(),
     //                               keyframe_R_cur_frame,
@@ -341,6 +353,8 @@ StatusMonoMeasurementsPtr MonoVisionImuFrontend::processFrame(
                    display_queue_);
     }
 
+    mono_frame_lkfm2_ = mono_frame_lkfm1_;
+    mono_frame_lkfm1_ = mono_frame_lkf_;
     mono_frame_lkf_ = mono_frame_k_;
 
     start_time = utils::Timer::tic();

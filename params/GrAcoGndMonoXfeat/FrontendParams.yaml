@@ -11,7 +11,7 @@ maxFeatureAge: 1000
 # 1: ORB
 # 2: AGAST
 # 3: GFTT, aka Good Features To Track
-feature_detector_type: 5
+feature_detector_type: 4
 maxFeaturesPerFrame: 500
 
 # Good Features To Track specific parameters
@@ -35,7 +35,7 @@ maxPointDist: 10
 bidirectionalMatching: 0
 
 # Non-maximum suppression params
-max_nr_keypoints_before_anms: 2000
+max_nr_keypoints_before_anms: 500
 enable_non_max_suppression: 0
 non_max_suppression_type: 6
 nr_horizontal_bins: 7
@@ -96,11 +96,11 @@ interp_nearest_path: /workspaces/src/xfeat-cpp/onnx_model/interpolator_nearest_6
 xfeat_use_gpu: 1
 matcher_type: 0 # 0: Brute Force, 1: FLANN, 2: LighterGlue
 
-feature_tracker_type: 3 # 0: OpticalFlow, 1: LighterGlue 2: Flann 3: GpuBFMatcher 4: GpuBF+RANSAC
-num_features: 1000
+feature_tracker_type: 1 # 0: OpticalFlow, 1: LighterGlue 2: Flann 3: GpuBFMatcher 4: GpuBF+RANSAC
+num_features: 500
 lg_model_path: /workspaces/src/xfeat-cpp/onnx_model/lg_640x480_500.onnx
-gpu_bf_min_sim: 0.95 # Minimum similarity for GpuBFMatcher
-search_radius: 100
+gpu_bf_min_sim: 0.9 # Minimum similarity for GpuBFMatcher
+search_radius: 10000
 
 track_on_keyframe: 1
 

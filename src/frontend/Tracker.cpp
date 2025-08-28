@@ -151,8 +151,6 @@ void Tracker::featureTracking(
   px_ref.reserve(n_ref_kpts);
   indices_of_valid_landmarks.reserve(n_ref_kpts);
   for (size_t i = 0; i < ref_frame->keypoints_.size(); ++i) {
-    CHECK_NE(ref_frame->landmarks_[i],
-             -1);  // should not be tracking keypoints without landmarks
     if (ref_frame->landmarks_[i] != -1) {
       // Current reference frame keypoint has a valid landmark.
       px_ref.push_back(ref_frame->keypoints_[i]);
@@ -1442,17 +1440,12 @@ void Tracker::featureTrackingDesc(
     }
 
     LandmarkId cur_lmk_id = cur_frame->landmarks_.at(cur_i);
-    if (ref_lmk_ids.count(cur_lmk_id)) {
+    if (ref_lmk_ids.count(cur_lmk_id) and cur_lmk_id != -1) {
       // This landmark is already in the reference frame, skip it.
       continue;
     }
 
-    if (ref_frame->landmarks_.at(ref_i) == -1) {
-      if (not mergeLandmark(ref_frame, ref_i, &ref_kp_kdtree)) {
-        // This is a new feature, assign a new landmark id.
-        ref_frame->landmarks_.at(ref_i) = FeatureDetector::lmk_id++;
-      }
-    }
+    mergeLandmark(ref_frame, ref_i, &ref_kp_kdtree);
     cur_frame->landmarks_.at(cur_i) = ref_frame->landmarks_.at(ref_i);
     tracked_lmk_ids.insert(ref_frame->landmarks_.at(ref_i));
     ref_frame->landmarks_age_.at(ref_i)++;
@@ -1474,11 +1467,11 @@ void Tracker::featureTrackingDesc(
   }
 
   // assign unmatched keypoints a new landmark id
-  for (size_t i = 0; i < cur_frame->landmarks_.size(); ++i) {
-    if (cur_frame->landmarks_.at(i) == -1) {
-      cur_frame->landmarks_.at(i) = FeatureDetector::lmk_id++;
-    }
-  }
+  // for (size_t i = 0; i < cur_frame->landmarks_.size(); ++i) {
+  //   if (cur_frame->landmarks_.at(i) == -1) {
+  //     cur_frame->landmarks_.at(i) = FeatureDetector::lmk_id++;
+  //   }
+  // }
 
   // max number of frames in which a feature is seen
   VLOG(5) << "featureTracking: frame " << cur_frame->id_
