@@ -58,7 +58,8 @@ std::vector<int> remapOpenGvInliersToKimera(
 Tracker::Tracker(const TrackerParams& tracker_params,
                  const Camera::ConstPtr& camera,
                  DisplayQueue* display_queue,
-                 std::shared_ptr<Ort::Env> env)
+                 std::shared_ptr<Ort::Env> env,
+                 bool use_of_tracker)
     : tracker_params_(tracker_params),
       landmark_count_(0),
       camera_(camera),
@@ -66,7 +67,6 @@ Tracker::Tracker(const TrackerParams& tracker_params,
       optical_flow_predictor_(nullptr),
       display_queue_(display_queue),
       output_images_path_("./outputImages/") {
-  LOG(INFO) << int(tracker_params_.tracker_type_);
   // Create the optical flow prediction module
   optical_flow_predictor_ =
       OpticalFlowPredictorFactory::makeOpticalFlowPredictor(
@@ -90,21 +90,24 @@ Tracker::Tracker(const TrackerParams& tracker_params,
   stereo_ransac_.max_iterations_ = tracker_params_.ransac_max_iterations_;
   stereo_ransac_.probability_ = tracker_params_.ransac_probability_;
 
-  VilibTracker::Params vilib_params;
-  vilib_params.width = camera_->getCamParams().image_size_.width;
-  vilib_params.height = camera_->getCamParams().image_size_.height;
-  vilib_params.detector_options_.cell_width = tracker_params_.vilib_cell_width;
-  vilib_params.detector_options_.cell_height =
-      tracker_params_.vilib_cell_height;
-  vilib_params.feature_tracker_options_.reset_before_detection = false;
-  vilib_params.feature_tracker_options_.min_tracks_to_detect_new_features =
-      tracker_params_.num_features_ * 0.4;
-  vilib_params.feature_tracker_options_.use_best_n_features =
-      tracker_params_.num_features_;
+  if (use_of_tracker) {
+    VilibTracker::Params vilib_params;
+    vilib_params.width = camera_->getCamParams().image_size_.width;
+    vilib_params.height = camera_->getCamParams().image_size_.height;
+    vilib_params.detector_options_.cell_width =
+        tracker_params_.vilib_cell_width;
+    vilib_params.detector_options_.cell_height =
+        tracker_params_.vilib_cell_height;
+    vilib_params.feature_tracker_options_.reset_before_detection = false;
+    vilib_params.feature_tracker_options_.min_tracks_to_detect_new_features =
+        tracker_params_.num_features_;
+    vilib_params.feature_tracker_options_.use_best_n_features =
+        tracker_params_.num_features_ * 1.1;
 
-  optical_flow_tracker_ = std::make_shared<VilibTracker>(vilib_params);
-
-  LOG(INFO) << VIO::to_underlying(tracker_params.tracker_type_);
+    optical_flow_tracker_ = std::make_shared<VilibTracker>(vilib_params);
+  } else {
+    optical_flow_tracker_ = nullptr;
+  }
 
   switch (tracker_params.tracker_type_) {
     case TrackerParams::TrackerType::OPTICAL_FLOW: {
@@ -1449,7 +1452,6 @@ void Tracker::featureTrackingDesc(
     ref_kp_mat.at<float>(i, 0) = ref_frame->keypoints_[i].x;
     ref_kp_mat.at<float>(i, 1) = ref_frame->keypoints_[i].y;
   }
-  cv::flann::Index ref_kp_kdtree(ref_kp_mat, kdtree_params);
   std::set<LandmarkId> ref_lmk_ids(ref_frame->landmarks_.begin(),
                                    ref_frame->landmarks_.end());
 
@@ -1470,7 +1472,7 @@ void Tracker::featureTrackingDesc(
       continue;
     }
 
-    mergeLandmark(ref_frame.get(), ref_i, &ref_kp_kdtree);
+    // mergeLandmark(ref_frame.get(), ref_i, &ref_kp_kdtree);
     cur_frame->landmarks_.at(cur_i) = ref_frame->landmarks_.at(ref_i);
     tracked_lmk_ids.insert(ref_frame->landmarks_.at(ref_i));
     ref_frame->landmarks_age_.at(ref_i)++;

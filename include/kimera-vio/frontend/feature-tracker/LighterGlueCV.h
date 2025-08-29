@@ -14,9 +14,7 @@ class LighterGlueCV : public FeatureTracker {
 
   using Params = xfeat::LighterGlueCV::Params;
 
-  LighterGlueCV(Ort::Env& env, Params params) : lg_matcher_(env, params) {
-    lg_matcher_.warmup();
-  }
+  LighterGlueCV(Ort::Env& env, Params params) : lg_matcher_(env, params) {}
   virtual ~LighterGlueCV() = default;
 
   void track(Frame* ref_frame,
@@ -58,6 +56,11 @@ class LighterGlueCV : public FeatureTracker {
       det0.keypoints.at<float>(i, 1) = ref_frame->keypoints_[i].y;
     }
     det0.descriptors = ref_desc;
+    det0.scores.create(ref_frame->scores_.size(), 1, CV_32F);
+    // copy data from ref_frame->scores_ to det0.scores
+    for (size_t i = 0; i < ref_frame->scores_.size(); ++i) {
+      det0.scores.at<float>(i) = ref_frame->scores_[i];
+    }
 
     det1.keypoints = cv::Mat(cur_frame->keypoints_.size(), 2, CV_32F);
     for (size_t i = 0; i < cur_frame->keypoints_.size(); ++i) {
@@ -65,6 +68,10 @@ class LighterGlueCV : public FeatureTracker {
       det1.keypoints.at<float>(i, 1) = cur_frame->keypoints_[i].y;
     }
     det1.descriptors = cur_desc;
+    det1.scores.create(cur_frame->scores_.size(), 1, CV_32F);
+    for (size_t i = 0; i < cur_frame->scores_.size(); ++i) {
+      det1.scores.at<float>(i) = cur_frame->scores_[i];
+    }
 
     cv::Size image_size0(640, 480);  // Default size, can be changed
     cv::Size image_size1(640, 480);  // Default size, can be changed
@@ -112,6 +119,11 @@ class LighterGlueCV : public FeatureTracker {
       det0.keypoints.at<float>(i, 1) = ref_frame->keypoints_[i].y;
     }
     det0.descriptors = ref_frame->descriptors_;
+    det0.scores.create(ref_frame->scores_.size(), 1, CV_32F);
+    // copy data from ref_frame->scores_ to det0.scores
+    for (size_t i = 0; i < ref_frame->scores_.size(); ++i) {
+      det0.scores.at<float>(i) = ref_frame->scores_[i];
+    }
 
     det1.keypoints = cv::Mat(cur_frame->keypoints_.size(), 2, CV_32F);
     for (size_t i = 0; i < cur_frame->keypoints_.size(); ++i) {
@@ -119,6 +131,11 @@ class LighterGlueCV : public FeatureTracker {
       det1.keypoints.at<float>(i, 1) = cur_frame->keypoints_[i].y;
     }
     det1.descriptors = cur_frame->descriptors_;
+    det1.scores.create(cur_frame->scores_.size(), 1, CV_32F);
+    // copy data from ref_frame->scores_ to det0.scores
+    for (size_t i = 0; i < cur_frame->scores_.size(); ++i) {
+      det1.scores.at<float>(i) = cur_frame->scores_[i];
+    }
 
     cv::Size image_size0 = ref_frame->img_.size();  // Use actual image size
     cv::Size image_size1 = cur_frame->img_.size();  // Use actual image size

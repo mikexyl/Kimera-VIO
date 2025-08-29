@@ -55,9 +55,12 @@ MonoVisionImuFrontend::MonoVisionImuFrontend(
 
   frontend_params_.tracker_params_.print();
 
-  LOG(INFO) << int(frontend_params.tracker_params_.tracker_type_);
-  tracker_ = std::make_shared<Tracker>(
-      frontend_params_.tracker_params_, mono_camera_, display_queue, ort_env_);
+  static constexpr bool kFrontendTrackerUseOF = true;
+  tracker_ = std::make_shared<Tracker>(frontend_params_.tracker_params_,
+                                       mono_camera_,
+                                       display_queue,
+                                       ort_env_,
+                                       kFrontendTrackerUseOF);
 
   feature_detector_ = std::make_unique<FeatureDetector>(
       frontend_params_.feature_detector_params_, ort_env_);
@@ -225,6 +228,8 @@ void MonoVisionImuFrontend::processFirstFrame(const Frame& first_frame) {
                             frontend_params_.feature_detector_params_,
                             std::nullopt,
                             false);
+  CHECK_GE(mono_frame_k_->keypoints_.size(),
+           frontend_params_.tracker_params_.num_features_);
 
   // Undistort keypoints:
   mono_camera_->undistortKeypoints(mono_frame_k_->keypoints_,
@@ -294,35 +299,36 @@ StatusMonoMeasurementsPtr MonoVisionImuFrontend::processFrame(
   if (new_keyframe) {
     ++keyframe_count_;
 
-    // feature_detector_->featureDetection(
-    //     mono_frame_k_.get(), std::nullopt, mono_frame_km1_.get());
+    feature_detector_->featureDetection(
+        mono_frame_k_.get(), std::nullopt, mono_frame_km1_.get());
+
+    CHECK_EQ(mono_frame_lkf_->keypoints_.size(),
+             mono_frame_lkf_->scores_.size())
+        << mono_frame_lkf_->keypoints_.size() << " "
+        << mono_frame_lkf_->scores_.size() << " " << mono_frame_lkf_->id_;
+    CHECK_EQ(mono_frame_k_->keypoints_.size(), mono_frame_k_->scores_.size())
+        << mono_frame_k_->keypoints_.size() << " "
+        << mono_frame_k_->scores_.size() << " " << mono_frame_k_->id_;
 
     mono_camera_->undistortKeypoints(mono_frame_k_->keypoints_,
                                      &mono_frame_k_->keypoints_undistorted_);
 
-    // tracker_->featureTrackingDesc(mono_frame_lkf_,
-    //                               mono_frame_k_,
-    //                               keyframe_R_cur_frame,
-    //                               frontend_params_.feature_detector_params_,
-    //                               std::nullopt,
-    //                               false);
+    tracker_->featureTrackingDesc(mono_frame_lkf_,
+                                  mono_frame_k_,
+                                  keyframe_R_cur_frame,
+                                  frontend_params_.feature_detector_params_,
+                                  std::nullopt,
+                                  false);
 
-    // if (mono_frame_lkfm1_) {
-    //   // track from lkfm1 to k
-    //   tracker_->featureTrackingDesc(mono_frame_lkfm1_,
-    //                                 mono_frame_k_,
-    //                                 {},
-    //                                 frontend_params_.feature_detector_params_,
-    //                                 std::nullopt,
-    //                                 false);
-    // }
-
-    // tracker_->featureTrackingDesc(mono_frame_lkf_.get(),
-    //                               mono_frame_k_.get(),
-    //                               keyframe_R_cur_frame,
-    //                               frontend_params_.feature_detector_params_,
-    //                               std::nullopt,
-    //                               false);
+    if (mono_frame_lkfm1_) {
+      // track from lkfm1 to k
+      tracker_->featureTrackingDesc(mono_frame_lkfm1_,
+                                    mono_frame_k_,
+                                    {},
+                                    frontend_params_.feature_detector_params_,
+                                    std::nullopt,
+                                    false);
+    }
 
     if (frontend_params_.useRANSAC_) {
       TrackingStatusPose status_pose_mono;

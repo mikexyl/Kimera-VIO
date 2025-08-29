@@ -103,7 +103,6 @@ FeatureDetector::FeatureDetector(
       xfeat_params.keypoint_detection = 0;  // Use xfeat to detect keypoints
 
       auto xfeat = xfeat::XFeatCV::create(*env, xfeat_params);
-      xfeat->warmup();
       feature_detector_ = xfeat;
       break;
     }
@@ -125,7 +124,6 @@ FeatureDetector::FeatureDetector(
       xfeat_params.keypoint_detection = 1;  // Use GFTT to detect keypoints
 
       auto xfeat = xfeat::XFeatCV::create(*env, xfeat_params);
-      xfeat->warmup();
       feature_detector_ = xfeat;
       break;
     }
@@ -314,22 +312,21 @@ KeypointsCV FeatureDetector::featureDetection(Frame* cur_frame,
                                      true,
                                      &cur_frame->xfeat_M1_,
                                      &cur_frame->xfeat_x_prep_,
-                                     &keypoint_stds);
+                                      &keypoint_stds,
+                                    //  nullptr,
+                                     &cur_frame->scores_);
     // check the first elements of the input_kpts the same as keypoints
     CHECK_LE(input_kpts.size(), keypoints.size());
-
-    // if doesn't get enough keypoints, we copy the top keypoints and their
-    // descriptors
-    if (keypoints.size() > static_cast<size_t>(need_n_corners)) {
-      // if there is more than need, discard last n kpts
-      keypoints.resize(need_n_corners);
-      cur_frame->descriptors_.resize(need_n_corners);
-      keypoint_stds.resize(need_n_corners);
+    CHECK_EQ(cur_frame->keypoints_.size(), cur_frame->scores_.size());
+    if (input_kpts.size()) {
+      CHECK_LE(cv::norm(input_kpts[0].pt - keypoints[0].pt), 1e-1);
     }
 
-    for (size_t i = 0; i < keypoints.size(); ++i) {
-      cur_frame->keypoint_stds.push_back(
-          std::max(keypoint_stds[i][0], keypoint_stds[i][1]));
+    if (keypoint_stds.size()) {
+      for (size_t i = 0; i < keypoints.size(); ++i) {
+        cur_frame->keypoint_stds.push_back(
+            std::max(keypoint_stds[i][0], keypoint_stds[i][1]));
+      }
     }
 
     VLOG(1) << "finish xfeat detection " << keypoints.size();
@@ -359,18 +356,7 @@ KeypointsCV FeatureDetector::featureDetection(Frame* cur_frame,
   // Change window_size, and term_criteria to improve timing
   if (new_corners.size() > 0) {
     if (feature_detector_params_.enable_subpixel_corner_refinement_) {
-      const auto& subpixel_params =
-          feature_detector_params_.subpixel_corner_finder_params_;
-      auto tic = utils::Timer::tic();
-      cv::Mat gray_image;
-      cv::cvtColor(cur_frame->img_, gray_image, cv::COLOR_BGR2GRAY);
-      cv::cornerSubPix(gray_image,
-                       new_corners,
-                       subpixel_params.window_size_,
-                       subpixel_params.zero_zone_,
-                       subpixel_params.term_criteria_);
-      VLOG(1) << "Corner Sub Pixel Refinement Timing [ms]: "
-              << utils::Timer::toc(tic).count();
+      LOG(FATAL) << "subpixel corner refinement disabled";
     }
   }
 
@@ -406,51 +392,14 @@ void FeatureDetector::featureDetectionNew(Frame* cur_frame,
 
   std::vector<int> tracked_corners;
 
+  CHECK_GT(cur_frame->keypoints_.size(), 0) << cur_frame->id_;
+
   auto corners = featureDetection(
       cur_frame, ref_frame, nr_corners_needed, &tracked_corners);
   VLOG(1) << "tracked corners: " << tracked_corners.size();
 
-  const size_t& n_corners = corners.size();
-
-  cur_frame->landmarks_.clear();
-  cur_frame->landmarks_.reserve(n_corners);
-
-  cur_frame->landmarks_age_.clear();
-  cur_frame->landmarks_age_.reserve(n_corners);
-
-  cur_frame->keypoints_.clear();
-  cur_frame->keypoints_.reserve(n_corners);
-  cur_frame->scores_.clear();
-  cur_frame->scores_.reserve(n_corners);
-  cur_frame->versors_.clear();
-  cur_frame->versors_.reserve(n_corners);
-
-  // Incremental id assigned to new landmarks
-  const CameraParams& cam_param = cur_frame->cam_param_;
-  for (size_t i = 0; i < tracked_corners.size(); i++) {
-    int old_kp_id = tracked_corners[i];
-    cur_frame->landmarks_.push_back(old_lmk_ids[old_kp_id]);
-    cur_frame->landmarks_age_.push_back(old_lmk_age[old_kp_id]);
-    cur_frame->keypoints_.push_back(corners[i]);
-    cur_frame->scores_.push_back(old_scores[old_kp_id]);
-    cur_frame->versors_.push_back(old_versors[old_kp_id]);
-    // check the versor's norm is not nan
-    CHECK(!std::isnan(cur_frame->versors_.back().norm()));
-  }
-
-  for (size_t i = tracked_corners.size(); i < n_corners; i++) {
-    cur_frame->landmarks_.push_back(FeatureDetector::lmk_id);
-    // New keypoint, so seen in a single (key)frame so far.
-    cur_frame->landmarks_age_.push_back(1u);
-    cur_frame->keypoints_.push_back(corners[i]);
-    cur_frame->scores_.push_back(0.0);  // NOT IMPLEMENTED
-    cur_frame->versors_.push_back(
-        UndistorterRectifier::GetBearingVector(corners[i], cam_param, R));
-    CHECK(!std::isnan(cur_frame->versors_.back().norm()));
-    FeatureDetector::lmk_id++;
-  }
-
   CHECK_EQ(cur_frame->keypoints_.size(), cur_frame->descriptors_.rows);
+  CHECK_EQ(cur_frame->keypoints_.size(), cur_frame->scores_.size());
 
   // here we only detect and compute keypoints and descriptors
   // matching is done afterwards by the lighterglue matcher

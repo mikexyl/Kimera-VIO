@@ -1,5 +1,6 @@
 #pragma once
 
+#include <vilib/config.h>
 #include <vilib/feature_detection/detector_base_gpu.h>
 #include <vilib/feature_detection/harris/harris_gpu.h>
 #include <vilib/feature_tracker/feature_tracker_gpu.h>
@@ -57,13 +58,13 @@ class VilibTracker : public FeatureTracker {
             params_.detector_options_.quality_level);
     vilib::FeatureTrackerOptions ft_options = params.feature_tracker_options_;
 
-    vilib::PyramidPool::init(1,
+    params_.n_pyramid_levels_ = params_.detector_options_.max_level + 1;
+    vilib::PyramidPool::init(IMAGE_PYRAMID_PREALLOCATION_ITEM_NUM,
                              params_.width,
                              params_.height,
                              1,
-                             params_.detector_options_.max_level + 1,
+                             params_.n_pyramid_levels_,
                              vilib::IMAGE_PYRAMID_MEMORY_TYPE);
-    params_.n_pyramid_levels_ = params_.detector_options_.max_level + 1;
 
     feature_tracker_ =
         std::make_shared<vilib::FeatureTrackerGPU>(ft_options, 1);
@@ -143,16 +144,8 @@ class VilibTracker : public FeatureTracker {
       }
     }
 
-    LOG(INFO) << "tracked/detected " << n_tracked << "/" << n_detected
-              << " between frames " << prev_frame_id_ << " and "
-              << cur_frame->id_;
-    LOG(INFO) << "num of px cur: " << nextPts->size()
-              << " num_prev_keypoints: " << num_prev_keypoints;
-
     prev_kp_id_to_feature_id_ = cur_kp_id_to_feature_id;
     prev_frame_id_ = cur_frame->id_;
-
-    LOG(INFO) << "done vilib tracking";
   }
 
   std::shared_ptr<vilib::FeatureTrackerGPU> feature_tracker_;

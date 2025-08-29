@@ -47,9 +47,13 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::
   shared_noise_model_ = gtsam::noiseModel::Diagonal::Precisions(precisions);
 
   // Outlier rejection initialization (inside of tracker)
+  static constexpr bool kLCDTrackerUseOF = false;
   tracker_ = std::make_unique<Tracker>(
       lcd_params.tracker_params_,
-      std::make_shared<VIO::Camera>(tracker_cam_params));
+      std::make_shared<VIO::Camera>(tracker_cam_params),
+      nullptr,
+      nullptr,
+      kLCDTrackerUseOF);
 
   // Initialize pgo_:
   // TODO(marcus): parametrize the verbosity of PGO params
