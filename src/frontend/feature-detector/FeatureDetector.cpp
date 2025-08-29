@@ -288,10 +288,7 @@ KeypointsCV FeatureDetector::featureDetection(Frame* cur_frame,
     std::vector<cv::Vec2d> keypoint_stds;
 
     for (size_t i = 0; i < cur_frame->keypoints_.size(); i++) {
-      LandmarkId lmk_id = cur_frame->landmarks_.at(i);
-      if (lmk_id != -1 and existing_lmks.count(lmk_id) > 0) {
-        keypoints.emplace_back(cv::KeyPoint(cur_frame->keypoints_.at(i), 1.0));
-      }
+      keypoints.emplace_back(cv::KeyPoint(cur_frame->keypoints_.at(i), 1.0));
     }
 
     if (not keypoints.empty()) {

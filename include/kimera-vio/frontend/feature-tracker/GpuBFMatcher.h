@@ -33,9 +33,9 @@ class GpuBFMatcher : public FeatureTracker {
 
   void track(Frame* ref_frame,
              Frame* cur_frame,
-             cv::InputArray /*prevPts*/,
-             cv::InputOutputArray /*lnextPts*/,
-             cv::OutputArray status,
+             const std::vector<cv::Point2f>& prevPts,
+             std::vector<cv::Point2f>* nextPts,
+             std::vector<int>*,
              cv::OutputArray err,
              cv::Size /*winSize*/ = cv::Size(21, 21),
              int /*maxLevel*/ = 3,

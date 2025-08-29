@@ -202,7 +202,7 @@ class VisionImuFrontend {
   ImuFrontend::UniquePtr imu_frontend_;
 
   // Tracker
-  Tracker::UniquePtr tracker_;
+  Tracker::Ptr tracker_;
   TrackerStatusSummary tracker_status_summary_;
 
   // Display queue

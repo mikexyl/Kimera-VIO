@@ -20,6 +20,7 @@
   <depend>opengv_catkin</depend>
   <depend>xfeat-cpp</depend>
   <depend>vio-factors</depend>
+  <depend>vilib_catkin</depend>
   <export>
     <!-- Specify that this is not really a catkin package-->
     <build_type>cmake</build_type>

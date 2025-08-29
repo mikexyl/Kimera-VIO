@@ -21,9 +21,9 @@ class LighterGlueCV : public FeatureTracker {
 
   void track(Frame* ref_frame,
              Frame* cur_frame,
-             cv::InputArray /*prevPts*/,
-             cv::InputOutputArray /*lnextPts*/,
-             cv::OutputArray status,
+             const std::vector<cv::Point2f>& prevPts,
+             std::vector<cv::Point2f>* nextPts,
+             std::vector<int>* prev_next_matches,
              cv::OutputArray err,
              cv::Size /*winSize*/ = cv::Size(21, 21),
              int /*maxLevel*/ = 3,
@@ -74,12 +74,11 @@ class LighterGlueCV : public FeatureTracker {
     VLOG(1) << "found " << matches.size() << " matches, time gap: "
             << (cur_frame->timestamp_ - ref_frame->timestamp_) / 1e6 << " ms";
 
-    std::vector<uchar>& status_vec =
-        *reinterpret_cast<std::vector<uchar>*>(status.getObj());
-    status_vec.resize(ref_frame->keypoints_.size(), 0);  // Initialize to 0
+    prev_next_matches->resize(ref_frame->keypoints_.size(),
+                              0);  // Initialize to 0
     // set status
     for (auto match : matches) {
-      status_vec[match.queryIdx] = 1;  // Mark as found
+      (*prev_next_matches)[match.queryIdx] = match.trainIdx;  // Mark as found
       VLOG(1) << "Match found: " << match.queryIdx << " -> " << match.trainIdx;
     }
 

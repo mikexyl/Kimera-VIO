@@ -35,6 +35,7 @@ find_package(KimeraRPGO REQUIRED)
 find_package(Pangolin QUIET)
 find_package(xfeat-cpp REQUIRED)
 find_package(vio-factors REQUIRED)
+find_package(vilib REQUIRED)
 
 include(VerifyGtsamConfig)
 option(KIMERA_VERIFY_GTSAM_CONFIG "Check that GTSAM was compiled with the right options" ON)
@@ -134,6 +135,7 @@ target_link_libraries(${PROJECT_NAME}
     opengv
     xfeat-cpp::xfeat-cpp
     vio-factors
+    vilib
 )
 target_include_directories(${PROJECT_NAME}
   PUBLIC

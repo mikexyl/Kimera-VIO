@@ -78,7 +78,9 @@ void TrackerParams::print() const {
                         optimize_2d3d_pose_from_inliers_,
                         // OTHER parameters
                         "disparityThreshold_: ",
-                        disparityThreshold_);
+                        disparityThreshold_,
+                        "tracker type:",
+                        VIO::to_underlying(tracker_type_));
   LOG(INFO) << out.str();
 }
 
@@ -146,6 +148,9 @@ bool TrackerParams::parseYAML(const std::string& filepath) {
 
   yaml_parser.getYamlParam("max_lmk_merge_px", &max_lmk_merge_px_);
   yaml_parser.getYamlParam("min_lmk_merge_sim", &min_lmk_merge_sim_);
+
+  yaml_parser.getYamlParam("vilib_cell_width", &vilib_cell_width);
+  yaml_parser.getYamlParam("vilib_cell_height", &vilib_cell_height);
 
   return true;
 }

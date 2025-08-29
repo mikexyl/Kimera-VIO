@@ -87,7 +87,7 @@ struct TrackerParams : public PipelineParams {
   enum class TrackerType {
     OPTICAL_FLOW = 0,
     LIGHTERGLUE,
-    FLANN,
+    VILIB,
     GPU_BF,
     GPU_BF_RANSAC,
   } tracker_type_ = TrackerType::OPTICAL_FLOW;
@@ -105,6 +105,9 @@ struct TrackerParams : public PipelineParams {
 
   float max_lmk_merge_px_ = 4;
   float min_lmk_merge_sim_ = 0.8;
+
+  int vilib_cell_width = 32;
+  int vilib_cell_height = 32;
 };
 
 }  // namespace VIO

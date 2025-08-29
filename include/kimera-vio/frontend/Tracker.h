@@ -30,7 +30,6 @@
 #include "kimera-vio/frontend/StereoFrame.h"
 #include "kimera-vio/frontend/Tracker-definitions.h"
 #include "kimera-vio/frontend/VisionImuTrackerParams.h"
-#include "kimera-vio/frontend/feature-tracker/FlannTracker.h"
 #include "kimera-vio/frontend/feature-tracker/LighterGlueCV.h"
 #include "kimera-vio/frontend/feature-tracker/OpticalFlowCV.h"
 #include "kimera-vio/frontend/optical-flow/OpticalFlowPredictor.h"
@@ -79,11 +78,10 @@ class Tracker {
                        const gtsam::Rot3& inter_frame_rotation,
                        const FeatureDetectorParams& feature_detector_params,
                        std::optional<cv::Mat> R = std::nullopt,
-                       bool invalidate_landmarks = true,
-                       bool use_optical_flow = true);
+                       bool invalidate_landmarks = true);
 
-  void featureTrackingDesc(Frame* ref_frame,
-                           Frame* cur_frame,
+  void featureTrackingDesc(Frame::Ptr ref_frame,
+                           Frame::Ptr cur_frame,
                            const gtsam::Rot3& inter_frame_rotation,
                            const FeatureDetectorParams& feature_detector_params,
                            std::optional<cv::Mat> R = std::nullopt,
@@ -364,7 +362,7 @@ class Tracker {
   LandmarksMap landmarks_map_;
 
   FeatureTracker::Ptr feature_tracker_ = nullptr;
-  OpticalFlowCV::Ptr optical_flow_tracker_ = nullptr;
+  FeatureTracker::Ptr optical_flow_tracker_ = nullptr;
 };
 
 }  // namespace VIO

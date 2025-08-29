@@ -15,9 +15,9 @@ class OpticalFlowCV : public FeatureTracker {
 
   void track(Frame* ref_frame,
              Frame* cur_frame,
-             cv::InputArray prevPts,
-             cv::InputOutputArray nextPts,
-             cv::OutputArray status,
+             const std::vector<cv::Point2f>& prevPts,
+             std::vector<cv::Point2f>* nextPts,
+             std::vector<int>* prev_next_matches,
              cv::OutputArray err,
              cv::Size winSize = cv::Size(21, 21),
              int maxLevel = 3,
@@ -27,17 +27,24 @@ class OpticalFlowCV : public FeatureTracker {
                  0.01),
              int flags = 0,
              double minEigThreshold = 1e-4) override {
+    std::vector<uchar> status_vec;
     cv::calcOpticalFlowPyrLK(ref_frame->img_,
                              cur_frame->img_,
                              prevPts,
-                             nextPts,
-                             status,
+                             *nextPts,
+                             status_vec,
                              err,
                              winSize,
                              maxLevel,
                              criteria,
                              flags,
                              minEigThreshold);
+    prev_next_matches->clear();
+    for (size_t i = 0; i < status_vec.size(); ++i) {
+      if (status_vec[i]) {
+        (*prev_next_matches)[i] = i;
+      }
+    }
   }
 
   static OpticalFlowCV::Ptr Create() {

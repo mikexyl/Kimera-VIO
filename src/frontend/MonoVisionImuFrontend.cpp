@@ -17,6 +17,7 @@
 #include <memory>
 
 #include "kimera-vio/frontend/MonoVisionImuFrontend-definitions.h"
+#include "kimera-vio/frontend/feature-tracker/VilibTracker.h"
 #include "kimera-vio/utils/UtilsNumerical.h"
 
 DEFINE_bool(log_mono_matching_images,
@@ -52,7 +53,10 @@ MonoVisionImuFrontend::MonoVisionImuFrontend(
       mono_camera_(camera) {
   CHECK(mono_camera_);
 
-  tracker_ = std::make_unique<Tracker>(
+  frontend_params_.tracker_params_.print();
+
+  LOG(INFO) << int(frontend_params.tracker_params_.tracker_type_);
+  tracker_ = std::make_shared<Tracker>(
       frontend_params_.tracker_params_, mono_camera_, display_queue, ort_env_);
 
   feature_detector_ = std::make_unique<FeatureDetector>(
@@ -215,12 +219,19 @@ void MonoVisionImuFrontend::processFirstFrame(const Frame& first_frame) {
       << "Keypoints already present in first frame: please do not extract"
          " keypoints manually";
 
-  CHECK(feature_detector_);
-  feature_detector_->featureDetection(mono_frame_k_.get());
+  tracker_->featureTracking(nullptr,
+                            mono_frame_k_.get(),
+                            {},
+                            frontend_params_.feature_detector_params_,
+                            std::nullopt,
+                            false);
 
   // Undistort keypoints:
   mono_camera_->undistortKeypoints(mono_frame_k_->keypoints_,
                                    &mono_frame_k_->keypoints_undistorted_);
+
+  feature_detector_->featureDetection(
+      mono_frame_k_.get(), std::nullopt, mono_frame_km1_.get());
 
   // TODO(marcus): get 3d points if possible?
   mono_frame_km1_ = mono_frame_k_;
@@ -260,29 +271,17 @@ StatusMonoMeasurementsPtr MonoVisionImuFrontend::processFrame(
   CHECK(feature_detector_);
   // if we are using lighter glue, detect all features first, and track features
   // by matching descriptors
-  // tracker_->featureTracking(mono_frame_km1_.get(),
-  //                           mono_frame_k_.get(),
-  //                           ref_frame_R_cur_frame,
-  //                           frontend_params_.feature_detector_params_,
-  //                           std::nullopt,
-  //                           false,
-  //                           true);
+  tracker_->featureTracking(mono_frame_km1_.get(),
+                            mono_frame_k_.get(),
+                            ref_frame_R_cur_frame,
+                            frontend_params_.feature_detector_params_,
+                            std::nullopt,
+                            false);
 
   // TODO(mike): detection was after keyframe detection, we moved it here,
   // need to check if it causes bugs in the keyframe detection
-  feature_detector_->featureDetection(
-      mono_frame_k_.get(), std::nullopt, mono_frame_km1_.get());
-
-  // Undistort keypoints:
-  mono_camera_->undistortKeypoints(mono_frame_k_->keypoints_,
-                                   &mono_frame_k_->keypoints_undistorted_);
-
-  tracker_->featureTrackingDesc(mono_frame_lkf_.get(),
-                                mono_frame_k_.get(),
-                                keyframe_R_cur_frame,
-                                frontend_params_.feature_detector_params_,
-                                std::nullopt,
-                                false);
+  // feature_detector_->featureDetection(
+  // mono_frame_k_.get(), std::nullopt, mono_frame_km1_.get());
 
   // TODO(marcus): need another structure for monocular slam
   tracker_status_summary_.kfTrackingStatus_mono_ = TrackingStatus::INVALID;
@@ -295,15 +294,28 @@ StatusMonoMeasurementsPtr MonoVisionImuFrontend::processFrame(
   if (new_keyframe) {
     ++keyframe_count_;
 
-    if (mono_frame_lkfm1_) {
-      // track from lkfm1 to k
-      tracker_->featureTrackingDesc(mono_frame_lkfm1_.get(),
-                                    mono_frame_k_.get(),
-                                    {},
-                                    frontend_params_.feature_detector_params_,
-                                    std::nullopt,
-                                    false);
-    }
+    // feature_detector_->featureDetection(
+    //     mono_frame_k_.get(), std::nullopt, mono_frame_km1_.get());
+
+    mono_camera_->undistortKeypoints(mono_frame_k_->keypoints_,
+                                     &mono_frame_k_->keypoints_undistorted_);
+
+    // tracker_->featureTrackingDesc(mono_frame_lkf_,
+    //                               mono_frame_k_,
+    //                               keyframe_R_cur_frame,
+    //                               frontend_params_.feature_detector_params_,
+    //                               std::nullopt,
+    //                               false);
+
+    // if (mono_frame_lkfm1_) {
+    //   // track from lkfm1 to k
+    //   tracker_->featureTrackingDesc(mono_frame_lkfm1_,
+    //                                 mono_frame_k_,
+    //                                 {},
+    //                                 frontend_params_.feature_detector_params_,
+    //                                 std::nullopt,
+    //                                 false);
+    // }
 
     // tracker_->featureTrackingDesc(mono_frame_lkf_.get(),
     //                               mono_frame_k_.get(),
