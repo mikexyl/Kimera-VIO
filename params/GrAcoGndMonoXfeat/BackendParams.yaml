@@ -18,7 +18,7 @@ initialGyroBiasSigma: 0.01
 #
 # How to linearize the factor:
 # 0: Hessian, 1: Implicit Schur, 2:Jacobian_Q, 3:Jacobian_SVD
-linearizationMode: 1
+linearizationMode: 0
 # How to manage degeneracy
 # 0: Ignore degeneracy, 1: Zero on degeneracy, 2: handle infinity
 degeneracyMode: 1
@@ -30,7 +30,7 @@ rankTolerance: 1
 #   * if the landmark is triangulated at distance larger than this,
 #   * result is flagged as degenerate.
 #   */
-landmarkDistanceThreshold: 500
+landmarkDistanceThreshold: 100
 
 # DynamicOutlierRejection:
 #  /**
@@ -43,7 +43,7 @@ outlierRejection: 3
 retriangulationThreshold: 0.001
 
 ## Noise models ##
-smartNoiseSigma: 16.0
+smartNoiseSigma: 16
 monoNoiseSigma: 8
 monoNormType: 2
 monoNormParam: 4.6851

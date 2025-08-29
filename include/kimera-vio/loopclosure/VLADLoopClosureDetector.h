@@ -240,8 +240,10 @@ class VLADLoopClosureDetector
     CHECK_NOTNULL(feature_matcher_);
 
     // if any of the frames has less than required keypoints, skip
-    if (ref.keypoints_.size() < static_cast<size_t>(lcd_params_.lcd_lg_num_features_) ||
-        curr.keypoints_.size() < static_cast<size_t>(lcd_params_.lcd_lg_num_features_)) {
+    if (ref.keypoints_.size() <
+            static_cast<size_t>(lcd_params_.lcd_lg_num_features_) ||
+        curr.keypoints_.size() <
+            static_cast<size_t>(lcd_params_.lcd_lg_num_features_)) {
       LOG(WARNING) << "VLADLCD: LG: Not enough keypoints found.";
       return;
     }
@@ -276,6 +278,14 @@ class VLADLoopClosureDetector
             .scores = {},
             .descriptors = curr.descriptors_mat_,
         };
+    ref_ret.scores.create(ref_ret.keypoints.rows, 1, CV_32F);
+    for (int i = 0; i < ref_ret.keypoints.rows; ++i) {
+      ref_ret.scores.at<float>(i, 0) = 1.0f;
+    }
+    cur_ret.scores.create(cur_ret.keypoints.rows, 1, CV_32F);
+    for (int i = 0; i < cur_ret.keypoints.rows; ++i) {
+      cur_ret.scores.at<float>(i, 0) = 1.0f;
+    }
 
     feature_matcher_->match(
         cur_ret, image_size0, ref_ret, image_size0, matches);

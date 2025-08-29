@@ -95,6 +95,7 @@ MonoFrontendOutput::UniquePtr MonoVisionImuFrontend::bootstrapSpinMono(
   CHECK(mono_camera_);
 
   if (FLAGS_do_fine_imu_camera_temporal_sync) {
+    LOG(INFO) << "skip adding frame to downstream modules";
     return nullptr;  // skip adding a frame to all downstream modules
   }
 
@@ -235,6 +236,8 @@ void MonoVisionImuFrontend::processFirstFrame(const Frame& first_frame) {
   mono_camera_->undistortKeypoints(mono_frame_k_->keypoints_,
                                    &mono_frame_k_->keypoints_undistorted_);
 
+  CHECK_GE(mono_frame_k_->keypoints_.size(),
+           frontend_params_.tracker_params_.num_features_);
   feature_detector_->featureDetection(
       mono_frame_k_.get(), std::nullopt, mono_frame_km1_.get());
 
