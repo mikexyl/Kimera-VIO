@@ -312,15 +312,7 @@ StatusMonoMeasurementsPtr MonoVisionImuFrontend::processFrame(
     mono_camera_->undistortKeypoints(mono_frame_k_->keypoints_,
                                      &mono_frame_k_->keypoints_undistorted_);
 
-    tracker_->featureTrackingDesc(mono_frame_lkf_,
-                                  mono_frame_k_,
-                                  keyframe_R_cur_frame,
-                                  frontend_params_.feature_detector_params_,
-                                  std::nullopt,
-                                  false);
-
     if (mono_frame_lkfm1_) {
-      // track from lkfm1 to k
       tracker_->featureTrackingDesc(mono_frame_lkfm1_,
                                     mono_frame_k_,
                                     {},
@@ -328,6 +320,18 @@ StatusMonoMeasurementsPtr MonoVisionImuFrontend::processFrame(
                                     std::nullopt,
                                     false);
     }
+
+    if (mono_frame_lkfm2_) {
+      // track from lkfm1 to k
+      tracker_->featureTrackingDesc(mono_frame_lkfm2_,
+                                    mono_frame_k_,
+                                    {},
+                                    frontend_params_.feature_detector_params_,
+                                    std::nullopt,
+                                    false);
+    }
+
+    CHECK_EQ(mono_frame_k_->keypoints_.size(), mono_frame_k_->scores_.size());
 
     if (frontend_params_.useRANSAC_) {
       TrackingStatusPose status_pose_mono;
@@ -407,11 +411,11 @@ void MonoVisionImuFrontend::getSmartMonoMeasurements(
     const Frame::Ptr& lkf_frame) {
   // TODO(marcus): convert to point2 when ready!
   CHECK_NOTNULL(smart_mono_measurements);
-  if (frame->keypoint_stds.size()) {
-    CHECK_EQ(frame->keypoint_stds.size(), frame->keypoints_.size())
+  if (frame->prim_stds_.size()) {
+    CHECK_EQ(frame->prim_stds_.size(), frame->keypoints_.size())
         << "Keypoint stds size does not match keypoints size.";
   } else {
-    frame->keypoint_stds.resize(frame->keypoints_.size(), -1.0);
+    frame->prim_stds_.resize(frame->keypoints_.size(), -1.0);
   }
 
   frame->checkFrame();
@@ -433,12 +437,13 @@ void MonoVisionImuFrontend::getSmartMonoMeasurements(
     const auto& uL = keypoints_undistorted.at(i).second.x;
     const auto& v = keypoints_undistorted.at(i).second.y;
 
-    double px_sigma = frame->keypoint_stds.at(i);
+    float px_sigma = frame->prim_stds_.at(i);
+    float score = frame->scores_.at(i);
 
     // Initialize to missing pixel information.
     double uR = std::numeric_limits<double>::quiet_NaN();
     smart_mono_measurements->push_back(
-        {landmarkId_kf[i], gtsam::StereoPoint2(uL, uR, v), px_sigma});
+        {landmarkId_kf[i], gtsam::StereoPoint2(uL, uR, v), px_sigma, score});
   }
 
   if (not lkf_frame) {

@@ -464,7 +464,8 @@ class VioBackend {
     const FrameId& frame_id = obs.first;
     const gtsam::Symbol& pose_symbol = gtsam::Symbol(kPoseSymbolChar, frame_id);
     const StereoPoint2& measurement = obs.second;
-    double stereo_px_sigma = obs.px_sigma;
+    float stereo_px_sigma = obs.px_sigma_;
+    float score = obs.score_;
     if (new_factor->find(pose_symbol) == new_factor->end()) {
       new_factor->add(measurement, pose_symbol, stereo_cal_);
       auto noise = new_factor->noiseModel();
@@ -478,6 +479,7 @@ class VioBackend {
             << smart_noise_->sigmas().size();
         smart_noise_ptr->pushSigma(
             stereo_px_sigma > 0 ? stereo_px_sigma : smart_noise_->sigmas()[0]);
+        smart_noise_ptr->pushScore(score);
       }
     }
   }

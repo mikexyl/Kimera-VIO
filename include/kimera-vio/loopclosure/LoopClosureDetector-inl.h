@@ -761,7 +761,7 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::recoverPoseBody(
       }
 
       bool success = false;
-      if (camMatch_points.size() > lcd_params_.min_pnp_num_landmarks_) {
+      if (camMatch_points.size() > size_t(lcd_params_.min_pnp_num_landmarks_)) {
         success = tracker_->pnp(camQuery_bearing_vectors,
                                 camMatch_points,
                                 &camMatch_T_camQuery_3d,

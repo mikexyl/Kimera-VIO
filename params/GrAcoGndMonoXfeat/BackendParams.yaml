@@ -7,11 +7,11 @@ backend_modality: 0
 autoInitialize: 1
 roundOnAutoInitialize: 0
 initialPositionSigma: 1e-4
-initialRollPitchSigma: 0.0174533 # 10.0/180.0*M_PI
-initialYawSigma: 0.017
-initialVelocitySigma: 0.01
-initialAccBiasSigma: 0.01
-initialGyroBiasSigma: 0.01
+initialRollPitchSigma: 0.174533 # 10.0/180.0*M_PI
+initialYawSigma: 0.17
+initialVelocitySigma: 0.1
+initialAccBiasSigma: 0.1
+initialGyroBiasSigma: 0.1
 
 # VISION PARAMETERS ###########################################################
 ## Smart Factors ##
@@ -65,7 +65,7 @@ relinearizeSkip: 1
 zero_velocity_precision: 1000
 no_motion_position_precision: 1000
 no_motion_rotation_precision: 10000
-constant_vel_precision: 100
+constant_vel_precision: 10
 numOptimize: 1
 nr_states: 100 # number of nodes in horizon.
 # ISAM2GaussNewtonParams: continue updating the linear delta only when
