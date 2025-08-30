@@ -29,14 +29,8 @@ class FeatureTracker {
                      std::vector<cv::Point2f>* nextPts,
                      std::vector<int>* status,
                      cv::OutputArray err,
-                     cv::Size winSize = cv::Size(21, 21),
-                     int maxLevel = 3,
-                     cv::TermCriteria criteria = cv::TermCriteria(
-                         cv::TermCriteria::COUNT + cv::TermCriteria::EPS,
-                         30,
-                         0.01),
-                     int flags = 0,
-                     double minEigThreshold = 1e-4) = 0;
+                     std::vector<float>* stds,
+                     std::vector<float>* scores) = 0;
 
   virtual void trackDesc(Frame* ref_frame,
                          Frame* cur_frame,

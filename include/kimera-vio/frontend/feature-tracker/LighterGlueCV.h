@@ -2,6 +2,8 @@
 
 #include <xfeat-cpp/lighterglue_cv.h>
 
+#include <opencv2/calib3d.hpp>
+
 #include "kimera-vio/frontend/Frame.h"
 #include "kimera-vio/frontend/feature-tracker/FeatureTracker.h"
 
@@ -23,14 +25,8 @@ class LighterGlueCV : public FeatureTracker {
              std::vector<cv::Point2f>* nextPts,
              std::vector<int>* prev_next_matches,
              cv::OutputArray err,
-             cv::Size /*winSize*/ = cv::Size(21, 21),
-             int /*maxLevel*/ = 3,
-             cv::TermCriteria /*criteria*/ = cv::TermCriteria(
-                 cv::TermCriteria::COUNT + cv::TermCriteria::EPS,
-                 30,
-                 0.01),
-             int /*flags*/ = 0,
-             double /*minEigThreshold*/ = 1e-4) override {
+             std::vector<float>* stds,
+             std::vector<float>* scores) override {
     // number of previous points should be equal to number of descriptors
     CHECK_EQ(ref_frame->keypoints_.size(), ref_frame->descriptors_.rows)
         << "Number of previous points does not match number of descriptors in "
@@ -141,6 +137,25 @@ class LighterGlueCV : public FeatureTracker {
     cv::Size image_size1 = cur_frame->img_.size();  // Use actual image size
 
     lg_matcher_.match(det0, image_size0, det1, image_size1, *matches);
+
+    // filter matches by finding homography
+    std::vector<cv::Point2f> pts1, pts2;
+    for (const auto& match : *matches) {
+      pts1.push_back({det0.keypoints.at<float>(match.queryIdx, 0),
+                      det0.keypoints.at<float>(match.queryIdx, 1)});
+      pts2.push_back({det1.keypoints.at<float>(match.trainIdx, 0),
+                      det1.keypoints.at<float>(match.trainIdx, 1)});
+    }
+    cv::Mat mask;
+    cv::Mat H = cv::findHomography(pts1, pts2, cv::RANSAC, 3.5, mask, 100, 0.9);
+    mask = mask.reshape(1, mask.total());
+    DMatchVec filtered_matches;
+    for (size_t i = 0; i < matches->size(); ++i) {
+      if (mask.at<uchar>(i, 0) > 0) {
+        filtered_matches.push_back((*matches)[i]);
+      }
+    }
+    matches->swap(filtered_matches);
 
     VLOG(1) << "found " << matches->size() << " matches, time gap: "
             << (cur_frame->timestamp_ - ref_frame->timestamp_) / 1e6 << " ms";

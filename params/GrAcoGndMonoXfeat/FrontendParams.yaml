@@ -96,16 +96,16 @@ interp_nearest_path: /workspaces/src/xfeat-cpp/onnx_model/interpolator_nearest_6
 xfeat_use_gpu: 1
 matcher_type: 0 # 0: Brute Force, 1: FLANN, 2: LighterGlue
 
-feature_tracker_type: 1 # 0: OpticalFlow, 1: LighterGlue 2: Flann 3: GpuBFMatcher 4: GpuBF+RANSAC
+feature_tracker_type: 3 # 0: OpticalFlow, 1: LighterGlue 2: Flann 3: GpuBFMatcher 4: GpuBF+RANSAC
 num_features: 500
 lg_model_path: /workspaces/src/xfeat-cpp/onnx_model/lg_640x480_500.onnx
 gpu_bf_min_sim: 0.9 # Minimum similarity for GpuBFMatcher
-search_radius: 10000
+search_radius: 100
 
 track_on_keyframe: 1
 
 min_lmk_merge_sim: 0.7
-max_lmk_merge_px: 5
+max_lmk_merge_px: 10
 
-vilib_cell_width: 32
-vilib_cell_height: 32
+vilib_cell_width: 64
+vilib_cell_height: 64

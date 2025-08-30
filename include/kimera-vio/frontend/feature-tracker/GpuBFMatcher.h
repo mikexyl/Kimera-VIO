@@ -37,14 +37,8 @@ class GpuBFMatcher : public FeatureTracker {
              std::vector<cv::Point2f>* nextPts,
              std::vector<int>*,
              cv::OutputArray err,
-             cv::Size /*winSize*/ = cv::Size(21, 21),
-             int /*maxLevel*/ = 3,
-             cv::TermCriteria /*criteria*/ = cv::TermCriteria(
-                 cv::TermCriteria::COUNT + cv::TermCriteria::EPS,
-                 30,
-                 0.01),
-             int /*flags*/ = 0,
-             double /*minEigThreshold*/ = 1e-4) override {
+             std::vector<float>* stds,
+             std::vector<float>* scores) override {
     throw std::runtime_error(
         "GpuBFMatcher does not support optical flow tracking. ");
   }

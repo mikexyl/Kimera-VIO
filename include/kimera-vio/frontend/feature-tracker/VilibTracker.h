@@ -77,14 +77,8 @@ class VilibTracker : public FeatureTracker {
              std::vector<cv::Point2f>* nextPts,
              std::vector<int>* prevNextIds,
              cv::OutputArray err,
-             cv::Size /*winSize*/ = cv::Size(21, 21),
-             int /*maxLevel*/ = 3,
-             cv::TermCriteria /*criteria*/ = cv::TermCriteria(
-                 cv::TermCriteria::COUNT + cv::TermCriteria::EPS,
-                 30,
-                 0.01),
-             int /*flags*/ = 0,
-             double /*minEigThreshold*/ = 1e-4) override {
+             std::vector<float>* std,
+             std::vector<float>* scores) override {
     if (ref_frame) {
       CHECK_EQ(ref_frame->id_, prev_frame_id_);
     }
@@ -141,6 +135,29 @@ class VilibTracker : public FeatureTracker {
         } else {
           prevNextIds->at(i) = -1;
         }
+      }
+    }
+
+    auto levels = vilib_frame->level_vec_;
+    std->resize(vilib_frame->num_features_);
+    for (size_t i = 0; i < vilib_frame->num_features_; ++i) {
+      (*std)[i] = (levels[i] + 1) * 4;
+    }
+    auto feature_scores = vilib_frame->score_vec_;
+    scores->resize(vilib_frame->num_features_, 0.0f);
+    for (size_t i = 0; i < vilib_frame->num_features_; ++i) {
+      (*scores)[i] = feature_scores[i];
+    }
+
+    // find min/max of scores
+    auto [min_score, max_score] =
+        std::minmax_element(scores->begin(), scores->end());
+
+    // normalize scores to 0-1
+    float score_range = *max_score - *min_score;
+    if (score_range > 0) {
+      for (size_t i = 0; i < scores->size(); ++i) {
+        (*scores)[i] = ((*scores)[i] - *min_score) / score_range;
       }
     }
 

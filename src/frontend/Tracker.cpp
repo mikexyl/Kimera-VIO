@@ -98,11 +98,15 @@ Tracker::Tracker(const TrackerParams& tracker_params,
         tracker_params_.vilib_cell_width;
     vilib_params.detector_options_.cell_height =
         tracker_params_.vilib_cell_height;
+    vilib_params.detector_options_.horizontal_border =
+        tracker_params_.vilib_cell_width / 4;
+    vilib_params.detector_options_.vertical_border =
+        tracker_params_.vilib_cell_height / 4;
     vilib_params.feature_tracker_options_.reset_before_detection = false;
     vilib_params.feature_tracker_options_.min_tracks_to_detect_new_features =
         tracker_params_.num_features_;
     vilib_params.feature_tracker_options_.use_best_n_features =
-        tracker_params_.num_features_ * 1.1;
+        tracker_params_.num_features_;
 
     optical_flow_tracker_ = std::make_shared<VilibTracker>(vilib_params);
   } else {
@@ -198,16 +202,15 @@ void Tracker::featureTracking(
   std::vector<int> prev_next_matches(px_ref.size(), -1);
   std::vector<float> error;
   auto time_lukas_kanade_tic = utils::Timer::tic();
+  std::vector<float> stds, scores;
   optical_flow_tracker_->track(ref_frame,
                                cur_frame,
                                px_ref,
                                &px_cur,
                                &prev_next_matches,
                                error,
-                               klt_window_size,
-                               tracker_params_.klt_max_level_,
-                               kTerminationCriteria,
-                               cv::OPTFLOW_USE_INITIAL_FLOW);
+                               &stds,
+                               &scores);
   VLOG(1) << "Optical Flow Timing [ms]: "
           << utils::Timer::toc(time_lukas_kanade_tic).count();
   // CHECK_LE(px_ref.size(), tracker_params_.num_features_);
@@ -253,6 +256,9 @@ void Tracker::featureTracking(
 
   CHECK(not invalidate_landmarks) << "broken";
 
+  CHECK_EQ(stds.size(), px_cur.size());
+  CHECK_EQ(scores.size(), px_cur.size());
+
   for (size_t i = 0; i < px_cur.size(); i++) {
     // check not nan or inf
     CHECK(not(std::isnan(px_cur[i].x) || std::isnan(px_cur[i].y)));
@@ -264,18 +270,21 @@ void Tracker::featureTracking(
       LandmarkId lmk_id = ref_frame->landmarks_.at(next_prev_matches[i]);
       cur_frame->landmarks_.push_back(lmk_id);
       cur_frame->landmarks_age_.push_back(lmk_age);
-      cur_frame->scores_.push_back(ref_frame->scores_.at(next_prev_matches[i]));
     } else {
       cur_frame->landmarks_.push_back(FeatureDetector::lmk_id++);
       cur_frame->landmarks_age_.push_back(0);
-      cur_frame->scores_.push_back(0);
     }
+
+    // cur_frame->scores_.push_back(0.8);
+    cur_frame->scores_.push_back(scores[i]);
     cur_frame->keypoints_.push_back(px_cur[i]);
     auto versor = UndistorterRectifier::GetBearingVector(
         px_cur[i], cur_frame->cam_param_, R);
     CHECK_LT(std::abs(versor.norm() - 1.0), 1e-6)
         << "Versor norm: " << versor.norm();
     cur_frame->versors_.push_back(versor);
+
+    cur_frame->prim_stds_.push_back(stds[i]);
   }
 
   VLOG(1) << "cur lmk range after track "
@@ -1134,12 +1143,18 @@ cv::Mat Tracker::getTrackerImage(const Frame& ref_frame,
     cv::circle(img_rgb, px, 4, blue, 2);
   }
 
-  // Add all keypoints in cur_frame with the tracks.
+  CHECK_EQ(cur_frame.keypoints_.size(), cur_frame.scores_.size());
+
+  std::vector<float> scores;
   for (size_t i = 0; i < cur_frame.keypoints_.size(); ++i) {
     const cv::Point2f& px_cur = cur_frame.keypoints_.at(i);
     double px_sigma = 5;
-    if (i < cur_frame.keypoint_stds.size()) {
-      px_sigma = cur_frame.keypoint_stds.at(i);
+    double score = 1;
+    if (i < cur_frame.prim_stds_.size()) {
+      px_sigma = cur_frame.prim_stds_.at(i) * 2;
+    }
+    if (i < cur_frame.scores_.size()) {
+      score = cur_frame.scores_.at(i);
     }
     if (cur_frame.landmarks_.at(i) == -1) {  // Untracked landmarks are red.
       cv::circle(img_rgb, px_cur, 4, red, 2);
@@ -1148,16 +1163,29 @@ cv::Mat Tracker::getTrackerImage(const Frame& ref_frame,
                                  ref_frame.landmarks_.end(),
                                  cur_frame.landmarks_.at(i));
       if (it != ref_frame.landmarks_.end()) {
-        // If feature was in previous frame, display tracked feature with
-        // green circle/line:
-        cv::circle(img_rgb, px_cur, px_sigma, green, 1);
+        scores.push_back(score);
+        cv::Scalar color(0, 255, 0);
+        color[1] = 255 * std::min(1.0, score);
+        color[2] = 255 * (1.0 - std::min(1.0, score));
+        cv::circle(img_rgb, px_cur, px_sigma, color, 1);
         int i = std::distance(ref_frame.landmarks_.begin(), it);
         const cv::Point2f& px_ref = ref_frame.keypoints_.at(i);
-        cv::arrowedLine(img_rgb, px_ref, px_cur, green, 1);
+        cv::line(img_rgb, px_ref, px_cur, color, 1);
       } else {  // New feature tracks are blue.
         cv::circle(img_rgb, px_cur, px_sigma, blue, 1);
       }
     }
+  }
+  // find the mean and std of scores
+  if (!scores.empty()) {
+    const float mean =
+        std::accumulate(scores.begin(), scores.end(), 0.0f) / scores.size();
+    float sq_sum =
+        std::inner_product(scores.begin(), scores.end(), scores.begin(), 0.0f);
+    const float stdev = std::sqrt(sq_sum / scores.size() - mean * mean);
+    auto [min, max] = std::minmax_element(scores.begin(), scores.end());
+    LOG(INFO) << "Feature tracking scores - Mean: " << mean
+              << ", Std: " << stdev << ", Min: " << *min << ", Max: " << *max;
   }
   return img_rgb;
 }
@@ -1455,12 +1483,17 @@ void Tracker::featureTrackingDesc(
   std::set<LandmarkId> ref_lmk_ids(ref_frame->landmarks_.begin(),
                                    ref_frame->landmarks_.end());
 
+  double min_score = std::numeric_limits<double>::max();
+  double max_score = std::numeric_limits<double>::lowest();
+  size_t n_added_matches = 0;
+
   for (auto match : matches) {
     auto ref_i = match.queryIdx;
     auto cur_i = match.trainIdx;
 
     auto lmk_age = ref_frame->landmarks_age_.at(ref_i);
-    if (lmk_age > tracker_params_.max_feature_track_age_) {
+    if (invalidate_landmarks and
+        lmk_age > tracker_params_.max_feature_track_age_) {
       // If the feature is too old, we do not track it anymore.
       ref_frame->landmarks_.at(ref_i) = -1;
       continue;
@@ -1478,7 +1511,20 @@ void Tracker::featureTrackingDesc(
     ref_frame->landmarks_age_.at(ref_i)++;
     cur_frame->landmarks_age_.at(cur_i) = ref_frame->landmarks_age_.at(ref_i) +
                                           1;  // increment age of feature track
-    cur_frame->scores_.at(cur_i) = ref_frame->scores_.at(ref_i);
+    cur_frame->scores_.at(cur_i) =
+        ref_frame->secd_scores_.at(ref_i) * static_cast<double>(match.distance);
+    n_added_matches++;
+    if (cur_frame->scores_.at(cur_i) < min_score) {
+      min_score = cur_frame->scores_.at(cur_i);
+    }
+    if (cur_frame->scores_.at(cur_i) > max_score) {
+      max_score = cur_frame->scores_.at(cur_i);
+    }
+  }
+  if (n_added_matches == 0) {
+    LOG(INFO) << "No extra tracked keypoints.";
+  } else {
+    LOG(INFO) << "Extra tracked keypoints: " << n_added_matches;
   }
 
   // invalidate all keypoints that were not tracked in the ref frame

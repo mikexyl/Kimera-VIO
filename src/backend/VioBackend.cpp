@@ -492,10 +492,13 @@ void VioBackend::addLandmarksToGraph(const LandmarkIds& landmarks_kf) {
 // Adds a landmark to the graph for the first time.
 void VioBackend::addLandmarkToGraph(const LandmarkId& lmk_id,
                                     const FeatureTrack& ft) {
-  // We use a unit pinhole projection camera for the smart factors to be
-  // more efficient.
   gtsam::noiseModel::ExpandingIsotropic<3>::shared_ptr smart_noise(
       new gtsam::noiseModel::ExpandingIsotropic<3>());
+  smart_noise->setDCSMapping(/*phi_min*/ 10,
+                             /*phi_max*/ 50,
+                             /*gamma*/ 1);
+  smart_noise->enableDCS(true);
+
   SmartStereoFactor::shared_ptr new_factor(new SmartStereoFactor(
       smart_noise, smart_factors_params_, B_Pose_leftCamRect_));
 
@@ -755,7 +758,8 @@ void VioBackend::addStereoMeasurementsToFeatureTracks(
   for (size_t i = 0u; i < n_stereo_measurements; ++i) {
     const LandmarkId& lmk_id_in_kf_i = stereo_meas_kf[i].first;
     const StereoPoint2& stereo_px_i = stereo_meas_kf[i].second;
-    const double stereo_px_sigma = stereo_meas_kf[i].px_sigma;
+    const float stereo_px_sigma = stereo_meas_kf[i].px_sigma_;
+    const float stereo_px_score = stereo_meas_kf[i].score_;
 
     // We filtered invalid lmks in the StereoTracker, so this should not happen.
     CHECK_NE(lmk_id_in_kf_i, -1) << "landmarkId_kf_i == -1?";
@@ -795,7 +799,7 @@ void VioBackend::addStereoMeasurementsToFeatureTracks(
       // Add observation to existing landmark.
       VLOG(20) << "Updating feature track for lmk: " << lmk_id_in_kf_i << ".";
       feature_track_it->second.obs_.push_back(
-          FeatureObs(frame_num, stereo_px_i, stereo_px_sigma));
+          FeatureObs(frame_num, stereo_px_i, stereo_px_sigma, stereo_px_score));
 
       // TODO(Toni):
       // Mark feature tracks that have been re-observed, so that we can delete

@@ -305,6 +305,7 @@ KeypointsCV FeatureDetector::featureDetection(Frame* cur_frame,
       VLOG(1) << input_kpts[0].pt;
     }
 
+    std::vector<double> xfeat_scores;
     xfeat_detector->detectAndCompute(cur_frame->img_,
                                      {},
                                      keypoints,
@@ -312,21 +313,23 @@ KeypointsCV FeatureDetector::featureDetection(Frame* cur_frame,
                                      true,
                                      &cur_frame->xfeat_M1_,
                                      &cur_frame->xfeat_x_prep_,
-                                      &keypoint_stds,
-                                    //  nullptr,
-                                     &cur_frame->scores_);
+                                     &keypoint_stds,
+                                     //  nullptr,
+                                     &xfeat_scores);
     // check the first elements of the input_kpts the same as keypoints
     CHECK_LE(input_kpts.size(), keypoints.size());
     CHECK_EQ(cur_frame->keypoints_.size(), cur_frame->scores_.size());
-    if (input_kpts.size()) {
+    if (input_kpts.size()) {  // make sure the xfeat doesn't not change the
+                              // input keypoints
       CHECK_LE(cv::norm(input_kpts[0].pt - keypoints[0].pt), 1e-1);
     }
 
-    if (keypoint_stds.size()) {
-      for (size_t i = 0; i < keypoints.size(); ++i) {
-        cur_frame->keypoint_stds.push_back(
-            std::max(keypoint_stds[i][0], keypoint_stds[i][1]));
-      }
+    CHECK_EQ(xfeat_scores.size(), keypoints.size());
+
+    cur_frame->secd_scores_.resize(xfeat_scores.size(), 0.0);
+    for (size_t i = 0; i < xfeat_scores.size(); ++i) {
+      cur_frame->secd_scores_.at(i) =
+          xfeat_scores.at(i) * cur_frame->scores_.at(i);
     }
 
     VLOG(1) << "finish xfeat detection " << keypoints.size();
@@ -381,12 +384,6 @@ void FeatureDetector::featureDetectionNew(Frame* cur_frame,
                                           Frame* ref_frame,
                                           std::optional<cv::Mat> R) {
   CHECK_NOTNULL(cur_frame);
-
-  LandmarkIds old_lmk_ids = cur_frame->landmarks_;
-  auto old_keypoints = cur_frame->keypoints_;
-  auto old_scores = cur_frame->scores_;
-  auto old_versors = cur_frame->versors_;
-  auto old_lmk_age = cur_frame->landmarks_age_;
 
   int nr_corners_needed = feature_detector_params_.max_features_per_frame_;
 

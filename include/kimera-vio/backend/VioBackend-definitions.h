@@ -74,10 +74,16 @@ using PointsWithIdMap = LandmarksMap;
 using LmkIdToLmkTypeMap = std::unordered_map<LandmarkId, LandmarkType>;
 
 struct FeatureObs : std::pair<FrameId, StereoPoint2> {
-  FeatureObs(const FrameId& frame_id, const StereoPoint2& px, double px_sigma)
-      : std::pair<FrameId, StereoPoint2>(frame_id, px), px_sigma(px_sigma) {}
+  FeatureObs(const FrameId& frame_id,
+             const StereoPoint2& px,
+             double px_sigma,
+             double score = 1.)
+      : std::pair<FrameId, StereoPoint2>(frame_id, px),
+        px_sigma_(px_sigma),
+        score_(score) {}
 
-  double px_sigma = -1.;
+  double px_sigma_ = -1.;
+  double score_ = 1;
 };
 
 ////////////////////////////////////////////////////////////////////////////////
