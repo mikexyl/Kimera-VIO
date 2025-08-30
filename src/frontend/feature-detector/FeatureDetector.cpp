@@ -329,6 +329,15 @@ KeypointsCV FeatureDetector::featureDetection(Frame* cur_frame,
       }
     }
 
+    int n_good_features=0;
+    // count the number of scores that's >0
+    for (const auto& score : cur_frame->scores_) {
+      if (score > 0) {
+        n_good_features++;
+      }
+    }
+    LOG(INFO) << "Number of good features: " << n_good_features;
+
     VLOG(1) << "finish xfeat detection " << keypoints.size();
   } else {
     keypoints = rawFeatureDetection(cur_frame->img_, mask);

@@ -102,7 +102,7 @@ Tracker::Tracker(const TrackerParams& tracker_params,
     vilib_params.feature_tracker_options_.min_tracks_to_detect_new_features =
         tracker_params_.num_features_;
     vilib_params.feature_tracker_options_.use_best_n_features =
-        tracker_params_.num_features_ * 1.1;
+        tracker_params_.num_features_;
 
     optical_flow_tracker_ = std::make_shared<VilibTracker>(vilib_params);
   } else {
