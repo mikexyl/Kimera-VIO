@@ -63,10 +63,10 @@ ransac_probability: 0.995
 ransac_randomize: 0
 min_intra_keyframe_time: 0.2
 max_intra_keyframe_time: 10.0
-max_disparity_since_lkf: 200 #large value to disable
-minNumberFeatures: 0
+max_disparity_since_lkf: 2000 #large value to disable
+minNumberFeatures: 100
 useStereoTracking: 0
-disparityThreshold: 0.5
+disparityThreshold: 50
 # Type of optical flow predictor to aid feature tracking:
 # 0: Static - assumes no optical flow between images (aka static camera).
 # 1: Rotational - use IMU gyro to estimate optical flow.

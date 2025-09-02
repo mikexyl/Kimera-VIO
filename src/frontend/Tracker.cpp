@@ -275,8 +275,8 @@ void Tracker::featureTracking(
       cur_frame->landmarks_age_.push_back(0);
     }
 
-    // cur_frame->scores_.push_back(0.8);
-    cur_frame->scores_.push_back(scores[i]);
+    cur_frame->scores_.push_back(0.05);
+    // cur_frame->scores_.push_back(scores[i]);
     cur_frame->keypoints_.push_back(px_cur[i]);
     auto versor = UndistorterRectifier::GetBearingVector(
         px_cur[i], cur_frame->cam_param_, R);
@@ -1184,7 +1184,7 @@ cv::Mat Tracker::getTrackerImage(const Frame& ref_frame,
         std::inner_product(scores.begin(), scores.end(), scores.begin(), 0.0f);
     const float stdev = std::sqrt(sq_sum / scores.size() - mean * mean);
     auto [min, max] = std::minmax_element(scores.begin(), scores.end());
-    LOG(INFO) << "Feature tracking scores - Mean: " << mean
+    VLOG(1) << "Feature tracking scores - Mean: " << mean
               << ", Std: " << stdev << ", Min: " << *min << ", Max: " << *max;
   }
   return img_rgb;
@@ -1521,11 +1521,11 @@ void Tracker::featureTrackingDesc(
       max_score = cur_frame->scores_.at(cur_i);
     }
   }
-  if (n_added_matches == 0) {
-    LOG(INFO) << "No extra tracked keypoints.";
-  } else {
-    LOG(INFO) << "Extra tracked keypoints: " << n_added_matches;
-  }
+  // if (n_added_matches == 0) {
+  //   LOG(INFO) << "No extra tracked keypoints.";
+  // } else {
+  //   LOG(INFO) << "Extra tracked keypoints: " << n_added_matches;
+  // }
 
   // invalidate all keypoints that were not tracked in the ref frame
   if (invalidate_landmarks) {

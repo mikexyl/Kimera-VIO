@@ -125,6 +125,7 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::spinOnce(
     case LcdState::Nominal: {
       // TODO(marcus): need a better check than this:
       CHECK_GT(pgo_->calculateEstimate().size(), 0);
+      // updateOdomFactorsFromStates(input.backend_states_, odom_factor);
       addOdometryFactorAndOptimize(odom_factor);
       break;
     }
@@ -390,6 +391,82 @@ void LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::
   // Update tracker for latest VIO estimate
   // NOTE: done here instead of in spinOnce() to make unit tests easier.
   W_Pose_B_kf_vio_ = std::make_pair(factor.cur_key_, W_Pose_Bkf);
+}
+
+template <typename Database, typename FeatureDetector, typename FeatureMatcher>
+void LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::
+    updateOdomFactorsFromStates(const gtsam::Values& states,
+                                std::optional<OdometryFactor> odom_factor) {
+  CHECK(lcd_state_ == LcdState::Nominal);
+
+  // extract all odom factors from states
+  gtsam::NonlinearFactorGraph new_odom_factors;
+  std::map<FrameId, Pose3> poses;
+  for (auto const& key : states.keys()) {
+    gtsam::Symbol symbol(key);
+    if (symbol.chr() == kPoseSymbolChar) {
+      poses[symbol.index()] = states.at<gtsam::Pose3>(key);
+    }
+  }
+
+  // check if the poses are connected
+  // find the smallest and largest key of poses
+  FrameId first_frame, last_frame;
+  if (poses.empty()) {
+    return;
+  } else {
+    first_frame = poses.begin()->first;
+    last_frame = poses.rbegin()->first;
+    for (FrameId id = first_frame; id < last_frame; id++) {
+      CHECK(poses.count(id));
+      CHECK(poses.count(id + 1));
+
+      new_odom_factors.add(gtsam::BetweenFactor<gtsam::Pose3>(
+          id,
+          id + 1,
+          poses.at(id).inverse() * poses.at(id + 1),
+          shared_noise_model_));
+    }
+  }
+
+  auto const& old_factors = pgo_->getFactorsUnsafe();
+  gtsam::FactorIndices to_remove;
+  for (size_t fi = 0; fi < old_factors.size(); fi++) {
+    const auto& factor = old_factors[fi];
+    if (!factor) continue;
+    if (factor->keys().size() != 2) {
+      continue;
+    }
+    gtsam::Key key0(factor->keys().at(0)), key1(factor->keys().at(1));
+    if (poses.count(key0) && poses.count(key1)) {
+      to_remove.push_back(fi);
+    }
+  }
+  pgo_->removeFactorsNoUpdate(to_remove);
+
+  gtsam::Values values;
+  for (const auto& [id, pose] : poses) {
+    values.insert(gtsam::Symbol(id), pose);
+  }
+
+  CHECK(pgo_);
+  if (n_since_last_pgo_++ > 20) {
+    pgo_->forceUpdate(new_odom_factors, values);
+    LOG(INFO) << "Full PGO update!";
+    n_since_last_pgo_ = 0;
+  } else {
+    pgo_->update(new_odom_factors, values, false);
+  }
+
+  if (not odom_factor) {
+    return;
+  }
+
+  const gtsam::Pose3& W_Pose_Bkf = odom_factor->W_Pose_Blkf_;
+
+  // Update tracker for latest VIO estimate
+  // NOTE: done here instead of in spinOnce() to make unit tests easier.
+  W_Pose_B_kf_vio_ = std::make_pair(odom_factor->cur_key_, W_Pose_Bkf);
 }
 
 /* ------------------------------------------------------------------------

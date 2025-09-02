@@ -312,24 +312,31 @@ StatusMonoMeasurementsPtr MonoVisionImuFrontend::processFrame(
     mono_camera_->undistortKeypoints(mono_frame_k_->keypoints_,
                                      &mono_frame_k_->keypoints_undistorted_);
 
-    if (mono_frame_lkfm1_) {
-      tracker_->featureTrackingDesc(mono_frame_lkfm1_,
-                                    mono_frame_k_,
-                                    {},
-                                    frontend_params_.feature_detector_params_,
-                                    std::nullopt,
-                                    false);
-    }
+    tracker_->featureTrackingDesc(mono_frame_lkf_,
+                                  mono_frame_k_,
+                                  {},
+                                  frontend_params_.feature_detector_params_,
+                                  std::nullopt,
+                                  false);
 
-    if (mono_frame_lkfm2_) {
-      // track from lkfm1 to k
-      tracker_->featureTrackingDesc(mono_frame_lkfm2_,
-                                    mono_frame_k_,
-                                    {},
-                                    frontend_params_.feature_detector_params_,
-                                    std::nullopt,
-                                    false);
-    }
+    // if (mono_frame_lkfm1_) {
+    //   tracker_->featureTrackingDesc(mono_frame_lkfm1_,
+    //                                 mono_frame_k_,
+    //                                 {},
+    //                                 frontend_params_.feature_detector_params_,
+    //                                 std::nullopt,
+    //                                 false);
+    // }
+
+    // if (mono_frame_lkfm2_) {
+    //   // track from lkfm1 to k
+    //   tracker_->featureTrackingDesc(mono_frame_lkfm2_,
+    //                                 mono_frame_k_,
+    //                                 {},
+    //                                 frontend_params_.feature_detector_params_,
+    //                                 std::nullopt,
+    //                                 false);
+    // }
 
     CHECK_EQ(mono_frame_k_->keypoints_.size(), mono_frame_k_->scores_.size());
 

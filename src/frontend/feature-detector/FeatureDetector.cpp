@@ -329,7 +329,7 @@ KeypointsCV FeatureDetector::featureDetection(Frame* cur_frame,
     cur_frame->secd_scores_.resize(xfeat_scores.size(), 0.0);
     for (size_t i = 0; i < xfeat_scores.size(); ++i) {
       cur_frame->secd_scores_.at(i) =
-          xfeat_scores.at(i) * cur_frame->scores_.at(i);
+          xfeat_scores.at(i);  //* cur_frame->scores_.at(i);
     }
 
     VLOG(1) << "finish xfeat detection " << keypoints.size();

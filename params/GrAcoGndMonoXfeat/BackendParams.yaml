@@ -30,7 +30,7 @@ rankTolerance: 1
 #   * if the landmark is triangulated at distance larger than this,
 #   * result is flagged as degenerate.
 #   */
-landmarkDistanceThreshold: 100
+landmarkDistanceThreshold: 50
 
 # DynamicOutlierRejection:
 #  /**
@@ -65,7 +65,7 @@ relinearizeSkip: 1
 zero_velocity_precision: 1000
 no_motion_position_precision: 1000
 no_motion_rotation_precision: 10000
-constant_vel_precision: 10
+constant_vel_precision: 0.00001
 numOptimize: 1
 nr_states: 100 # number of nodes in horizon.
 # ISAM2GaussNewtonParams: continue updating the linear delta only when

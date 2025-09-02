@@ -26,8 +26,8 @@ score_type_id: 0
 patch_sze: 31
 fast_threshold: 20
 
-betweenRotationPrecision: 0.01 # 1/(0.01*0.01)
-betweenTranslationPrecision: 0.01 # 1/(0.1*0.1)
+betweenRotationPrecision: 1 # 1/(0.01*0.01)
+betweenTranslationPrecision: 1 # 1/(0.1*0.1)
 
 odom_rot_threshold: 0.1
 odom_trans_threshold: 1
@@ -84,6 +84,6 @@ local_window_size: 10
 min_pnp_num_landmarks: 50
 min_lmk_obs_ratio: 0.1 # map point cull, set to 0 to disable
 min_lmk_obs_count: 3 # map point cull, set to 0 to disable
-min_lmk_parallax: 10
+min_lmk_parallax: 20
 lcd_min_matched_features: 50
-max_lmk_reproj_error: 20000000
+max_lmk_reproj_error: 30

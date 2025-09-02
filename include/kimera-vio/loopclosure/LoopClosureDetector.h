@@ -225,6 +225,10 @@ class LoopClosureDetector : public LoopClosureDetectorBase {
    */
   void addLoopClosureFactorAndOptimize(const LoopClosureFactor& factor);
 
+  void updateOdomFactorsFromStates(
+      const gtsam::Values& states,
+      std::optional<OdometryFactor> odom_factor = std::nullopt);
+
   /* ------------------------------------------------------------------------
    */
   /** @brief Processed a single frame and adds it to relevant internal
@@ -554,6 +558,8 @@ class LoopClosureDetector : public LoopClosureDetectorBase {
   // Logging members
   std::unique_ptr<LoopClosureDetectorLogger> logger_;
   LcdDebugInfo debug_info_;
+
+  size_t n_since_last_pgo_{0};
 
   // Parameter members
   const bool log_output_ = false;
