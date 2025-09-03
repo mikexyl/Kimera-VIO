@@ -494,10 +494,10 @@ void VioBackend::addLandmarkToGraph(const LandmarkId& lmk_id,
                                     const FeatureTrack& ft) {
   gtsam::noiseModel::ExpandingIsotropic<3>::shared_ptr smart_noise(
       new gtsam::noiseModel::ExpandingIsotropic<3>());
-  smart_noise->setDCSMapping(/*phi_min*/ 10,
-                             /*phi_max*/ 50,
-                             /*gamma*/ 1);
-  smart_noise->enableDCS(true);
+  // smart_noise->setDCSMapping(/*phi_min*/ 10,
+  //                            /*phi_max*/ 50,
+  //                            /*gamma*/ 1);
+  // smart_noise->enableDCS(false);
 
   SmartStereoFactor::shared_ptr new_factor(new SmartStereoFactor(
       smart_noise, smart_factors_params_, B_Pose_leftCamRect_));

@@ -78,7 +78,7 @@ class LighterGlueCV : public FeatureTracker {
             << (cur_frame->timestamp_ - ref_frame->timestamp_) / 1e6 << " ms";
 
     prev_next_matches->resize(ref_frame->keypoints_.size(),
-                              0);  // Initialize to 0
+                              -1);  // Initialize to -1
     // set status
     for (auto match : matches) {
       (*prev_next_matches)[match.queryIdx] = match.trainIdx;  // Mark as found
@@ -104,15 +104,22 @@ class LighterGlueCV : public FeatureTracker {
     CHECK_NOTNULL(cur_frame);
     CHECK_NOTNULL(matches);
 
-    CHECK(not ref_frame->keypoints_.empty());
-    CHECK(not cur_frame->keypoints_.empty());
+    CHECK(not ref_frame->keypoints_undistorted_.empty());
+    CHECK(not cur_frame->keypoints_undistorted_.empty());
+    CHECK_EQ(ref_frame->keypoints_undistorted_.size(),
+             ref_frame->keypoints_.size());
+    CHECK_EQ(cur_frame->keypoints_undistorted_.size(),
+             cur_frame->keypoints_.size());
 
     xfeat::DetectionResult det0, det1;
     // keypoints vec to mat
-    det0.keypoints = cv::Mat(ref_frame->keypoints_.size(), 2, CV_32F);
-    for (size_t i = 0; i < ref_frame->keypoints_.size(); ++i) {
-      det0.keypoints.at<float>(i, 0) = ref_frame->keypoints_[i].x;
-      det0.keypoints.at<float>(i, 1) = ref_frame->keypoints_[i].y;
+    det0.keypoints =
+        cv::Mat(ref_frame->keypoints_undistorted_.size(), 2, CV_32F);
+    for (size_t i = 0; i < ref_frame->keypoints_undistorted_.size(); ++i) {
+      det0.keypoints.at<float>(i, 0) =
+          ref_frame->keypoints_undistorted_[i].second.x;
+      det0.keypoints.at<float>(i, 1) =
+          ref_frame->keypoints_undistorted_[i].second.y;
     }
     det0.descriptors = ref_frame->descriptors_;
     det0.scores.create(ref_frame->scores_.size(), 1, CV_32F);
@@ -121,10 +128,13 @@ class LighterGlueCV : public FeatureTracker {
       det0.scores.at<float>(i) = ref_frame->scores_[i];
     }
 
-    det1.keypoints = cv::Mat(cur_frame->keypoints_.size(), 2, CV_32F);
-    for (size_t i = 0; i < cur_frame->keypoints_.size(); ++i) {
-      det1.keypoints.at<float>(i, 0) = cur_frame->keypoints_[i].x;
-      det1.keypoints.at<float>(i, 1) = cur_frame->keypoints_[i].y;
+    det1.keypoints =
+        cv::Mat(cur_frame->keypoints_undistorted_.size(), 2, CV_32F);
+    for (size_t i = 0; i < cur_frame->keypoints_undistorted_.size(); ++i) {
+      det1.keypoints.at<float>(i, 0) =
+          cur_frame->keypoints_undistorted_[i].second.x;
+      det1.keypoints.at<float>(i, 1) =
+          cur_frame->keypoints_undistorted_[i].second.y;
     }
     det1.descriptors = cur_frame->descriptors_;
     det1.scores.create(cur_frame->scores_.size(), 1, CV_32F);
@@ -145,6 +155,10 @@ class LighterGlueCV : public FeatureTracker {
                       det0.keypoints.at<float>(match.queryIdx, 1)});
       pts2.push_back({det1.keypoints.at<float>(match.trainIdx, 0),
                       det1.keypoints.at<float>(match.trainIdx, 1)});
+    }
+    if (pts1.size() < 4) {
+      matches->clear();
+      return;
     }
     cv::Mat mask;
     cv::Mat H = cv::findHomography(pts1, pts2, cv::RANSAC, 3.5, mask, 100, 0.9);

@@ -83,7 +83,7 @@ class VilibTracker : public FeatureTracker {
       CHECK_EQ(ref_frame->id_, prev_frame_id_);
     }
 
-    size_t num_prev_keypoints = ref_frame ? ref_frame->keypoints_.size() : 0;
+    size_t num_prev_keypoints = ref_frame ? ref_frame->of_keypoints_.size() : 0;
 
     cv::Mat gray_image;
     cv::cvtColor(cur_frame->img_, gray_image, cv::COLOR_BGR2GRAY);

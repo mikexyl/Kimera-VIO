@@ -121,6 +121,8 @@ class Tracker {
       std::vector<int>* inliers,
       const gtsam::Pose3& cam_lkf_Pose_cam_kf = gtsam::Pose3());
 
+  TrackingStatus detectZeroMotionOF(Frame* ref_frame, Frame* cur_frame);
+
   /**
    * @brief geometricOutlierRejection3d3d
    * @param ref_stereo_frame
@@ -215,6 +217,10 @@ class Tracker {
   static void findMatchingKeypoints(const Frame& ref_frame,
                                     const Frame& cur_frame,
                                     KeypointMatches* matches_ref_cur);
+
+  static void findMatchingKeypointsOF(const Frame& ref_frame,
+                                      const Frame& cur_frame,
+                                      KeypointMatches* matches_ref_cur);
 
   static void findMatchingStereoKeypoints(
       const StereoFrame& ref_stereoFrame,

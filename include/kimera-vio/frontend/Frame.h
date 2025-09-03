@@ -181,6 +181,9 @@ class Frame : public PipelinePayload {
   //! in the ref frame of the RECTIFIED left frame
   BearingVectors versors_;
 
+  KeypointsCV of_keypoints_;
+  LandmarkIds of_landmarks_;
+
   cv::Mat descriptors_;
   //! Optional mask for feature detection. Note that can change when the frame
   //! is const

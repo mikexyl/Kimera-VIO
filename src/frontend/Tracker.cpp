@@ -120,7 +120,7 @@ Tracker::Tracker(const TrackerParams& tracker_params,
     }
     case TrackerParams::TrackerType::LIGHTERGLUE: {
       LighterGlueCV::Params lg_params;
-      lg_params.min_score = -1.f;
+      lg_params.min_score = tracker_params_.gpu_bf_min_sim_;
       lg_params.model_path = tracker_params_.lighterglue_model_path_;
       lg_params.n_kpts = tracker_params_.num_features_;
       lg_params.use_gpu = true;
@@ -169,13 +169,13 @@ void Tracker::featureTracking(
   KeypointsCV px_ref;
   std::vector<size_t> indices_of_valid_landmarks;
   if (ref_frame) {
-    const size_t& n_ref_kpts = ref_frame->keypoints_.size();
+    const size_t& n_ref_kpts = ref_frame->of_keypoints_.size();
     px_ref.reserve(n_ref_kpts);
     indices_of_valid_landmarks.reserve(n_ref_kpts);
-    for (size_t i = 0; i < ref_frame->keypoints_.size(); ++i) {
-      if (ref_frame->landmarks_[i] != -1) {
+    for (size_t i = 0; i < ref_frame->of_keypoints_.size(); ++i) {
+      if (ref_frame->of_landmarks_[i] != -1) {
         // Current reference frame keypoint has a valid landmark.
-        px_ref.push_back(ref_frame->keypoints_[i]);
+        px_ref.push_back(ref_frame->of_keypoints_[i]);
         indices_of_valid_landmarks.push_back(i);
       }
     }
@@ -237,22 +237,8 @@ void Tracker::featureTracking(
     }
   }
 
-  // TODO(Toni): use the error to further take only the best tracks?
-
-  // At this point cur_frame should have no keypoints...
-  CHECK(cur_frame->keypoints_.empty());
-  CHECK(cur_frame->landmarks_.empty());
-  CHECK(cur_frame->landmarks_age_.empty());
-  CHECK(cur_frame->keypoints_.empty());
-  CHECK(cur_frame->scores_.empty());
-  CHECK(cur_frame->versors_.empty());
-  // TODO(TOni): this is basically copying the whole px_ref into the
-  // current frame as well as the ref_frame information! Absolute nonsense.
-  cur_frame->landmarks_.reserve(px_ref.size());
-  cur_frame->landmarks_age_.reserve(px_ref.size());
-  cur_frame->keypoints_.reserve(px_ref.size());
-  cur_frame->scores_.reserve(px_ref.size());
-  cur_frame->versors_.reserve(px_ref.size());
+  cur_frame->of_landmarks_.reserve(px_ref.size());
+  cur_frame->of_keypoints_.reserve(px_ref.size());
 
   CHECK(not invalidate_landmarks) << "broken";
 
@@ -266,33 +252,14 @@ void Tracker::featureTracking(
 
     if (next_prev_matches[i] != -1) {
       CHECK_NOTNULL(ref_frame);
-      size_t lmk_age = ++(ref_frame->landmarks_age_.at(next_prev_matches[i]));
-      LandmarkId lmk_id = ref_frame->landmarks_.at(next_prev_matches[i]);
-      cur_frame->landmarks_.push_back(lmk_id);
-      cur_frame->landmarks_age_.push_back(lmk_age);
+      LandmarkId lmk_id = ref_frame->of_landmarks_.at(next_prev_matches[i]);
+      cur_frame->of_landmarks_.push_back(lmk_id);
     } else {
-      cur_frame->landmarks_.push_back(FeatureDetector::lmk_id++);
-      cur_frame->landmarks_age_.push_back(0);
+      cur_frame->of_landmarks_.push_back(FeatureDetector::of_lmk_id++);
     }
 
-    cur_frame->scores_.push_back(0.05);
-    // cur_frame->scores_.push_back(scores[i]);
-    cur_frame->keypoints_.push_back(px_cur[i]);
-    auto versor = UndistorterRectifier::GetBearingVector(
-        px_cur[i], cur_frame->cam_param_, R);
-    CHECK_LT(std::abs(versor.norm() - 1.0), 1e-6)
-        << "Versor norm: " << versor.norm();
-    cur_frame->versors_.push_back(versor);
-
-    cur_frame->prim_stds_.push_back(stds[i]);
+    cur_frame->of_keypoints_.push_back(px_cur[i]);
   }
-
-  VLOG(1) << "cur lmk range after track "
-          << *std::min_element(cur_frame->landmarks_.begin(),
-                               cur_frame->landmarks_.end())
-          << " - "
-          << *std::max_element(cur_frame->landmarks_.begin(),
-                               cur_frame->landmarks_.end());
 
   // max number of frames in which a feature is seen
   VLOG(5) << "featureTracking: frame " << cur_frame->id_
@@ -423,6 +390,24 @@ TrackingStatusPose Tracker::geometricOutlierRejection2d2d(
           << status_pose.second;
 
   return status_pose;
+}
+
+TrackingStatus Tracker::detectZeroMotionOF(Frame* ref_frame, Frame* cur_frame) {
+  KeypointMatches matches_ref_cur;
+  findMatchingKeypointsOF(*ref_frame, *cur_frame, &matches_ref_cur);
+
+  double disparity;
+  if (computeMedianDisparity(ref_frame->of_keypoints_,
+                             cur_frame->of_keypoints_,
+                             matches_ref_cur,
+                             &disparity)) {
+    if (disparity < tracker_params_.disparityThreshold_) {
+      return TrackingStatus::LOW_DISPARITY;
+    }
+  } else {
+    return TrackingStatus::INVALID;
+  }
+  return TrackingStatus::VALID;
 }
 
 // TODO(Toni): this function is almost a replica of the Stereo version,
@@ -1023,6 +1008,35 @@ void Tracker::removeOutliersStereo(const std::vector<int>& inliers,
   *matches_ref_cur = outlier_free_matches_ref_cur;
 }
 
+void Tracker::findMatchingKeypointsOF(const Frame& ref_frame,
+                                      const Frame& cur_frame,
+                                      KeypointMatches* matches_ref_cur) {
+  CHECK_NOTNULL(matches_ref_cur)->clear();
+
+  // Find keypoints that observe the same landmarks in both frames:
+  std::map<LandmarkId, size_t> ref_lm_index_map;
+  for (size_t i = 0; i < ref_frame.of_landmarks_.size(); ++i) {
+    const LandmarkId& ref_id = ref_frame.of_landmarks_.at(i);
+    if (ref_id != -1) {
+      // Map landmark id -> position in ref_frame.landmarks_
+      ref_lm_index_map[ref_id] = i;
+    }
+  }
+
+  // Map of position of landmark j in ref frame to position of landmark j in
+  // cur_frame
+  matches_ref_cur->reserve(ref_lm_index_map.size());
+  for (size_t i = 0; i < cur_frame.of_landmarks_.size(); ++i) {
+    const LandmarkId& cur_id = cur_frame.of_landmarks_.at(i);
+    if (cur_id != -1) {
+      auto it = ref_lm_index_map.find(cur_id);
+      if (it != ref_lm_index_map.end()) {
+        matches_ref_cur->push_back(std::make_pair(it->second, i));
+      }
+    }
+  }
+}
+
 void Tracker::findMatchingKeypoints(const Frame& ref_frame,
                                     const Frame& cur_frame,
                                     KeypointMatches* matches_ref_cur) {
@@ -1184,8 +1198,8 @@ cv::Mat Tracker::getTrackerImage(const Frame& ref_frame,
         std::inner_product(scores.begin(), scores.end(), scores.begin(), 0.0f);
     const float stdev = std::sqrt(sq_sum / scores.size() - mean * mean);
     auto [min, max] = std::minmax_element(scores.begin(), scores.end());
-    VLOG(1) << "Feature tracking scores - Mean: " << mean
-              << ", Std: " << stdev << ", Min: " << *min << ", Max: " << *max;
+    VLOG(1) << "Feature tracking scores - Mean: " << mean << ", Std: " << stdev
+            << ", Min: " << *min << ", Max: " << *max;
   }
   return img_rgb;
 }

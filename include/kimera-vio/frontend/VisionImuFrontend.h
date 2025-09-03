@@ -137,7 +137,9 @@ class VisionImuFrontend {
   virtual FrontendOutputPacketBase::UniquePtr nominalSpin(
       FrontendInputPacketBase::UniquePtr&& input) = 0;
 
-  virtual bool shouldBeKeyframe(const Frame& frame, const Frame& lkf) const;
+  virtual bool shouldBeKeyframe(const Frame& frame,
+                                const Frame& lkf,
+                                size_t* n_tracked = nullptr) const;
 
   /* ------------------------------------------------------------------------ */
   // Reset ImuFrontend gravity. Trivial gravity is needed for initial alignment.

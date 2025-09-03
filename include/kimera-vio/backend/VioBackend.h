@@ -479,7 +479,7 @@ class VioBackend {
             << smart_noise_->sigmas().size();
         smart_noise_ptr->pushSigma(
             stereo_px_sigma > 0 ? stereo_px_sigma : smart_noise_->sigmas()[0]);
-        smart_noise_ptr->pushScore(score);
+        // smart_noise_ptr->pushScore(score);
       }
     }
   }

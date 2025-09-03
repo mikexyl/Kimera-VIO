@@ -18,6 +18,7 @@
 namespace VIO {
 
 LandmarkId FeatureDetector::lmk_id = 0;
+LandmarkId FeatureDetector::of_lmk_id = 0;
 
 FeatureDetector::FeatureDetector(
     const FeatureDetectorParams& feature_detector_params,
@@ -306,31 +307,57 @@ KeypointsCV FeatureDetector::featureDetection(Frame* cur_frame,
     }
 
     std::vector<double> xfeat_scores;
+    bool use_provided_keypoints = false;
     xfeat_detector->detectAndCompute(cur_frame->img_,
                                      {},
                                      keypoints,
                                      cur_frame->descriptors_,
-                                     true,
+                                     use_provided_keypoints,
                                      &cur_frame->xfeat_M1_,
                                      &cur_frame->xfeat_x_prep_,
                                      &keypoint_stds,
                                      //  nullptr,
                                      &xfeat_scores);
+    CHECK_EQ(keypoints.size(), need_n_corners);
     // check the first elements of the input_kpts the same as keypoints
     CHECK_LE(input_kpts.size(), keypoints.size());
     CHECK_EQ(cur_frame->keypoints_.size(), cur_frame->scores_.size());
-    if (input_kpts.size()) {  // make sure the xfeat doesn't not change the
+    if (use_provided_keypoints and
+        input_kpts.size()) {  // make sure the xfeat doesn't not change the
                               // input keypoints
       CHECK_LE(cv::norm(input_kpts[0].pt - keypoints[0].pt), 1e-1);
     }
 
     CHECK_EQ(xfeat_scores.size(), keypoints.size());
 
-    cur_frame->secd_scores_.resize(xfeat_scores.size(), 0.0);
+    cv::KeyPoint::convert(keypoints, cur_frame->keypoints_);
+
+    cur_frame->secd_scores_.resize(cur_frame->keypoints_.size(), 0.0);
+    cur_frame->scores_.resize(cur_frame->keypoints_.size(), 0.0);
+    cur_frame->prim_stds_.resize(cur_frame->keypoints_.size());
+    cur_frame->landmarks_.resize(cur_frame->keypoints_.size());
+    cur_frame->landmarks_age_.resize(cur_frame->keypoints_.size(), 0);
+    cur_frame->versors_.resize(cur_frame->keypoints_.size());
+
     for (size_t i = 0; i < xfeat_scores.size(); ++i) {
       cur_frame->secd_scores_.at(i) =
           xfeat_scores.at(i);  //* cur_frame->scores_.at(i);
+      cur_frame->scores_.at(i) = xfeat_scores.at(i);
     }
+
+    for (size_t i = 0; i < cur_frame->keypoints_.size(); i++) {
+      cur_frame->prim_stds_.at(i) =
+          std::max(keypoint_stds.at(i)[0], keypoint_stds.at(i)[1]);
+      cur_frame->landmarks_.at(i) = FeatureDetector::lmk_id++;
+      auto versor = UndistorterRectifier::GetBearingVector(
+          cur_frame->keypoints_.at(i), cur_frame->cam_param_, std::nullopt);
+      cur_frame->versors_.at(i) = versor;
+    }
+
+    CHECK_EQ(cur_frame->keypoints_.size(), cur_frame->landmarks_.size());
+    CHECK_EQ(cur_frame->keypoints_.size(), cur_frame->prim_stds_.size());
+    CHECK_EQ(cur_frame->keypoints_.size(), cur_frame->scores_.size());
+    CHECK_EQ(cur_frame->keypoints_.size(), cur_frame->versors_.size());
 
     VLOG(1) << "finish xfeat detection " << keypoints.size();
   } else {
@@ -389,14 +416,12 @@ void FeatureDetector::featureDetectionNew(Frame* cur_frame,
 
   std::vector<int> tracked_corners;
 
-  CHECK_GT(cur_frame->keypoints_.size(), 0) << cur_frame->id_;
-
   auto corners = featureDetection(
       cur_frame, ref_frame, nr_corners_needed, &tracked_corners);
   VLOG(1) << "tracked corners: " << tracked_corners.size();
 
   CHECK_EQ(cur_frame->keypoints_.size(), cur_frame->descriptors_.rows);
-  CHECK_EQ(cur_frame->keypoints_.size(), cur_frame->scores_.size());
+  CHECK_EQ(cur_frame->keypoints_.size(), cur_frame->secd_scores_.size());
 
   // here we only detect and compute keypoints and descriptors
   // matching is done afterwards by the lighterglue matcher

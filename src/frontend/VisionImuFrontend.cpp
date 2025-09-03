@@ -175,12 +175,16 @@ void VisionImuFrontend::outlierRejectionPnP(
 }
 
 bool VisionImuFrontend::shouldBeKeyframe(const Frame& frame,
-                                         const Frame& frame_lkf) const {
+                                         const Frame& frame_lkf,
+                                         size_t* n_tracked) const {
   const Timestamp kf_diff_ns = frame.timestamp_ - frame_lkf.timestamp_;
 
   KeypointMatches matches_ref_cur;
-  tracker_->findMatchingKeypoints(frame_lkf, frame, &matches_ref_cur);
+  tracker_->findMatchingKeypointsOF(frame_lkf, frame, &matches_ref_cur);
   const size_t nr_valid_features = matches_ref_cur.size();
+  if (n_tracked) {
+    *n_tracked = nr_valid_features;
+  }
 
   const bool min_time_elapsed =
       kf_diff_ns >= frontend_params_.min_intra_keyframe_time_ns_;
@@ -191,8 +195,10 @@ bool VisionImuFrontend::shouldBeKeyframe(const Frame& frame,
 
   // check for large enough disparity
   double disparity;
-  tracker_->computeMedianDisparity(
-      frame_lkf.keypoints_, frame.keypoints_, matches_ref_cur, &disparity);
+  tracker_->computeMedianDisparity(frame_lkf.of_keypoints_,
+                                   frame.of_keypoints_,
+                                   matches_ref_cur,
+                                   &disparity);
 
   const bool is_disparity_low =
       disparity < tracker_->tracker_params_.disparityThreshold_;
@@ -206,9 +212,13 @@ bool VisionImuFrontend::shouldBeKeyframe(const Frame& frame,
   const bool disparity_flipped =
       ((enough_disparity || disparity_low_first_time) && min_time_elapsed);
 
-  const bool need_new_keyframe = max_time_elapsed || max_disparity_reached ||
+  bool need_new_keyframe = max_time_elapsed || max_disparity_reached ||
                                  disparity_flipped || nr_features_low ||
                                  frame.isKeyframe_;
+
+  if (!min_time_elapsed) {
+    need_new_keyframe = false;
+  }
 
   if (!need_new_keyframe) {
     return false;  // no keyframe conditions are met

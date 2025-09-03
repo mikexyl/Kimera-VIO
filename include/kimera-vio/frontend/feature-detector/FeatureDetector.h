@@ -53,6 +53,7 @@ class FeatureDetector {
       const cv::Mat& mask = cv::Mat());
 
   static LandmarkId lmk_id;
+  static LandmarkId of_lmk_id;
 
  private:
   // Returns landmark_count (updated from the new keypoints),
