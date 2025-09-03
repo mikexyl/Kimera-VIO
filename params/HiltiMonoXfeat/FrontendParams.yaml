@@ -63,8 +63,8 @@ ransac_probability: 0.99
 ransac_randomize: 0
 min_intra_keyframe_time: 0.2
 max_intra_keyframe_time: 0.5
-max_disparity_since_lkf: 500 #large value to disable
-minNumberFeatures: 100
+max_disparity_since_lkf: 2000 #large value to disable
+minNumberFeatures: 50
 useStereoTracking: 0
 disparityThreshold: 3
 # Type of optical flow predictor to aid feature tracking:
@@ -110,5 +110,5 @@ max_lmk_merge_px: 1
 vilib_cell_width: 64
 vilib_cell_height: 64
 
-kf_queue_size: 2
-rematch_threshold: 0.7
+kf_queue_size: 5
+rematch_threshold: 0.3
