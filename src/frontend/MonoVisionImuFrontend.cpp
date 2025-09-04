@@ -340,8 +340,8 @@ StatusMonoMeasurementsPtr MonoVisionImuFrontend::processFrame(
     }
 
     // find the best (least tracked) keyframe to run matcher
-    if (tracker_status_summary_.kfTrackingStatus_mono_ ==
-        TrackingStatus::VALID) {
+    if (tracker_status_summary_.kfTrackingStatus_mono_ !=
+        TrackingStatus::LOW_DISPARITY) {
       Frame::Ptr best_kf_to_rematch = nullptr;
       if (not mono_frames_.empty()) {
         size_t n_total_points = mono_frame_k_->keypoints_.size();
