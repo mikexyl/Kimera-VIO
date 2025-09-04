@@ -491,6 +491,9 @@ class VioBackend {
   const BackendOutputParams backend_output_params_;
   std::optional<OdometryParams> odom_params_;
 
+  std::deque<TrackingStatus> tracking_statuses_;
+  const int tracking_status_window_size_ = 2000;
+
   // State estimates.
   // TODO(Toni): bundle these in a VioNavStateTimestamped.
   Timestamp timestamp_lkf_;

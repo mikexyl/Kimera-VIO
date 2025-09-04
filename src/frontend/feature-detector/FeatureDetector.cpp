@@ -286,8 +286,8 @@ KeypointsCV FeatureDetector::featureDetection(Frame* cur_frame,
     CHECK_NOTNULL(xfeat_detector);
     std::vector<cv::Vec2d> keypoint_stds;
 
-    for (size_t i = 0; i < cur_frame->keypoints_.size(); i++) {
-      keypoints.emplace_back(cv::KeyPoint(cur_frame->keypoints_.at(i), 1.0));
+    for (size_t i = 0; i < cur_frame->of_keypoints_.size(); i++) {
+      keypoints.emplace_back(cv::KeyPoint(cur_frame->of_keypoints_.at(i), 1.0));
     }
 
     if (not keypoints.empty()) {
@@ -307,7 +307,7 @@ KeypointsCV FeatureDetector::featureDetection(Frame* cur_frame,
     }
 
     std::vector<double> xfeat_scores;
-    bool use_provided_keypoints = false;
+    bool use_provided_keypoints = true;
     xfeat_detector->detectAndCompute(cur_frame->img_,
                                      {},
                                      keypoints,
@@ -318,7 +318,6 @@ KeypointsCV FeatureDetector::featureDetection(Frame* cur_frame,
                                      &keypoint_stds,
                                      //  nullptr,
                                      &xfeat_scores);
-    CHECK_EQ(keypoints.size(), need_n_corners);
     // check the first elements of the input_kpts the same as keypoints
     CHECK_LE(input_kpts.size(), keypoints.size());
     CHECK_EQ(cur_frame->keypoints_.size(), cur_frame->scores_.size());

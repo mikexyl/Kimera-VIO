@@ -16,7 +16,7 @@ T_BS:
 rate_hz: 125
 
 # inertial sensor parameters
-imu_bias_init_sigma: 1e-2
+imu_bias_init_sigma: 1e-4
 accelerometer_noise_density: 1.8744963e-02  # [ m / s^2 / sqrt(Hz) ]   ( accel "white noise" )
 accelerometer_random_walk: 6.4808910e-04    # [ m / s^3 / sqrt(Hz) ].  ( accel bias diffusion )
 gyroscope_noise_density: 5.4259815e-04     # [ rad / s / sqrt(Hz) ]   ( gyro "white noise" )

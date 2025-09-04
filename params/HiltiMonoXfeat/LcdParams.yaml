@@ -83,7 +83,7 @@ local_window_size: 10
 
 min_pnp_num_landmarks: 30
 min_lmk_obs_ratio: 0.01 # map point cull, set to 0 to disable
-min_lmk_obs_count: 2 # map point cull, set to 0 to disable
-min_lmk_parallax: 2
+min_lmk_obs_count: 3 # map point cull, set to 0 to disable
+min_lmk_parallax: 5
 lcd_min_matched_features: 30
-max_lmk_reproj_error: 30
+max_lmk_reproj_error: 20

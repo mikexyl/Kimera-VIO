@@ -1165,7 +1165,7 @@ cv::Mat Tracker::getTrackerImage(const Frame& ref_frame,
     double px_sigma = 5;
     double score = 1;
     if (i < cur_frame.prim_stds_.size()) {
-      px_sigma = cur_frame.prim_stds_.at(i) * 2;
+      px_sigma = cur_frame.prim_stds_.at(i);
     }
     if (i < cur_frame.scores_.size()) {
       score = cur_frame.scores_.at(i);
@@ -1182,6 +1182,7 @@ cv::Mat Tracker::getTrackerImage(const Frame& ref_frame,
         color[1] = 255 * std::min(1.0, score);
         color[2] = 255 * (1.0 - std::min(1.0, score));
         cv::circle(img_rgb, px_cur, px_sigma, color, 1);
+        cv::circle(img_rgb, px_cur, 4, green, -1);
         int i = std::distance(ref_frame.landmarks_.begin(), it);
         const cv::Point2f& px_ref = ref_frame.keypoints_.at(i);
         cv::line(img_rgb, px_ref, px_cur, color, 1);

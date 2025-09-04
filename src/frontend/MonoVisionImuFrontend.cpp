@@ -315,36 +315,6 @@ StatusMonoMeasurementsPtr MonoVisionImuFrontend::processFrame(
                                   std::nullopt,
                                   false);
 
-    // find the best (least tracked) keyframe to run matcher
-    Frame::Ptr best_kf_to_rematch = nullptr;
-    if (not mono_frames_.empty()) {
-      size_t n_total_points = mono_frame_k_->keypoints_.size();
-      for (auto kf = mono_frames_.rbegin(); kf != mono_frames_.rend(); ++kf) {
-        KeypointMatches matches_ref_cur;
-        tracker_->findMatchingKeypoints(**kf, *mono_frame_k_, &matches_ref_cur);
-        if (matches_ref_cur.size() <
-            n_total_points * frontend_params_.rematch_threshold_) {
-          best_kf_to_rematch = *kf;
-          break;
-        }
-      }
-      if (not best_kf_to_rematch) {
-        best_kf_to_rematch = mono_frames_.front();
-      }
-    }
-
-    if (best_kf_to_rematch) {
-      LOG(INFO) << "Rematching with keyframe: " << best_kf_to_rematch->id_;
-      LOG(INFO) << "Rematching interval: "
-                << mono_frame_k_->id_ - best_kf_to_rematch->id_;
-      tracker_->featureTrackingDesc(best_kf_to_rematch,
-                                    mono_frame_k_,
-                                    {},
-                                    frontend_params_.feature_detector_params_,
-                                    std::nullopt,
-                                    false);
-    }
-
     CHECK_EQ(mono_frame_k_->keypoints_.size(), mono_frame_k_->scores_.size());
 
     if (frontend_params_.useRANSAC_) {
@@ -366,6 +336,40 @@ StatusMonoMeasurementsPtr MonoVisionImuFrontend::processFrame(
           TrackingStatus::VALID) {
         tracker_status_summary_.lkf_T_k_mono_ =
             gtsam::Pose3(keyframe_R_cur_frame, gtsam::Point3(0, 0, 0));
+      }
+    }
+
+    // find the best (least tracked) keyframe to run matcher
+    if (tracker_status_summary_.kfTrackingStatus_mono_ ==
+        TrackingStatus::VALID) {
+      Frame::Ptr best_kf_to_rematch = nullptr;
+      if (not mono_frames_.empty()) {
+        size_t n_total_points = mono_frame_k_->keypoints_.size();
+        for (auto kf = mono_frames_.rbegin(); kf != mono_frames_.rend(); ++kf) {
+          KeypointMatches matches_ref_cur;
+          tracker_->findMatchingKeypoints(
+              **kf, *mono_frame_k_, &matches_ref_cur);
+          if (matches_ref_cur.size() <
+              n_total_points * frontend_params_.rematch_threshold_) {
+            best_kf_to_rematch = *kf;
+            break;
+          }
+        }
+        if (not best_kf_to_rematch) {
+          best_kf_to_rematch = mono_frames_.front();
+        }
+      }
+
+      if (best_kf_to_rematch) {
+        LOG(INFO) << "Rematching with keyframe: " << best_kf_to_rematch->id_;
+        LOG(INFO) << "Rematching interval: "
+                  << mono_frame_k_->id_ - best_kf_to_rematch->id_;
+        tracker_->featureTrackingDesc(best_kf_to_rematch,
+                                      mono_frame_k_,
+                                      {},
+                                      frontend_params_.feature_detector_params_,
+                                      std::nullopt,
+                                      false);
       }
     }
 

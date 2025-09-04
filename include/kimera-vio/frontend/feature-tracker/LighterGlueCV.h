@@ -113,13 +113,10 @@ class LighterGlueCV : public FeatureTracker {
 
     xfeat::DetectionResult det0, det1;
     // keypoints vec to mat
-    det0.keypoints =
-        cv::Mat(ref_frame->keypoints_undistorted_.size(), 2, CV_32F);
-    for (size_t i = 0; i < ref_frame->keypoints_undistorted_.size(); ++i) {
-      det0.keypoints.at<float>(i, 0) =
-          ref_frame->keypoints_undistorted_[i].second.x;
-      det0.keypoints.at<float>(i, 1) =
-          ref_frame->keypoints_undistorted_[i].second.y;
+    det0.keypoints = cv::Mat(ref_frame->keypoints_.size(), 2, CV_32F);
+    for (size_t i = 0; i < ref_frame->keypoints_.size(); ++i) {
+      det0.keypoints.at<float>(i, 0) = ref_frame->keypoints_[i].x;
+      det0.keypoints.at<float>(i, 1) = ref_frame->keypoints_[i].y;
     }
     det0.descriptors = ref_frame->descriptors_;
     det0.scores.create(ref_frame->scores_.size(), 1, CV_32F);
@@ -128,13 +125,10 @@ class LighterGlueCV : public FeatureTracker {
       det0.scores.at<float>(i) = ref_frame->scores_[i];
     }
 
-    det1.keypoints =
-        cv::Mat(cur_frame->keypoints_undistorted_.size(), 2, CV_32F);
-    for (size_t i = 0; i < cur_frame->keypoints_undistorted_.size(); ++i) {
-      det1.keypoints.at<float>(i, 0) =
-          cur_frame->keypoints_undistorted_[i].second.x;
-      det1.keypoints.at<float>(i, 1) =
-          cur_frame->keypoints_undistorted_[i].second.y;
+    det1.keypoints = cv::Mat(cur_frame->keypoints_.size(), 2, CV_32F);
+    for (size_t i = 0; i < cur_frame->keypoints_.size(); ++i) {
+      det1.keypoints.at<float>(i, 0) = cur_frame->keypoints_[i].x;
+      det1.keypoints.at<float>(i, 1) = cur_frame->keypoints_[i].y;
     }
     det1.descriptors = cur_frame->descriptors_;
     det1.scores.create(cur_frame->scores_.size(), 1, CV_32F);

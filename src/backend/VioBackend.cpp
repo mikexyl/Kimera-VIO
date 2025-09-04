@@ -406,6 +406,29 @@ bool VioBackend::addVisualInertialStateAndOptimize(
     }
   }
 
+  tracking_statuses_.push_back(kfTrackingStatus_mono);
+  if (tracking_statuses_.size() > tracking_status_window_size_) {
+    tracking_statuses_.pop_front();
+  }
+
+  int n_states_valid = 0;
+  int n_until_enough_valid = 0;
+  // count backwards the state queue until we find number of valid states
+  for (auto it = tracking_statuses_.rbegin();
+       it != tracking_statuses_.rend() and
+       n_states_valid < backend_params_.nr_states_;
+       ++it) {
+    n_until_enough_valid++;
+    n_states_valid += (*it == TrackingStatus::VALID);
+  }
+
+  int nr_states_include_invalid = std::max(
+      backend_params_.nr_states_, static_cast<double>(n_until_enough_valid));
+  smoother_->smootherLag() = nr_states_include_invalid;
+  LOG(INFO) << "Setting smoother lag to: " << smoother_->smootherLag()
+            << " states, to include " << n_states_valid
+            << " valid states in the optimization.";
+
   // Add odometry factors if they're available and have non-zero precision
   if (odometry_body_pose && odom_params_ &&
       (odom_params_->betweenRotationPrecision_ > 0.0 ||
