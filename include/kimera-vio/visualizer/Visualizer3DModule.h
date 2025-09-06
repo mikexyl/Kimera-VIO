@@ -38,6 +38,7 @@ class VisualizerModule
   using VizFrontendInput = FrontendOutputPacketBase::Ptr;
   using VizBackendInput = BackendOutput::Ptr;
   using VizMesherInput = MesherOutput::Ptr;
+  using VizLoopClosureInput = LcdOutput::Ptr;
 
   VisualizerModule(OutputQueue* output_queue,
                    bool parallel_run,
@@ -55,6 +56,18 @@ class VisualizerModule
 
   inline void fillBackendQueue(const VizBackendInput& backend_payload) {
     backend_queue_.push(backend_payload);
+  }
+
+  inline void fillLoopClosureQueue(const VizLoopClosureInput& lcd_payload) {
+    if (!lcd_payload) {
+      return;
+    }
+    if (not loop_closure_queue_) {
+      loop_closure_queue_ =
+          std::make_unique<ThreadsafeQueue<VizLoopClosureInput>>(
+              "visualizer_loop_closure_queue");
+    }
+    loop_closure_queue_->push(lcd_payload);
   }
 
   void fillMesherQueue(const VizMesherInput& mesher_payload);
@@ -81,6 +94,7 @@ class VisualizerModule
   //! Input Queues
   ThreadsafeQueue<VizFrontendInput> frontend_queue_;
   ThreadsafeQueue<VizBackendInput> backend_queue_;
+  ThreadsafeQueue<VizLoopClosureInput>::UniquePtr loop_closure_queue_;
   /// Mesher queue is optional, therefore it is a unique ptr (nullptr if unused)
   ThreadsafeQueue<VizMesherInput>::UniquePtr mesher_queue_;
 

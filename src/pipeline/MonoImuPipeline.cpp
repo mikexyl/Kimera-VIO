@@ -266,6 +266,13 @@ MonoImuPipeline::MonoImuPipeline(const VioParams& params,
                         params.display_params_->display_type_,
                         params.display_params_,
                         std::bind(&MonoImuPipeline::shutdown, this)));
+
+    if (FLAGS_use_lcd) {
+      CHECK(lcd_module_);
+      lcd_module_->registerOutputCallback([&](const LcdOutput::Ptr& output) {
+        visualizer_module_->fillLoopClosureQueue(output);
+      });
+    }
   }
 
   launchThreads();

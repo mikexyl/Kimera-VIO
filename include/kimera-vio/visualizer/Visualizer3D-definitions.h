@@ -23,6 +23,7 @@
 #include "kimera-vio/backend/VioBackend-definitions.h"
 #include "kimera-vio/common/vio_types.h"
 #include "kimera-vio/frontend/FrontendOutputPacketBase.h"
+#include "kimera-vio/loopclosure/LcdOutputPacket.h"
 #include "kimera-vio/mesh/Mesher-definitions.h"
 #include "kimera-vio/pipeline/PipelinePayload.h"
 #include "kimera-vio/utils/Macros.h"
@@ -74,14 +75,17 @@ struct VisualizerInput : public PipelinePayload {
   VisualizerInput(const Timestamp& timestamp,
                   const MesherOutput::Ptr& mesher_output,
                   const BackendOutput::Ptr& backend_output,
-                  const FrontendOutputPacketBase::Ptr& frontend_output)
+                  const FrontendOutputPacketBase::Ptr& frontend_output,
+                  const LcdOutput::Ptr& lcd_output = nullptr)
       : PipelinePayload(timestamp),
         mesher_output_(mesher_output),
         backend_output_(backend_output),
-        frontend_output_(frontend_output) {
+        frontend_output_(frontend_output),
+        lcd_output_(lcd_output) {
     if (backend_output) CHECK_EQ(timestamp, backend_output->timestamp_);
     if (frontend_output) CHECK_EQ(timestamp, frontend_output->timestamp_);
     if (mesher_output) CHECK_EQ(timestamp, mesher_output->timestamp_);
+    if (lcd_output) CHECK_EQ(timestamp, lcd_output->timestamp_);
   }
   virtual ~VisualizerInput() = default;
 
@@ -90,6 +94,7 @@ struct VisualizerInput : public PipelinePayload {
   const BackendOutput::ConstPtr backend_output_;
   const FrontendOutputPacketBase::Ptr
       frontend_output_;  // not ConstPtr because polymorphic
+  const LcdOutput::Ptr lcd_output_;
 };
 
 struct VisualizerOutput : public DisplayInputBase {

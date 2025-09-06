@@ -239,15 +239,6 @@ class VLADLoopClosureDetector
     CHECK_NOTNULL(matches_match_query);
     CHECK_NOTNULL(feature_matcher_);
 
-    // if any of the frames has less than required keypoints, skip
-    if (ref.keypoints_.size() <
-            static_cast<size_t>(lcd_params_.lcd_lg_num_features_) ||
-        curr.keypoints_.size() <
-            static_cast<size_t>(lcd_params_.lcd_lg_num_features_)) {
-      LOG(WARNING) << "VLADLCD: LG: Not enough keypoints found.";
-      return;
-    }
-
     matches_match_query->clear();
     std::vector<cv::DMatch> matches;
 

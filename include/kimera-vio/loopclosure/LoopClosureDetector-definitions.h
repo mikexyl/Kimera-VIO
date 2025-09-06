@@ -293,11 +293,13 @@ struct LcdInput : public PipelinePayload {
            const PointsWithIdMap& W_points_with_ids,
            const gtsam::Pose3& W_Pose_Blkf,
            const gtsam::Pose3& W_Pose_smoother = gtsam::Pose3(),
-           const gtsam::Values& backend_states = gtsam::Values())
+           const gtsam::Values& backend_states = gtsam::Values(),
+           const PointsWithIdMap& landmark_in_window = PointsWithIdMap())
       : PipelinePayload(timestamp),
         frontend_output_(frontend_output),
         cur_kf_id_(cur_kf_id),
-        smoother_points_with_ids_(W_points_with_ids),
+        landmark_in_window_(landmark_in_window),
+        landmark_out_window_(W_points_with_ids),
         W_Pose_Blkf_(W_Pose_Blkf),
         W_Pose_smoother_(W_Pose_smoother),
         backend_states_(backend_states) {
@@ -307,7 +309,8 @@ struct LcdInput : public PipelinePayload {
 
   const FrontendOutputPacketBase::Ptr frontend_output_;
   const FrameId cur_kf_id_;
-  const PointsWithIdMap smoother_points_with_ids_;
+  const PointsWithIdMap landmark_in_window_;
+  const PointsWithIdMap landmark_out_window_;
   const gtsam::Pose3 W_Pose_Blkf_;
   const gtsam::Pose3 W_Pose_smoother_;
   const gtsam::Values backend_states_;

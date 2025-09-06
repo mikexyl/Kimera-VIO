@@ -110,5 +110,5 @@ max_lmk_merge_px: 3
 kf_queue_size: 10
 rematch_threshold: 0.5
 
-vilib_cell_width: 64
-vilib_cell_height: 64
+vilib_cell_width: 32
+vilib_cell_height: 32

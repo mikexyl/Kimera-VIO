@@ -82,9 +82,20 @@ VisualizerModule::InputUniquePtr VisualizerModule::getInputPacket() {
     PIO::syncQueue(timestamp, mesher_queue_.get(), &mesher_payload);
   }
 
+  VizLoopClosureInput lcd_payload = nullptr;
+  if (loop_closure_queue_) {
+    // Loop closure output is optional, only sync if callback registered.
+    // Sync may fail is someone shuts down the pipeline, so no checks at this
+    // level.
+    PIO::syncQueue(timestamp, loop_closure_queue_.get(), &lcd_payload);
+  }
+
   // Push the synced messages to the visualizer's input queue
-  return std::make_unique<VisualizerInput>(
-      timestamp, mesher_payload, backend_payload, frontend_payload);
+  return std::make_unique<VisualizerInput>(timestamp,
+                                           mesher_payload,
+                                           backend_payload,
+                                           frontend_payload,
+                                           lcd_payload);
 }
 
 VisualizerModule::OutputUniquePtr VisualizerModule::spinOnce(

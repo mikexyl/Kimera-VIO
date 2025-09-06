@@ -82,8 +82,8 @@ netvlad_model_path: /workspaces/src/xfeat-cpp/onnx_model/netvlad.onnx
 local_window_size: 10
 
 min_pnp_num_landmarks: 30
-min_lmk_obs_ratio: 0.01 # map point cull, set to 0 to disable
+min_lmk_obs_ratio: 0.1 # map point cull, set to 0 to disable
 min_lmk_obs_count: 3 # map point cull, set to 0 to disable
-min_lmk_parallax: 10
+min_lmk_parallax: 20
 lcd_min_matched_features: 30
 max_lmk_reproj_error: 30

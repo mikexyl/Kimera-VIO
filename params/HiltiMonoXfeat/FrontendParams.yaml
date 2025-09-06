@@ -12,7 +12,7 @@ maxFeatureAge: 200
 # 2: AGAST
 # 3: GFTT, aka Good Features To Track
 feature_detector_type: 4
-maxFeaturesPerFrame: 500
+maxFeaturesPerFrame: 1000
 
 # Good Features To Track specific parameters
 quality_level: 0.001
@@ -35,7 +35,7 @@ maxPointDist: 10
 bidirectionalMatching: 0
 
 # Non-maximum suppression params
-max_nr_keypoints_before_anms: 500
+max_nr_keypoints_before_anms: 1000
 enable_non_max_suppression: 0
 non_max_suppression_type: 6
 nr_horizontal_bins: 7
@@ -62,7 +62,7 @@ ransac_max_iterations: 10
 ransac_probability: 0.99
 ransac_randomize: 0
 min_intra_keyframe_time: 0.2
-max_intra_keyframe_time: 0.5
+max_intra_keyframe_time: 1
 max_disparity_since_lkf: 2000 #large value to disable
 minNumberFeatures: 50
 useStereoTracking: 0
@@ -97,7 +97,7 @@ xfeat_use_gpu: 1
 matcher_type: 0 # 0: Brute Force, 1: FLANN, 2: LighterGlue
 
 feature_tracker_type: 1 # 0: OpticalFlow, 1: LighterGlue 2: Flann 3: GpuBFMatcher
-num_features: 1000
+num_features: 500
 lg_model_path: /workspaces/src/xfeat-cpp/onnx_model/lg_640x480_dyn.onnx
 gpu_bf_min_sim: 0.3 # Minimum similarity for GpuBFMatcher
 search_radius: 30
@@ -105,10 +105,10 @@ search_radius: 30
 track_on_keyframe: 1
 
 min_lmk_merge_sim: 0.7
-max_lmk_merge_px: 3
+max_lmk_merge_px: 1
 
 vilib_cell_width: 32
 vilib_cell_height: 32
 
 kf_queue_size: 10
-rematch_threshold: 0.3
+rematch_threshold: 0.5
