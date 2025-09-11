@@ -315,8 +315,8 @@ KeypointsCV FeatureDetector::featureDetection(Frame* cur_frame,
                                      use_provided_keypoints,
                                      &cur_frame->xfeat_M1_,
                                      &cur_frame->xfeat_x_prep_,
-                                     &keypoint_stds,
-                                     //  nullptr,
+                                     //  &keypoint_stds,
+                                     nullptr,
                                      &xfeat_scores);
     // check the first elements of the input_kpts the same as keypoints
     CHECK_LE(input_kpts.size(), keypoints.size());
@@ -345,8 +345,8 @@ KeypointsCV FeatureDetector::featureDetection(Frame* cur_frame,
     }
 
     for (size_t i = 0; i < cur_frame->keypoints_.size(); i++) {
-      cur_frame->prim_stds_.at(i) =
-          std::max(keypoint_stds.at(i)[0], keypoint_stds.at(i)[1]);
+      // cur_frame->prim_stds_.at(i) =
+      // std::max(keypoint_stds.at(i)[0], keypoint_stds.at(i)[1]);
       cur_frame->landmarks_.at(i) = FeatureDetector::lmk_id++;
       auto versor = UndistorterRectifier::GetBearingVector(
           cur_frame->keypoints_.at(i), cur_frame->cam_param_, std::nullopt);

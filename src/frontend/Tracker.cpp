@@ -99,9 +99,10 @@ Tracker::Tracker(const TrackerParams& tracker_params,
     vilib_params.detector_options_.cell_height =
         tracker_params_.vilib_cell_height;
     vilib_params.detector_options_.horizontal_border =
-        tracker_params_.vilib_cell_width / 4;
+        tracker_params_.vilib_cell_width / 8;
     vilib_params.detector_options_.vertical_border =
-        tracker_params_.vilib_cell_height / 4;
+        tracker_params_.vilib_cell_height / 8;
+    vilib_params.detector_options_.max_level = 3;
     vilib_params.feature_tracker_options_.reset_before_detection = false;
     vilib_params.feature_tracker_options_.min_tracks_to_detect_new_features =
         tracker_params_.num_features_;
@@ -259,6 +260,7 @@ void Tracker::featureTracking(
     }
 
     cur_frame->of_keypoints_.push_back(px_cur[i]);
+    cur_frame->prim_stds_.push_back(stds[i]);
   }
 
   // max number of frames in which a feature is seen
@@ -1160,6 +1162,27 @@ cv::Mat Tracker::getTrackerImage(const Frame& ref_frame,
   CHECK_EQ(cur_frame.keypoints_.size(), cur_frame.scores_.size());
 
   std::vector<float> scores;
+  float min_tracked_score, max_tracked_score;
+  min_tracked_score = 1;
+  max_tracked_score = -1.0f;
+  for (size_t i = 0; i < cur_frame.keypoints_.size(); ++i) {
+    const auto& it = std::find(ref_frame.landmarks_.begin(),
+                               ref_frame.landmarks_.end(),
+                               cur_frame.landmarks_.at(i));
+    if (it != ref_frame.landmarks_.end()) {
+      float score = cur_frame.scores_.at(i);
+      if (score < min_tracked_score) {
+        min_tracked_score = score;
+      }
+      if (score > max_tracked_score) {
+        max_tracked_score = score;
+      }
+    }
+  }
+
+  LOG(INFO) << "Min tracked score: " << min_tracked_score
+            << ", max tracked score: " << max_tracked_score;
+
   for (size_t i = 0; i < cur_frame.keypoints_.size(); ++i) {
     const cv::Point2f& px_cur = cur_frame.keypoints_.at(i);
     double px_sigma = 5;
@@ -1177,6 +1200,9 @@ cv::Mat Tracker::getTrackerImage(const Frame& ref_frame,
                                  ref_frame.landmarks_.end(),
                                  cur_frame.landmarks_.at(i));
       if (it != ref_frame.landmarks_.end()) {
+        // normalize score to [0,1] based on min and max of tracked
+        // score = (score - min_tracked_score) /
+                // (max_tracked_score - min_tracked_score);
         scores.push_back(score);
         cv::Scalar color(0, 255, 0);
         color[1] = 255 * std::min(1.0, score);
@@ -1186,8 +1212,6 @@ cv::Mat Tracker::getTrackerImage(const Frame& ref_frame,
         int i = std::distance(ref_frame.landmarks_.begin(), it);
         const cv::Point2f& px_ref = ref_frame.keypoints_.at(i);
         cv::line(img_rgb, px_ref, px_cur, color, 1);
-      } else {  // New feature tracks are blue.
-        cv::circle(img_rgb, px_cur, px_sigma, blue, 1);
       }
     }
   }
@@ -1199,8 +1223,8 @@ cv::Mat Tracker::getTrackerImage(const Frame& ref_frame,
         std::inner_product(scores.begin(), scores.end(), scores.begin(), 0.0f);
     const float stdev = std::sqrt(sq_sum / scores.size() - mean * mean);
     auto [min, max] = std::minmax_element(scores.begin(), scores.end());
-    VLOG(1) << "Feature tracking scores - Mean: " << mean << ", Std: " << stdev
-            << ", Min: " << *min << ", Max: " << *max;
+    LOG(INFO) << "Feature tracking scores - Mean: " << mean
+              << ", Std: " << stdev << ", Min: " << *min << ", Max: " << *max;
   }
   return img_rgb;
 }
@@ -1526,8 +1550,7 @@ void Tracker::featureTrackingDesc(
     ref_frame->landmarks_age_.at(ref_i)++;
     cur_frame->landmarks_age_.at(cur_i) = ref_frame->landmarks_age_.at(ref_i) +
                                           1;  // increment age of feature track
-    cur_frame->scores_.at(cur_i) =
-        ref_frame->secd_scores_.at(ref_i) * static_cast<double>(match.distance);
+    cur_frame->scores_.at(cur_i) = static_cast<double>(match.distance);
     n_added_matches++;
     if (cur_frame->scores_.at(cur_i) < min_score) {
       min_score = cur_frame->scores_.at(cur_i);
@@ -1536,6 +1559,10 @@ void Tracker::featureTrackingDesc(
       max_score = cur_frame->scores_.at(cur_i);
     }
   }
+
+  LOG(INFO) << "Feature tracking: Added " << n_added_matches
+            << " tracked keypoints. Score range: [" << min_score << ", "
+            << max_score << "]";
   // if (n_added_matches == 0) {
   //   LOG(INFO) << "No extra tracked keypoints.";
   // } else {

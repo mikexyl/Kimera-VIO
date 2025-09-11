@@ -141,7 +141,7 @@ class VilibTracker : public FeatureTracker {
     auto levels = vilib_frame->level_vec_;
     std->resize(vilib_frame->num_features_);
     for (size_t i = 0; i < vilib_frame->num_features_; ++i) {
-      (*std)[i] = (levels[i] + 1) * 4;
+      (*std)[i] = (levels[i] + 1) * 8;
     }
     auto feature_scores = vilib_frame->score_vec_;
     scores->resize(vilib_frame->num_features_, 0.0f);

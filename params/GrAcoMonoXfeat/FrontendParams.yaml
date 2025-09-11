@@ -12,7 +12,7 @@ maxFeatureAge: 200
 # 2: AGAST
 # 3: GFTT, aka Good Features To Track
 feature_detector_type: 4
-maxFeaturesPerFrame: 1000
+maxFeaturesPerFrame: 500
 
 # Good Features To Track specific parameters
 quality_level: 0.001
@@ -35,7 +35,7 @@ maxPointDist: 10
 bidirectionalMatching: 0
 
 # Non-maximum suppression params
-max_nr_keypoints_before_anms: 1000
+max_nr_keypoints_before_anms: 2000
 enable_non_max_suppression: 0
 non_max_suppression_type: 6
 nr_horizontal_bins: 7
@@ -63,8 +63,8 @@ ransac_probability: 0.995
 ransac_randomize: 0
 min_intra_keyframe_time: 0.2
 max_intra_keyframe_time: 10.0
-max_disparity_since_lkf: 2000 #large value to disable
-minNumberFeatures: 200
+max_disparity_since_lkf: 200 #large value to disable
+minNumberFeatures: 50
 useStereoTracking: 0
 disparityThreshold: 0.5
 # Type of optical flow predictor to aid feature tracking:
@@ -75,7 +75,7 @@ optical_flow_predictor_type: 1
 # 2D-2D pose estimation method
 use_2d2d_tracking: 1
 2d2d_algorithm: 1 # Nister
-optimize_2d2d_pose_from_inliers: 0
+optimize_2d2d_pose_from_inliers: 1
 
 # 3D-3D pose estimation
 use_3d3d_tracking: 0
@@ -103,11 +103,11 @@ gpu_bf_min_sim: 0.3 # Minimum similarity for GpuBFMatcher
 search_radius: 30
 
 track_on_keyframe: 1
-min_lmk_merge_sim: 0.7
-max_lmk_merge_px: 5
+min_lmk_merge_sim: -0.5
+max_lmk_merge_px: 8
 
-vilib_cell_width: 32
-vilib_cell_height: 32
+vilib_cell_width: 128
+vilib_cell_height: 128
 
 kf_queue_size: 10
-rematch_threshold: 0.5
+rematch_threshold: 0.3

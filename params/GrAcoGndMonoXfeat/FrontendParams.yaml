@@ -107,8 +107,8 @@ track_on_keyframe: 1
 min_lmk_merge_sim: 0.7
 max_lmk_merge_px: 3
 
-kf_queue_size: 10
+kf_queue_size: 0
 rematch_threshold: 0.5
 
-vilib_cell_width: 32
-vilib_cell_height: 32
+vilib_cell_width: 64
+vilib_cell_height: 64
