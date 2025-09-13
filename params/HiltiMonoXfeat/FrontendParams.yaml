@@ -97,7 +97,7 @@ xfeat_use_gpu: 1
 matcher_type: 0 # 0: Brute Force, 1: FLANN, 2: LighterGlue
 
 feature_tracker_type: 1 # 0: OpticalFlow, 1: LighterGlue 2: Flann 3: GpuBFMatcher
-num_features: 500
+num_features: 1000
 lg_model_path: /workspaces/src/xfeat-cpp/onnx_model/lg_640x480_dyn.onnx
 gpu_bf_min_sim: 0.3 # Minimum similarity for GpuBFMatcher
 search_radius: 30
@@ -110,5 +110,7 @@ max_lmk_merge_px: 1
 vilib_cell_width: 32
 vilib_cell_height: 32
 
-kf_queue_size: 0
+kf_queue_size: 10
 rematch_threshold: 0.5
+
+xfeat_use_of_points: 0

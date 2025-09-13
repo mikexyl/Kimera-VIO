@@ -1202,8 +1202,9 @@ cv::Mat Tracker::getTrackerImage(const Frame& ref_frame,
       if (it != ref_frame.landmarks_.end()) {
         // normalize score to [0,1] based on min and max of tracked
         // score = (score - min_tracked_score) /
-                // (max_tracked_score - min_tracked_score);
-        scores.push_back(score);
+        // (max_tracked_score - min_tracked_score);
+        // scores.push_back(score);
+        score = 1;
         cv::Scalar color(0, 255, 0);
         color[1] = 255 * std::min(1.0, score);
         color[2] = 255 * (1.0 - std::min(1.0, score));

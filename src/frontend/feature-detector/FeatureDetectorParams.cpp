@@ -240,6 +240,8 @@ bool FeatureDetectorParams::parseYAML(const std::string& filepath) {
     }
   }
 
+  yaml_parser.getYamlParam("xfeat_use_of_points", &xfeat_use_of_points_);
+
   return true;
 }
 

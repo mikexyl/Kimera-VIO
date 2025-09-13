@@ -307,21 +307,22 @@ KeypointsCV FeatureDetector::featureDetection(Frame* cur_frame,
     }
 
     std::vector<double> xfeat_scores;
-    bool use_provided_keypoints = true;
-    xfeat_detector->detectAndCompute(cur_frame->img_,
-                                     {},
-                                     keypoints,
-                                     cur_frame->descriptors_,
-                                     use_provided_keypoints,
-                                     &cur_frame->xfeat_M1_,
-                                     &cur_frame->xfeat_x_prep_,
-                                     //  &keypoint_stds,
-                                     nullptr,
-                                     &xfeat_scores);
+
+    xfeat_detector->detectAndCompute(
+        cur_frame->img_,
+        {},
+        keypoints,
+        cur_frame->descriptors_,
+        feature_detector_params_.xfeat_use_of_points_,
+        &cur_frame->xfeat_M1_,
+        &cur_frame->xfeat_x_prep_,
+        //  &keypoint_stds,
+        nullptr,
+        &xfeat_scores);
     // check the first elements of the input_kpts the same as keypoints
     CHECK_LE(input_kpts.size(), keypoints.size());
     CHECK_EQ(cur_frame->keypoints_.size(), cur_frame->scores_.size());
-    if (use_provided_keypoints and
+    if (feature_detector_params_.xfeat_use_of_points_ and
         input_kpts.size()) {  // make sure the xfeat doesn't not change the
                               // input keypoints
       CHECK_LE(cv::norm(input_kpts[0].pt - keypoints[0].pt), 1e-1);
