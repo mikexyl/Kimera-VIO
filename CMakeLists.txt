@@ -31,6 +31,11 @@ find_package(opengv REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(DBoW2 REQUIRED)
 find_package(KimeraRPGO REQUIRED)
+message(STATUS "KimeraRPGO include dirs: ${KimeraRPGO_INCLUDE_DIRS}")
+# print KiemraRPGO target's include dirs
+get_target_property(KIMERA_RPGO_INCLUDE_DIRS KimeraRPGO INTERFACE_INCLUDE_DIRECTORIES)
+message(STATUS "KimeraRPGO target include dirs: ${KIMERA_RPGO_INCLUDE_DIRS}")
+
 # Pangolin is optional
 find_package(Pangolin QUIET)
 find_package(xfeat-cpp REQUIRED)
@@ -143,11 +148,12 @@ message(STATUS "DBoW2 include dirs: ${DBoW2_INCLUDE_DIRS}")
 
 target_include_directories(${PROJECT_NAME}
   PUBLIC
-    ${DBoW2_INCLUDE_DIRS}/../
+    ${DBoW2_INCLUDE_DIRS}
     ${OpenCV_INCLUDE_DIRS}
     ${GFLAGS_INCLUDE_DIRS}
     ${GLOG_INCLUDE_DIRS}
     ${GTSAM_INCLUDE_DIR}
+    ${KIMERA_RPGO_INCLUDE_DIRS}
     $<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/include>
     $<INSTALL_INTERFACE:include>
 )
