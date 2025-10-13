@@ -15,6 +15,7 @@
 #pragma once
 
 #include <gflags/gflags.h>
+#include <opencv2/viz.hpp>
 
 #include "kimera-vio/backend/RegularVioBackendParams.h"
 #include "kimera-vio/backend/VioBackend-definitions.h"

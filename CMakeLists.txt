@@ -131,9 +131,13 @@ target_link_libraries(${PROJECT_NAME}
     gtsam_unstable
     opengv
 )
+
+# print DBoW2 include dirs
+message(STATUS "DBoW2 include dirs: ${DBoW2_INCLUDE_DIRS}")
+
 target_include_directories(${PROJECT_NAME}
   PUBLIC
-    ${DBoW2_INCLUDE_DIRS}
+    ${DBoW2_INCLUDE_DIRS}/../
     ${OpenCV_INCLUDE_DIRS}
     ${GFLAGS_INCLUDE_DIRS}
     ${GLOG_INCLUDE_DIRS}

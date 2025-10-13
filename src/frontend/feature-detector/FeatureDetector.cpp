@@ -206,6 +206,14 @@ KeypointsCV FeatureDetector::featureDetection(const Frame& cur_frame,
   std::vector<cv::KeyPoint> keypoints =
       rawFeatureDetection(cur_frame.img_, mask);
   VLOG(1) << "Number of points detected : " << keypoints.size();
+  if( keypoints.size() == 0u ) {
+    // save iamge file for debugging
+    static int img_id = 0;
+    std::string img_name = "/tmp/empty_img_" + std::to_string(img_id) + ".png";
+    cv::imwrite(img_name, cur_frame.img_);
+    LOG(ERROR) << "No keypoints detected! Image saved to " << img_name;
+    img_id++;
+  }
 
   /*{
    cv::Mat fastDetectionResults;  // draw FAST detections
