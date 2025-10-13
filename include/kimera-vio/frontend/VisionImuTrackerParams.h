@@ -63,7 +63,7 @@ struct TrackerParams : public PipelineParams {
   bool ransac_randomize_ = true;
   bool ransac_use_1point_stereo_ = true;
   bool ransac_use_2point_mono_ = true;
-  
+
   //! Use 2D-2D tracking to remove outliers
   Pose2d2dAlgorithm pose_2d2d_algorithm_ = Pose2d2dAlgorithm::NISTER;
   bool optimize_2d2d_pose_from_inliers_ = false;
@@ -82,6 +82,32 @@ struct TrackerParams : public PipelineParams {
   //! Others:
   // max disparity under which we consider the vehicle steady
   double disparityThreshold_ = 0.5;
+
+  // tracker type
+  enum class TrackerType {
+    OPTICAL_FLOW = 0,
+    LIGHTERGLUE,
+    VILIB,
+    GPU_BF,
+    GPU_BF_RANSAC,
+  } tracker_type_ = TrackerType::OPTICAL_FLOW;
+
+  bool track_on_keyframe_ = false;
+
+  int num_features_ = 500;  // num features to track
+
+  // lighterglue parameters
+  std::string lighterglue_model_path_{};
+
+  // gpu matcher parameters
+  float gpu_bf_min_sim_ = 0.4;
+  float search_radius_ = 45;
+
+  float max_lmk_merge_px_ = 4;
+  float min_lmk_merge_sim_ = 0.8;
+
+  int vilib_cell_width = 32;
+  int vilib_cell_height = 32;
 };
 
 }  // namespace VIO

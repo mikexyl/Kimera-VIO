@@ -18,6 +18,9 @@
        Hacky way of avoiding error in KimeraVIO by linking to 3.4.2-->
   <depend>opencv3_catkin</depend>
   <depend>opengv_catkin</depend>
+  <depend>xfeat-cpp</depend>
+  <depend>vio-factors</depend>
+  <depend>vilib_catkin</depend>
   <export>
     <!-- Specify that this is not really a catkin package-->
     <build_type>cmake</build_type>

@@ -31,6 +31,7 @@ class RgbdVisionImuFrontend : public VisionImuFrontend {
 
  public:
   RgbdVisionImuFrontend(
+      std::shared_ptr<Ort::Env> env,
       const FrontendParams& frontend_params,
       const ImuParams& imu_params,
       const ImuBias& imu_initial_bias,

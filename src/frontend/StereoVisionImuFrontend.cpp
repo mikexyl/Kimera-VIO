@@ -27,6 +27,7 @@ DECLARE_bool(do_fine_imu_camera_temporal_sync);
 namespace VIO {
 
 StereoVisionImuFrontend::StereoVisionImuFrontend(
+    std::shared_ptr<Ort::Env> env,
     const FrontendParams& frontend_params,
     const ImuParams& imu_params,
     const ImuBias& imu_initial_bias,
@@ -34,7 +35,8 @@ StereoVisionImuFrontend::StereoVisionImuFrontend(
     DisplayQueue* display_queue,
     bool log_output,
     std::optional<OdometryParams> odom_params)
-    : VisionImuFrontend(frontend_params,
+    : VisionImuFrontend(env,
+                        frontend_params,
                         imu_params,
                         imu_initial_bias,
                         display_queue,
@@ -526,7 +528,7 @@ void StereoVisionImuFrontend::getSmartStereoMeasurements(
       uR = rightKeypoints.at(i).second.x;
     }
     smart_stereo_measurements->push_back(
-        std::make_pair(landmarkId_kf[i], gtsam::StereoPoint2(uL, uR, v)));
+        {landmarkId_kf[i], gtsam::StereoPoint2(uL, uR, v), -1});
   }
 }
 
@@ -580,8 +582,8 @@ void StereoVisionImuFrontend::sendStereoMatchesToLogger() const {
                 "in right frame.";
   }
 
-  //############################################################################
-  // Plot matches.
+  // ############################################################################
+  //  Plot matches.
   cv::Mat img_left_right =
       UtilsOpenCV::DrawCornersMatches(img_left,
                                       left_frame_k.keypoints_,
@@ -602,7 +604,7 @@ void StereoVisionImuFrontend::sendStereoMatchesToLogger() const {
                           "/stereoMatchingUnrectifiedImg/",
                           FLAGS_visualize_frontend_images,
                           FLAGS_save_frontend_images);
-  //############################################################################
+  // ############################################################################
 
   // Display rectified, plot matches.
   static constexpr bool kUseRandomColor = false;
@@ -646,7 +648,7 @@ void StereoVisionImuFrontend::sendMonoTrackingToLogger() const {
       }
     }
   }
-  //############################################################################
+  // ############################################################################
 
   // Plot matches.
   cv::Mat img_left_lkf_kf =
@@ -670,7 +672,7 @@ void StereoVisionImuFrontend::sendMonoTrackingToLogger() const {
                           "/monoTrackingUnrectifiedImg/",
                           FLAGS_visualize_frontend_images,
                           FLAGS_save_frontend_images);
-  //############################################################################
+  // ############################################################################
 
   // Display rectified, plot matches.
   static constexpr bool kUseRandomColor = false;

@@ -31,6 +31,7 @@
 
 #include <gflags/gflags.h>
 #include <glog/logging.h>
+#include <vio_factors/ExpandingIsotropic.h>
 
 #include <limits>  // for numeric_limits<>
 #include <map>
@@ -180,31 +181,36 @@ BackendOutput::UniquePtr VioBackend::spinOnce(const BackendInput& input) {
     // Generate extra optional backend ouputs.
     static const bool kOutputLmkMap =
         backend_output_params_.output_map_lmk_ids_to_3d_points_in_time_horizon_;
-    static const bool kMinLmkObs =
-        backend_output_params_.min_num_obs_for_lmks_in_time_horizon_;
+    const bool kMinLmkObs = backend_params_.min_num_obs_per_landmark_to_keep_;
     static const bool kOutputLmkTypeMap =
         backend_output_params_.output_lmk_id_to_lmk_type_map_;
     LmkIdToLmkTypeMap lmk_id_to_lmk_type_map;
-    PointsWithIdMap lmk_ids_to_3d_points_in_time_horizon;
+    PointsWithIdMap lmks_out_local_window, lmks_in_local_window;
     if (kOutputLmkMap) {
       // Generate this map only if requested, since costly.
       // Also, if lmk type requested, fill lmk id to lmk type object.
       // WARNING this also cleans the lmks inside the old_smart_factors map!
-      lmk_ids_to_3d_points_in_time_horizon =
-          getMapLmkIdsTo3dPointsInTimeHorizon(
-              smoother_->getFactors(),
-              kOutputLmkTypeMap ? &lmk_id_to_lmk_type_map : nullptr,
-              kMinLmkObs);
+      lmks_out_local_window = getMapLmkIdsTo3dPointsOutTimeHorizon(
+          smoother_->getFactors(),
+          kOutputLmkTypeMap ? &lmk_id_to_lmk_type_map : nullptr,
+          kMinLmkObs);
+      lmks_in_local_window = getMapLmkIdsTo3dPointsInTimeHorizon(
+          smoother_->getFactors(), nullptr, kMinLmkObs);
     }
 
     if (map_update_callback_) {
-      map_update_callback_(lmk_ids_to_3d_points_in_time_horizon);
+      map_update_callback_(lmks_out_local_window);
     } else {
       LOG(FATAL) << "Did you forget to register the Map "
                     "Update callback for at least the "
                     "Frontend? Do so by using "
                     "registerMapUpdateCallback function.";
     }
+
+    gtsam::Pose3 smoother_P_cur = state_.at<gtsam::Pose3>(gtsam::Symbol(
+        kPoseSymbolChar, curr_kf_id_));  // Body pose from smoother.
+    gtsam::Pose3 W_P_cur = W_Pose_B_lkf_from_increments_;
+    gtsam::Pose3 W_P_smoother = W_P_cur * smoother_P_cur.inverse();
 
     // Create Backend Output Payload.
     output_payload = std::make_unique<BackendOutput>(
@@ -221,8 +227,10 @@ BackendOutput::UniquePtr VioBackend::spinOnce(const BackendInput& input) {
         curr_kf_id_,
         landmark_count_,
         debug_info_,
-        lmk_ids_to_3d_points_in_time_horizon,
-        lmk_id_to_lmk_type_map);
+        lmks_out_local_window,
+        lmk_id_to_lmk_type_map,
+        lmks_in_local_window,
+        W_P_smoother);
 
     if (logger_) {
       logger_->logBackendOutput(*output_payload);
@@ -398,6 +406,29 @@ bool VioBackend::addVisualInertialStateAndOptimize(
     }
   }
 
+  tracking_statuses_.push_back(kfTrackingStatus_mono);
+  if (tracking_statuses_.size() > tracking_status_window_size_) {
+    tracking_statuses_.pop_front();
+  }
+
+  int n_states_valid = 0;
+  int n_until_enough_valid = 0;
+  // count backwards the state queue until we find number of valid states
+  for (auto it = tracking_statuses_.rbegin();
+       it != tracking_statuses_.rend() and
+       n_states_valid < backend_params_.nr_states_;
+       ++it) {
+    n_until_enough_valid++;
+    n_states_valid += (*it == TrackingStatus::VALID);
+  }
+
+  int nr_states_include_invalid = std::max(
+      backend_params_.nr_states_, static_cast<double>(n_until_enough_valid));
+  smoother_->smootherLag() = nr_states_include_invalid;
+  LOG(INFO) << "Setting smoother lag to: " << smoother_->smootherLag()
+            << " states, to include " << n_states_valid
+            << " valid states in the optimization.";
+
   // Add odometry factors if they're available and have non-zero precision
   if (odometry_body_pose && odom_params_ &&
       (odom_params_->betweenRotationPrecision_ > 0.0 ||
@@ -465,7 +496,7 @@ void VioBackend::addLandmarksToGraph(const LandmarkIds& landmarks_kf) {
       addLandmarkToGraph(lmk_id, ft);
       ++n_new_landmarks;
     } else {
-      const std::pair<FrameId, StereoPoint2> obs_kf = ft.obs_.back();
+      const auto obs_kf = ft.obs_.back();
 
       LOG_IF(FATAL, obs_kf.first != static_cast<FrameId>(curr_kf_id_))
           << "addLandmarksToGraph: last obs is not from the current "
@@ -484,10 +515,15 @@ void VioBackend::addLandmarksToGraph(const LandmarkIds& landmarks_kf) {
 // Adds a landmark to the graph for the first time.
 void VioBackend::addLandmarkToGraph(const LandmarkId& lmk_id,
                                     const FeatureTrack& ft) {
-  // We use a unit pinhole projection camera for the smart factors to be
-  // more efficient.
+  gtsam::noiseModel::ExpandingIsotropic<3>::shared_ptr smart_noise(
+      new gtsam::noiseModel::ExpandingIsotropic<3>());
+  smart_noise->setDCSMapping(/*phi_min*/ 10,
+                             /*phi_max*/ 50,
+                             /*gamma*/ 1);
+  smart_noise->enableDCS(false);
+
   SmartStereoFactor::shared_ptr new_factor(new SmartStereoFactor(
-      smart_noise_, smart_factors_params_, B_Pose_leftCamRect_));
+      smart_noise, smart_factors_params_, B_Pose_leftCamRect_));
 
   VLOG(10) << "Adding landmark with: " << ft.obs_.size()
            << " landmarks to graph, with keys: ";
@@ -495,11 +531,8 @@ void VioBackend::addLandmarkToGraph(const LandmarkId& lmk_id,
   // Add observations to smart factor
   if (VLOG_IS_ON(10)) new_factor->print();
   std::stringstream ss;
-  for (const std::pair<FrameId, StereoPoint2>& obs : ft.obs_) {
-    const FrameId& frame_id = obs.first;
-    const gtsam::Symbol& pose_symbol = gtsam::Symbol(kPoseSymbolChar, frame_id);
-    const StereoPoint2& measurement = obs.second;
-    new_factor->add(measurement, pose_symbol, stereo_cal_);
+  for (const auto& obs : ft.obs_) {
+    addFeatureObsToFactor(new_factor, obs);
 
     if (VLOG_IS_ON(10)) ss << " " << obs.first;
   }
@@ -513,9 +546,8 @@ void VioBackend::addLandmarkToGraph(const LandmarkId& lmk_id,
 
 /* -------------------------------------------------------------------------- */
 // Updates a landmark already in the graph.
-void VioBackend::updateLandmarkInGraph(
-    const LandmarkId& lmk_id,
-    const std::pair<FrameId, StereoPoint2>& new_measurement) {
+void VioBackend::updateLandmarkInGraph(const LandmarkId& lmk_id,
+                                       const FeatureObs& new_obs) {
   // Update existing smart-factor
   auto old_smart_factors_it = old_smart_factors_.find(lmk_id);
   CHECK(old_smart_factors_it != old_smart_factors_.end())
@@ -525,20 +557,20 @@ void VioBackend::updateLandmarkInGraph(
   // Clone old factor to keep all previous measurements, now append one.
   SmartStereoFactor::shared_ptr new_factor(new SmartStereoFactor(*old_factor));
 
-  const gtsam::Symbol pose_symbol(kPoseSymbolChar, new_measurement.first);
-  const StereoPoint2& measurement = new_measurement.second;
-  new_factor->add(measurement, pose_symbol, stereo_cal_);
+  addFeatureObsToFactor(new_factor, new_obs);
 
   // Update the factor
   Slot slot = old_smart_factors_it->second.second;
   if (slot != -1) {
     new_smart_factors_.insert(std::make_pair(lmk_id, new_factor));
   } else {
+    // new_smart_factors_.insert(std::make_pair(lmk_id, new_factor));
     // If it's slot in the graph is still -1, it means that the factor has not
     // been inserted yet in the graph...
-    LOG(FATAL) << "When updating the smart factor, its slot should not be -1!"
-                  " Offensive lmk_id: "
-               << lmk_id;
+    // LOG(FATAL) << "When updating the smart factor, its slot should not be
+    // -1!"
+    //               " Offensive lmk_id: "
+    //            << lmk_id;
   }
   old_smart_factors_it->second.first = new_factor;
   VLOG(10) << "updateLandmarkInGraph: added observation to point: " << lmk_id;
@@ -562,7 +594,8 @@ PointsWithIdMap VioBackend::getMapLmkIdsTo3dPointsInTimeHorizon(
 
   // old_smart_factors_ has all smart factors included so far.
   // Retrieve lmk ids from smart factors in state.
-  size_t nr_valid_smart_lmks = 0, nr_smart_lmks = 0;
+  size_t nr_valid_smart_lmks = 0, nr_smart_lmks = 0,
+         nr_smart_lmks_in_smoother = 0, nr_lmks_invalid = 0;
   for (SmartFactorMap::iterator old_smart_factor_it =
            old_smart_factors_.begin();
        old_smart_factor_it !=
@@ -606,6 +639,7 @@ PointsWithIdMap VioBackend::getMapLmkIdsTo3dPointsInTimeHorizon(
       CHECK(deleteLmkFromFeatureTracks(lmk_id));
       continue;
     } else {
+      nr_smart_lmks_in_smoother++;
       VLOG(20) << "Slot id: " << slot_id
                << " for smart factor of lmk id: " << lmk_id;
     }
@@ -619,7 +653,7 @@ PointsWithIdMap VioBackend::getMapLmkIdsTo3dPointsInTimeHorizon(
       // not make any sense, since we are using lmk_id which comes from
       // smart_factor and result which comes from graph[slot_id], we should
       // use smart_factor_ptr instead then...
-      LOG(ERROR) << "The factor with slot id: " << slot_id
+      LOG(FATAL) << "The factor with slot id: " << slot_id
                  << " in the graph does not match the old_smart_factor of "
                  << "lmk with id: " << lmk_id << "\n."
                  << "Deleting old_smart_factor of lmk id: " << lmk_id;
@@ -659,6 +693,7 @@ PointsWithIdMap VioBackend::getMapLmkIdsTo3dPointsInTimeHorizon(
                  << ", vs min_age of " << min_age << ".";
       }  // gsf->measured().size() >= min_age ?
     } else {
+      nr_lmks_invalid++;
       VLOG(20) << "Triangulation result for smart factor of lmk with id "
                << lmk_id << " is not initialized...";
     }
@@ -694,12 +729,13 @@ PointsWithIdMap VioBackend::getMapLmkIdsTo3dPointsInTimeHorizon(
   // enforcing the regularities on the points that are out of current frame
   // in the Backend currently...
 
-  VLOG(10) << "Landmark typology to be used for the mesh:\n"
-           << "Number of valid smart factors " << nr_valid_smart_lmks
-           << " out of " << nr_smart_lmks << "\n"
-           << "Number of landmarks (not involved in a smart factor) "
-           << nr_proj_lmks << ".\n Total number of landmarks: "
-           << (nr_valid_smart_lmks + nr_proj_lmks);
+  VLOG(1) << "Landmark typology to be used for the mesh:\n"
+          << "Number of valid smart factors " << nr_valid_smart_lmks << ", "
+          << nr_lmks_invalid << ", " << nr_smart_lmks_in_smoother << " out of "
+          << nr_smart_lmks << "\n"
+          << "Number of landmarks (not involved in a smart factor) "
+          << nr_proj_lmks << ".\n Total number of landmarks: "
+          << (nr_valid_smart_lmks + nr_proj_lmks);
   return points_with_id;
 }
 
@@ -745,6 +781,8 @@ void VioBackend::addStereoMeasurementsToFeatureTracks(
   for (size_t i = 0u; i < n_stereo_measurements; ++i) {
     const LandmarkId& lmk_id_in_kf_i = stereo_meas_kf[i].first;
     const StereoPoint2& stereo_px_i = stereo_meas_kf[i].second;
+    const float stereo_px_sigma = stereo_meas_kf[i].px_sigma_;
+    const float stereo_px_score = stereo_meas_kf[i].score_;
 
     // We filtered invalid lmks in the StereoTracker, so this should not happen.
     CHECK_NE(lmk_id_in_kf_i, -1) << "landmarkId_kf_i == -1?";
@@ -765,8 +803,9 @@ void VioBackend::addStereoMeasurementsToFeatureTracks(
       // New feature.
       VLOG(20) << "Creating new feature track for lmk: " << lmk_id_in_kf_i
                << '.';
-      feature_tracks_.insert(
-          std::make_pair(lmk_id_in_kf_i, FeatureTrack(frame_num, stereo_px_i)));
+      feature_tracks_.insert(std::make_pair(
+          lmk_id_in_kf_i,
+          FeatureTrack(frame_num, stereo_px_i, stereo_px_sigma)));
       ++landmark_count_;
     } else {
       // @TODO: It seems that this else condition does not help --
@@ -783,7 +822,7 @@ void VioBackend::addStereoMeasurementsToFeatureTracks(
       // Add observation to existing landmark.
       VLOG(20) << "Updating feature track for lmk: " << lmk_id_in_kf_i << ".";
       feature_track_it->second.obs_.push_back(
-          std::make_pair(frame_num, stereo_px_i));
+          FeatureObs(frame_num, stereo_px_i, stereo_px_sigma, stereo_px_score));
 
       // TODO(Toni):
       // Mark feature tracks that have been re-observed, so that we can delete
@@ -1397,8 +1436,20 @@ bool VioBackend::updateSmoother(Smoother::Result* result,
   try {
     // Update smoother.
     VLOG(10) << "Starting update of smoother_...";
+    size_t n_new_factors = new_factors.size();
+    size_t n_deleted_factors = delete_slots.size();
+    size_t n_all_factors = smoother_->getFactors().size();
     *result =
         smoother_->update(new_factors, new_values, timestamps, delete_slots);
+    LOG(INFO) << "Smoother update: " << n_new_factors << "x"
+              << new_factors.keys().size() << " new factors, "
+              << n_deleted_factors << " deleted factors, " << n_all_factors
+              << " total factors."
+              << " elim keys: "
+              << smoother_->getISAM2Result().getVariablesReeliminated()
+              << " relin keys: "
+              << smoother_->getISAM2Result().getVariablesRelinearized()
+              << " total keys: " << smoother_->getFactors().keys().size();
     VLOG(10) << "Finished update of smoother_.";
     if (debug_smoother_) {
       printSmootherInfo(new_factors, delete_slots, "CATCHING EXCEPTION", false);
@@ -2320,6 +2371,118 @@ bool VioBackend::deleteLmkFromFeatureTracks(const LandmarkId& lmk_id) {
     return true;
   }
   return false;
+}
+
+PointsWithIdMap VioBackend::getMapLmkIdsTo3dPointsOutTimeHorizon(
+    const gtsam::NonlinearFactorGraph& graph,
+    LmkIdToLmkTypeMap* lmk_id_to_lmk_type_map,
+    const size_t& min_age) {
+  PointsWithIdMap points_with_id;
+
+  if (lmk_id_to_lmk_type_map) {
+    lmk_id_to_lmk_type_map->clear();
+  }
+
+  // Step 1:
+  /////////////// Add landmarks encoded in the smart factors. //////////////////
+
+  // old_smart_factors_ has all smart factors included so far.
+  // Retrieve lmk ids from smart factors in state.
+  size_t nr_smart_lmks = 0;
+  for (SmartFactorMap::iterator old_smart_factor_it =
+           old_smart_factors_.begin();
+       old_smart_factor_it !=
+       old_smart_factors_
+           .end();) {  //!< landmarkId -> {SmartFactorPtr, SlotIndex}
+
+    // Retrieve lmk_id of the smart factor.
+    LandmarkId lmk_id = old_smart_factor_it->first;
+
+    // Retrieve smart factor.
+    SmartStereoFactor::shared_ptr smart_factor_ptr =
+        old_smart_factor_it->second.first;
+    // Check that pointer is well definied.
+    CHECK(smart_factor_ptr) << "Smart factor is not well defined.";
+
+    // Retrieve smart factor slot in the graph.
+    Slot slot_id = old_smart_factor_it->second.second;
+
+    // Check that slot is admissible.
+    // Slot should be positive.
+    DCHECK(slot_id >= 0) << "Slot of smart factor is not admissible.";
+    // Ensure the graph size is small enough to cast to int.
+    DCHECK_LT(graph.size(), std::numeric_limits<Slot>::max())
+        << "Invalid cast, that would cause an overflow!";
+    // Slot should be inferior to the size of the graph.
+    DCHECK_LT(slot_id, static_cast<Slot>(graph.size()));
+
+    // if graph does not contain this slot, or the slot is other factor,
+    // then the smart factor is outdated, and we delete it and record its
+    // triangulation point
+    if (!graph.exists(slot_id) or smart_factor_ptr != graph.at(slot_id)) {
+      // This slot does not exist in the current graph...
+      VLOG(5) << "The slot with id: " << slot_id
+              << " does not exist in the graph.\n"
+              << "Deleting old_smart_factor of lmk id: " << lmk_id;
+      old_smart_factor_it = old_smart_factors_.erase(old_smart_factor_it);
+      // Update as well the feature track....
+      // TODO(TONI): please remove this and centralize how feature tracks
+      // and new/old_smart_factors are added and removed!
+      CHECK(deleteLmkFromFeatureTracks(lmk_id));
+    } else {
+      // Next iteration.
+      old_smart_factor_it++;
+      continue;
+    }
+
+    // Get triangulation result from smart factor.
+    const gtsam::TriangulationResult& result = smart_factor_ptr->point();
+    if (result.valid()) {
+      CHECK(result);
+      if (smart_factor_ptr->measured().size() >= min_age) {
+        // Triangulation result from smart factor is valid and
+        // we have observed the lmk at least min_age times.
+        VLOG(20) << "Adding lmk with id: " << lmk_id
+                 << " to list of lmks in time horizon";
+        // Check that we have not added this lmk already...
+        CHECK(points_with_id.find(lmk_id) == points_with_id.end());
+        points_with_id[lmk_id] = *result;
+        if (lmk_id_to_lmk_type_map) {
+          (*lmk_id_to_lmk_type_map)[lmk_id] = LandmarkType::SMART;
+        }
+        nr_smart_lmks++;
+      } else {
+        VLOG(20) << "Rejecting lmk with id: " << lmk_id
+                 << " from list of lmks in time horizon: "
+                 << "not enough measurements, "
+                 << smart_factor_ptr->measured().size() << ", vs min_age of "
+                 << min_age << ".";
+      }
+    } else {
+      VLOG(20) << "Triangulation result for smart factor of lmk with id "
+               << lmk_id << " is not initialized...";
+    }
+  }
+
+  // Step 2:
+  ////////////// Add landmarks that now are in projection factors. /////////////
+  size_t nr_proj_lmks = 0;
+  for (const auto& key_value : state_) {
+    const gtsam::Symbol key(key_value.key);
+    if (key.chr() != 'l') {
+      continue;
+    }
+
+    const auto lmk_id = key.index();
+    if (points_with_id.find(lmk_id) != points_with_id.end()) {
+      // We have already added this lmk.
+      continue;
+    }
+    points_with_id[lmk_id] = key_value.value.cast<gtsam::Point3>();
+    nr_proj_lmks++;
+  }
+
+  return points_with_id;
 }
 
 }  // namespace VIO.

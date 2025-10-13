@@ -123,6 +123,14 @@ bool FeatureDetectorParams::parseYAML(const std::string& filepath) {
       feature_detector_type_ = FeatureDetectorType::GFTT;
       break;
     }
+    case VIO::to_underlying(FeatureDetectorType::XFEAT): {
+      feature_detector_type_ = FeatureDetectorType::XFEAT;
+      break;
+    }
+    case VIO::to_underlying(FeatureDetectorType::GFTT_XFEAT): {
+      feature_detector_type_ = FeatureDetectorType::GFTT_XFEAT;
+      break;
+    }
     default: {
       LOG(FATAL) << "Unknown Feature Detector Type: " << feature_detector_type;
     }
@@ -217,6 +225,22 @@ bool FeatureDetectorParams::parseYAML(const std::string& filepath) {
 
   // FAST specific params
   yaml_parser.getYamlParam("fast_thresh", &fast_thresh_);
+
+  // XFEAT specific params
+  yaml_parser.getYamlParam("xfeat_path", &xfeat_path_);
+  yaml_parser.getYamlParam("interp_bilinear_path", &interp_bilinear_path_);
+  yaml_parser.getYamlParam("interp_bicubic_path", &interp_bicubic_path_);
+  yaml_parser.getYamlParam("interp_nearest_path", &interp_nearest_path_);
+  yaml_parser.getYamlParam("xfeat_use_gpu", &xfeat_use_gpu_);
+
+  if (feature_detector_type_ >= FeatureDetectorType::XFEAT) {
+    if (xfeat_path_.empty() || interp_bilinear_path_.empty() ||
+        interp_bicubic_path_.empty() || interp_nearest_path_.empty()) {
+      LOG(FATAL) << "XFEAT feature detector requires paths to ONNX models.";
+    }
+  }
+
+  yaml_parser.getYamlParam("xfeat_use_of_points", &xfeat_use_of_points_);
 
   return true;
 }

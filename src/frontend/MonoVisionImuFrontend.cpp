@@ -17,6 +17,7 @@
 #include <memory>
 
 #include "kimera-vio/frontend/MonoVisionImuFrontend-definitions.h"
+#include "kimera-vio/frontend/feature-tracker/VilibTracker.h"
 #include "kimera-vio/utils/UtilsNumerical.h"
 
 DEFINE_bool(log_mono_matching_images,
@@ -27,6 +28,7 @@ DECLARE_bool(do_fine_imu_camera_temporal_sync);
 namespace VIO {
 
 MonoVisionImuFrontend::MonoVisionImuFrontend(
+    std::shared_ptr<Ort::Env> env,
     const FrontendParams& frontend_params,
     const ImuParams& imu_params,
     const ImuBias& imu_initial_bias,
@@ -34,7 +36,8 @@ MonoVisionImuFrontend::MonoVisionImuFrontend(
     DisplayQueue* display_queue,
     bool log_output,
     std::optional<OdometryParams> odom_params)
-    : VisionImuFrontend(frontend_params,
+    : VisionImuFrontend(env,
+                        frontend_params,
                         imu_params,
                         imu_initial_bias,
                         display_queue,
@@ -48,11 +51,17 @@ MonoVisionImuFrontend::MonoVisionImuFrontend(
       mono_camera_(camera) {
   CHECK(mono_camera_);
 
-  tracker_ = std::make_unique<Tracker>(
-      frontend_params_.tracker_params_, mono_camera_, display_queue);
+  frontend_params_.tracker_params_.print();
+
+  static constexpr bool kFrontendTrackerUseOF = true;
+  tracker_ = std::make_shared<Tracker>(frontend_params_.tracker_params_,
+                                       mono_camera_,
+                                       display_queue,
+                                       ort_env_,
+                                       kFrontendTrackerUseOF);
 
   feature_detector_ = std::make_unique<FeatureDetector>(
-      frontend_params_.feature_detector_params_);
+      frontend_params_.feature_detector_params_, ort_env_);
 
   if (VLOG_IS_ON(1)) tracker_->tracker_params_.print();
 }
@@ -84,6 +93,7 @@ MonoFrontendOutput::UniquePtr MonoVisionImuFrontend::bootstrapSpinMono(
   CHECK(mono_camera_);
 
   if (FLAGS_do_fine_imu_camera_temporal_sync) {
+    LOG(INFO) << "skip adding frame to downstream modules";
     return nullptr;  // skip adding a frame to all downstream modules
   }
 
@@ -211,8 +221,15 @@ void MonoVisionImuFrontend::processFirstFrame(const Frame& first_frame) {
       << "Keypoints already present in first frame: please do not extract"
          " keypoints manually";
 
-  CHECK(feature_detector_);
-  feature_detector_->featureDetection(mono_frame_k_.get());
+  tracker_->featureTracking(nullptr,
+                            mono_frame_k_.get(),
+                            {},
+                            frontend_params_.feature_detector_params_,
+                            std::nullopt,
+                            false);
+
+  feature_detector_->featureDetection(
+      mono_frame_k_.get(), std::nullopt, mono_frame_km1_.get());
 
   // Undistort keypoints:
   mono_camera_->undistortKeypoints(mono_frame_k_->keypoints_,
@@ -220,6 +237,14 @@ void MonoVisionImuFrontend::processFirstFrame(const Frame& first_frame) {
 
   // TODO(marcus): get 3d points if possible?
   mono_frame_km1_ = mono_frame_k_;
+  int n_lmk = 0;
+  for (const auto& lmk : mono_frame_k_->landmarks_) {
+    if (lmk != -1) n_lmk++;
+  }
+
+  VLOG(1) << "first frame has: " << mono_frame_k_->keypoints_.size()
+          << " keypoints and " << n_lmk << " landmarks.";
+  mono_frames_.push_back(mono_frame_k_);
   mono_frame_lkf_ = mono_frame_k_;
   mono_frame_k_.reset();
   ++frame_count_;
@@ -245,15 +270,16 @@ StatusMonoMeasurementsPtr MonoVisionImuFrontend::processFrame(
   VLOG(2) << "Starting feature tracking...";
   gtsam::Rot3 ref_frame_R_cur_frame =
       keyframe_R_ref_frame_.inverse().compose(keyframe_R_cur_frame);
+
+  CHECK(feature_detector_);
+  // if we are using lighter glue, detect all features first, and track features
+  // by matching descriptors
   tracker_->featureTracking(mono_frame_km1_.get(),
                             mono_frame_k_.get(),
                             ref_frame_R_cur_frame,
-                            frontend_params_.feature_detector_params_);
-  if (feature_tracks) {
-    *feature_tracks =
-        tracker_->getTrackerImage(*mono_frame_lkf_, *mono_frame_k_);
-  }
-  VLOG(2) << "Finished feature tracking.";
+                            frontend_params_.feature_detector_params_,
+                            std::nullopt,
+                            false);
 
   // TODO(marcus): need another structure for monocular slam
   tracker_status_summary_.kfTrackingStatus_mono_ = TrackingStatus::INVALID;
@@ -262,9 +288,34 @@ StatusMonoMeasurementsPtr MonoVisionImuFrontend::processFrame(
   MonoMeasurements smart_mono_measurements;
 
   // determine if frame should be a keyframe
-  const bool new_keyframe = shouldBeKeyframe(*mono_frame_k_, *mono_frame_lkf_);
+  size_t n_tracked;
+  const bool new_keyframe =
+      shouldBeKeyframe(*mono_frame_k_, *mono_frame_lkf_, &n_tracked);
   if (new_keyframe) {
     ++keyframe_count_;
+
+    CHECK_EQ(mono_frame_lkf_->keypoints_.size(),
+             mono_frame_lkf_->scores_.size())
+        << mono_frame_lkf_->keypoints_.size() << " "
+        << mono_frame_lkf_->scores_.size() << " " << mono_frame_lkf_->id_;
+    CHECK_EQ(mono_frame_k_->keypoints_.size(), mono_frame_k_->scores_.size())
+        << mono_frame_k_->keypoints_.size() << " "
+        << mono_frame_k_->scores_.size() << " " << mono_frame_k_->id_;
+
+    feature_detector_->featureDetection(
+        mono_frame_k_.get(), std::nullopt, mono_frame_km1_.get());
+
+    mono_camera_->undistortKeypoints(mono_frame_k_->keypoints_,
+                                     &mono_frame_k_->keypoints_undistorted_);
+
+    tracker_->featureTrackingDesc(mono_frame_lkf_,
+                                  mono_frame_k_,
+                                  {},
+                                  frontend_params_.feature_detector_params_,
+                                  std::nullopt,
+                                  false);
+
+    CHECK_EQ(mono_frame_k_->keypoints_.size(), mono_frame_k_->scores_.size());
 
     if (frontend_params_.useRANSAC_) {
       TrackingStatusPose status_pose_mono;
@@ -278,7 +329,53 @@ StatusMonoMeasurementsPtr MonoVisionImuFrontend::processFrame(
         tracker_status_summary_.lkf_T_k_mono_ = status_pose_mono.second;
       }
     } else {
-      tracker_status_summary_.kfTrackingStatus_mono_ = TrackingStatus::DISABLED;
+      tracker_status_summary_.kfTrackingStatus_mono_ =
+          tracker_->detectZeroMotionOF(mono_frame_lkf_.get(),
+                                       mono_frame_k_.get());
+      if (tracker_status_summary_.kfTrackingStatus_mono_ ==
+          TrackingStatus::VALID) {
+        tracker_status_summary_.lkf_T_k_mono_ =
+            gtsam::Pose3(keyframe_R_cur_frame, gtsam::Point3(0, 0, 0));
+      }
+    }
+
+    // find the best (least tracked) keyframe to run matcher
+    if (tracker_status_summary_.kfTrackingStatus_mono_ !=
+        TrackingStatus::LOW_DISPARITY) {
+      Frame::Ptr best_kf_to_rematch = nullptr;
+      if (not mono_frames_.empty()) {
+        size_t n_total_points = mono_frame_k_->keypoints_.size();
+        for (auto kf = mono_frames_.rbegin(); kf != mono_frames_.rend(); ++kf) {
+          KeypointMatches matches_ref_cur;
+          tracker_->findMatchingKeypoints(
+              **kf, *mono_frame_k_, &matches_ref_cur);
+          if (matches_ref_cur.size() <
+              n_total_points * frontend_params_.rematch_threshold_) {
+            best_kf_to_rematch = *kf;
+            break;
+          }
+        }
+        if (not best_kf_to_rematch) {
+          best_kf_to_rematch = mono_frames_.front();
+        }
+      }
+
+      if (best_kf_to_rematch) {
+        LOG(INFO) << "Rematching with keyframe: " << best_kf_to_rematch->id_;
+        LOG(INFO) << "Rematching interval: "
+                  << mono_frame_k_->id_ - best_kf_to_rematch->id_;
+        tracker_->featureTrackingDesc(best_kf_to_rematch,
+                                      mono_frame_k_,
+                                      {},
+                                      frontend_params_.feature_detector_params_,
+                                      std::nullopt,
+                                      false);
+      }
+    }
+
+    if (feature_tracks) {
+      *feature_tracks =
+          tracker_->getTrackerImage(*mono_frame_lkf_, *mono_frame_k_);
     }
 
     if (VLOG_IS_ON(2)) {
@@ -289,12 +386,6 @@ StatusMonoMeasurementsPtr MonoVisionImuFrontend::processFrame(
     last_keyframe_timestamp_ = mono_frame_k_->timestamp_;
     mono_frame_k_->isKeyframe_ = true;
 
-    CHECK(feature_detector_);
-    feature_detector_->featureDetection(mono_frame_k_.get());
-
-    // Undistort keypoints:
-    mono_camera_->undistortKeypoints(mono_frame_k_->keypoints_,
-                                     &mono_frame_k_->keypoints_undistorted_);
     // Log images if needed.
     if (logger_ &&
         (FLAGS_visualize_frontend_images || FLAGS_save_frontend_images)) {
@@ -308,6 +399,14 @@ StatusMonoMeasurementsPtr MonoVisionImuFrontend::processFrame(
                    display_queue_);
     }
 
+    if (tracker_status_summary_.kfTrackingStatus_mono_ ==
+        TrackingStatus::VALID) {
+      mono_frames_.push_back(mono_frame_k_);
+    }
+    if (mono_frames_.size() >
+        static_cast<size_t>(frontend_params_.kf_queue_size_)) {
+      mono_frames_.pop_front();
+    }
     mono_frame_lkf_ = mono_frame_k_;
 
     start_time = utils::Timer::tic();
@@ -339,9 +438,17 @@ StatusMonoMeasurementsPtr MonoVisionImuFrontend::processFrame(
 // but want to switch to gtsam::Point2
 void MonoVisionImuFrontend::getSmartMonoMeasurements(
     const Frame::Ptr& frame,
-    MonoMeasurements* smart_mono_measurements) {
+    MonoMeasurements* smart_mono_measurements,
+    const Frame::Ptr& lkf_frame) {
   // TODO(marcus): convert to point2 when ready!
   CHECK_NOTNULL(smart_mono_measurements);
+  if (frame->prim_stds_.size()) {
+    CHECK_EQ(frame->prim_stds_.size(), frame->keypoints_.size())
+        << "Keypoint stds size does not match keypoints size.";
+  } else {
+    frame->prim_stds_.resize(frame->keypoints_.size(), -1.0);
+  }
+
   frame->checkFrame();
 
   const LandmarkIds& landmarkId_kf = frame->landmarks_;
@@ -361,10 +468,18 @@ void MonoVisionImuFrontend::getSmartMonoMeasurements(
     const auto& uL = keypoints_undistorted.at(i).second.x;
     const auto& v = keypoints_undistorted.at(i).second.y;
 
+    float px_sigma = frame->prim_stds_.at(i);
+    float score = frame->scores_.at(i);
+
     // Initialize to missing pixel information.
     double uR = std::numeric_limits<double>::quiet_NaN();
     smart_mono_measurements->push_back(
-        std::make_pair(landmarkId_kf[i], gtsam::StereoPoint2(uL, uR, v)));
+        {landmarkId_kf[i], gtsam::StereoPoint2(uL, uR, v), px_sigma, score});
+  }
+
+  if (not lkf_frame) {
+    // If we are not using a keyframe, we are done.
+    return;
   }
 }
 
@@ -397,7 +512,7 @@ void MonoVisionImuFrontend::sendMonoTrackingToLogger() const {
       }
     }
   }
-  //############################################################################
+  // ############################################################################
 
   // Plot matches.
   cv::Mat img_left_lkf_kf =

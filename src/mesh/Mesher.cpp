@@ -1528,7 +1528,7 @@ void Mesher::updateMesh3D(const MesherInput& mesher_payload,
     right_keypoint_status.push_back(kpt.first);
   }
 
-  updateMesh3D(mesher_payload.backend_output_->landmarks_with_id_map_,
+  updateMesh3D(mesher_payload.backend_output_->landmarks_out_local_window_,
                stereo_frame.left_frame_.keypoints_,
                right_keypoint_status,
                stereo_frame.keypoints_3d_,

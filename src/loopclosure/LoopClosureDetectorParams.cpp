@@ -48,6 +48,7 @@ bool LoopClosureDetectorParams::parseYAML(const std::string& filepath) {
   yaml_parser.getYamlParam("pose_recovery_type", &pose_recovery_type);
   pose_recovery_type_ = static_cast<PoseRecoveryType>(pose_recovery_type);
   yaml_parser.getYamlParam("lowe_ratio", &lowe_ratio_);
+  yaml_parser.getYamlParam("min_pnp_num_landmarks", &min_pnp_num_landmarks_);
 
   int matcher_type_id;
   yaml_parser.getYamlParam("matcher_type", &matcher_type_id);
@@ -164,6 +165,19 @@ bool LoopClosureDetectorParams::parseYAML(const std::string& filepath) {
                              &frame_cache.remove_cache_on_exit);
   }
 
+  yaml_parser.getYamlParam("lcd_lg_num_features", &lcd_lg_num_features_);
+  yaml_parser.getYamlParam("lcd_lg_model_path", &lcd_lg_model_path_);
+  yaml_parser.getYamlParam("lcd_faiss_index_path", &lcd_faiss_index_path_);
+  yaml_parser.getYamlParam("xfeat_nv_head_model_path",
+                           &xfeat_nv_head_model_path_);
+  yaml_parser.getYamlParam("netvlad_model_path", &netvlad_model_path_);
+  yaml_parser.getYamlParam("local_window_size", &local_window_size_);
+  yaml_parser.getYamlParam("min_lmk_obs_ratio", &min_lmk_obs_ratio_);
+  yaml_parser.getYamlParam("min_lmk_obs_count", &min_lmk_obs_cnt_);
+  yaml_parser.getYamlParam("min_lmk_parallax", &min_lmk_parallax_);
+  yaml_parser.getYamlParam("lcd_min_matched_features",
+                           &lcd_min_matched_features_);
+  yaml_parser.getYamlParam("max_lmk_reproj_error", &max_lmk_reproj_error);
   return true;
 }
 

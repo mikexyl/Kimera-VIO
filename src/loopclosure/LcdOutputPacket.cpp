@@ -22,15 +22,15 @@
 
 namespace VIO {
 
-LcdOutput::LcdOutput(bool is_loop_closure,
+LcdOutput::LcdOutput(LCDStatus lcd_status,
                      const Timestamp& timestamp_kf,
-                     const Timestamp& timestamp_query,
-                     const Timestamp& timestamp_match,
-                     const FrameId& id_match,
-                     const FrameId& id_recent,
-                     const gtsam::Pose3& relative_pose)
+                     const std::vector<Timestamp>& timestamp_query,
+                     const std::vector<Timestamp>& timestamp_match,
+                     const std::vector<FrameId>& id_match,
+                     const std::vector<FrameId>& id_recent,
+                     const std::vector<gtsam::Pose3>& relative_pose)
     : PipelinePayload(timestamp_kf),
-      is_loop_closure_(is_loop_closure),
+      lcd_status_(lcd_status),
       timestamp_query_(timestamp_query),
       timestamp_match_(timestamp_match),
       id_match_(id_match),
@@ -39,11 +39,19 @@ LcdOutput::LcdOutput(bool is_loop_closure,
 
 LcdOutput::LcdOutput(const Timestamp& timestamp_kf)
     : PipelinePayload(timestamp_kf),
-      is_loop_closure_(false),
-      timestamp_query_(0),
-      timestamp_match_(0),
-      id_match_(0),
-      id_recent_(0) {}
+      lcd_status_(LCDStatus::NO_MATCHES),
+      timestamp_query_({}),
+      timestamp_match_({}),
+      id_match_({}),
+      id_recent_({}) {}
+
+LcdOutput::LcdOutput(LCDStatus lcd_status, const Timestamp& timestamp_kf)
+    : PipelinePayload(timestamp_kf),
+      lcd_status_(lcd_status),
+      timestamp_query_({}),
+      timestamp_match_({}),
+      id_match_({}),
+      id_recent_({}) {}
 
 void LcdOutput::setMapInformation(const gtsam::Pose3& W_Pose_Map,
                                   const gtsam::Pose3& Map_Pose_Odom,
@@ -57,11 +65,11 @@ void LcdOutput::setMapInformation(const gtsam::Pose3& W_Pose_Map,
 
 void LcdOutput::setFrameInformation(const Landmarks& keypoints_3d,
                                     const BearingVectors& versors,
-                                    const DBoW2::BowVector& bow_vec,
+                                    const std::map<int, double>& bow_vec,
                                     const cv::Mat& descriptors_mat) {
   keypoints_3d_ = keypoints_3d;
   versors_ = versors;
-  bow_vec_ = std::map<int, double>(bow_vec.begin(), bow_vec.end());
+  bow_vec_ = bow_vec;
   descriptors_mat_ = descriptors_mat;
 }
 

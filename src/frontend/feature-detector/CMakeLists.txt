@@ -1,5 +1,5 @@
 ### Add source code for stereoVIO
-target_sources(kimera_vio
+target_sources(${PROJECT_NAME}
   PRIVATE
   "${CMAKE_CURRENT_LIST_DIR}/FeatureDetectorParams.cpp"
   "${CMAKE_CURRENT_LIST_DIR}/FeatureDetector.cpp"

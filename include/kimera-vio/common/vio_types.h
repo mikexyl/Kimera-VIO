@@ -1,16 +1,16 @@
 #pragma once
 
-#include <cstdint>
-#include <memory>
-#include <unordered_map>
-#include <utility>  // for forward
-#include <vector>
-
 #include <gtsam/base/Matrix.h>
 #include <gtsam/geometry/Point2.h>
 #include <gtsam/geometry/Point3.h>
 
+#include <cstdint>
+#include <memory>
 #include <opencv2/core.hpp>
+#include <set>
+#include <unordered_map>
+#include <utility>  // for forward
+#include <vector>
 
 namespace VIO {
 using Timestamp = std::int64_t;
@@ -51,9 +51,12 @@ using DMatchVec = std::vector<cv::DMatch>;
 // Definitions relevant to frame types
 using FrameId = std::uint64_t;  // Frame id is used as the index of gtsam symbol
                                 // (not as a gtsam key).
+using FrameIdSet =
+    std::set<FrameId,
+             std::less<FrameId>>;  // stores FrameIds in ascending order
 using PlaneId = std::uint64_t;
 using LandmarkId = long int;  // -1 for invalid landmarks. // int would be too
-                            // small if it is 16 bits!
+                              // small if it is 16 bits!
 using LandmarkIds = std::vector<LandmarkId>;
 using Landmark = gtsam::Point3;
 using Landmarks = std::vector<Landmark, Eigen::aligned_allocator<Landmark>>;
@@ -85,6 +88,11 @@ std::unique_ptr<Derived> castUnique(std::unique_ptr<Base>&& base) {
   return std::unique_ptr<Derived>(derived);
 }
 
-using LandmarksMap = std::unordered_map<LandmarkId, gtsam::Point3>;
+using LandmarksMap = std::unordered_map<
+    long,
+    Landmark,
+    std::hash<long>,
+    std::equal_to<long>,
+    Eigen::aligned_allocator<std::pair<const long, Landmark>>>;
 
 }  // namespace VIO

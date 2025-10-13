@@ -14,6 +14,7 @@
 
 #pragma once
 
+#include "kimera-vio/loopclosure/LcdOutputPacket.h"
 #include "kimera-vio/utils/Macros.h"
 #include "kimera-vio/visualizer/Visualizer3D-definitions.h"
 
@@ -35,6 +36,8 @@ class Visualizer3D {
  public:
   virtual VisualizerOutput::UniquePtr spinOnce(
       const VisualizerInput& input) = 0;
+
+  virtual void publishLcdOutput(const LcdOutput::ConstPtr& lcd_output) {}
 
  public:
   VisualizationType visualization_type_;

@@ -79,6 +79,7 @@ StereoImuPipeline::StereoImuPipeline(const VioParams& params,
       &frontend_input_queue_,
       parallel_run_,
       VisionImuFrontendFactory::createFrontend(
+          ort_env_,
           params.frontend_type_,
           params.imu_params_,
           gtsam::imuBias::ConstantBias(),

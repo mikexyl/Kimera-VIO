@@ -23,6 +23,7 @@
 #include <gtsam/nonlinear/Values.h>
 
 #include "kimera-vio/common/vio_types.h"
+#include "kimera-vio/loopclosure/LoopClosureDetector-definitions.h"
 #include "kimera-vio/pipeline/PipelinePayload.h"
 #include "kimera-vio/utils/Macros.h"
 
@@ -38,15 +39,17 @@ struct LcdOutput : PipelinePayload {
   KIMERA_POINTER_TYPEDEFS(LcdOutput);
   KIMERA_DELETE_COPY_CONSTRUCTORS(LcdOutput);
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
-  LcdOutput(bool is_loop_closure,
+  LcdOutput(LCDStatus lcd_status,
             const Timestamp& timestamp_kf,
-            const Timestamp& timestamp_query,
-            const Timestamp& timestamp_match,
-            const FrameId& id_match,
-            const FrameId& id_recent,
-            const gtsam::Pose3& relative_pose);
+            const std::vector<Timestamp>& timestamp_query,
+            const std::vector<Timestamp>& timestamp_match,
+            const std::vector<FrameId>& id_match,
+            const std::vector<FrameId>& id_recent,
+            const std::vector<gtsam::Pose3>& relative_pose);
 
   explicit LcdOutput(const Timestamp& timestamp_kf);
+
+  explicit LcdOutput(LCDStatus lcd_status, const Timestamp& timestamp_kf);
 
   void setMapInformation(const gtsam::Pose3& W_Pose_Map,
                          const gtsam::Pose3& Map_Pose_Odom,
@@ -55,16 +58,16 @@ struct LcdOutput : PipelinePayload {
 
   void setFrameInformation(const Landmarks& keypoints_3d,
                            const BearingVectors& versors,
-                           const DBoW2::BowVector& bow_vec,
+                           const std::map<int, double>& bow_vec,
                            const cv::Mat& descriptors_mat);
 
   // TODO(marcus): inlude stats/score of match
-  bool is_loop_closure_;
-  Timestamp timestamp_query_;
-  Timestamp timestamp_match_;
-  FrameId id_match_;
-  FrameId id_recent_;
-  gtsam::Pose3 relative_pose_;
+  LCDStatus lcd_status_;
+  std::vector<Timestamp> timestamp_query_;
+  std::vector<Timestamp> timestamp_match_;
+  std::vector<FrameId> id_match_;
+  std::vector<FrameId> id_recent_;
+  std::vector<gtsam::Pose3> relative_pose_;
   // map information
   gtsam::Pose3 W_Pose_Map_;
   gtsam::Pose3 Map_Pose_Odom_;  // Map frame is the optimal (RPGO) global frame
@@ -77,6 +80,11 @@ struct LcdOutput : PipelinePayload {
   std::map<int, double> bow_vec_;
   cv::Mat descriptors_mat_;
   FrameIDTimestampMap timestamp_map_;
+
+  Landmarks landmarks_;
+  std::map<FrameId, FrameIdSet> covis_graph_;
+  FrameId query_frame_;
+  FrameIdSet global_candidates_;
 };
 
 }  // namespace VIO

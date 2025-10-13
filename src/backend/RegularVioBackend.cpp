@@ -221,13 +221,13 @@ bool RegularVioBackend::addVisualInertialStateAndOptimize(
     default: {
       kfTrackingStatus_mono == TrackingStatus::VALID
           ? VLOG(1) << "Tracker has a VALID status."
-          : kfTrackingStatus_mono == TrackingStatus::FEW_MATCHES
-                ? VLOG(1) << "Tracker has a FEW_MATCHES status."
-                : kfTrackingStatus_mono == TrackingStatus::INVALID
-                      ? VLOG(1) << "Tracker has a INVALID status."
-                      : kfTrackingStatus_mono == TrackingStatus::DISABLED
-                            ? VLOG(1) << "Tracker has a DISABLED status."
-                            : VLOG(10) << "";
+      : kfTrackingStatus_mono == TrackingStatus::FEW_MATCHES
+          ? VLOG(1) << "Tracker has a FEW_MATCHES status."
+      : kfTrackingStatus_mono == TrackingStatus::INVALID
+          ? VLOG(1) << "Tracker has a INVALID status."
+      : kfTrackingStatus_mono == TrackingStatus::DISABLED
+          ? VLOG(1) << "Tracker has a DISABLED status."
+          : VLOG(10) << "";
 
       if (kfTrackingStatus_mono == TrackingStatus::VALID) {
         // Extract lmk ids that are involved in a regularity.
@@ -500,7 +500,9 @@ void RegularVioBackend::addLandmarkToGraph(const LandmarkId& lmk_id,
     VLOG(20) << "SmartFactor: adding observation of lmk with id: " << lmk_id
              << " from frame with id: " << obs.first;
     gtsam::Symbol pose_symbol('x', obs.first);
-    new_factor->add(obs.second, pose_symbol, stereo_cal_);
+    if (new_factor->find(pose_symbol) == new_factor->end()) {
+      new_factor->add(obs.second, pose_symbol, stereo_cal_);
+    }
   }
 
   /////////////////////// BOOK KEEPING /////////////////////////////////////////
@@ -600,8 +602,11 @@ void RegularVioBackend::updateExistingSmartFactor(
 
   // Add observation to new factor.
   VLOG(20) << "Added observation for smart factor of lmk with id: " << lmk_id;
-  new_factor->add(
-      new_obs.second, gtsam::Symbol('x', new_obs.first), stereo_cal_);
+  if (new_factor->find(gtsam::Symbol('x', new_obs.first)) ==
+      new_factor->end()) {
+    new_factor->add(
+        new_obs.second, gtsam::Symbol('x', new_obs.first), stereo_cal_);
+  }
 
   // If slot is still -1, it means that the factor has not been inserted yet
   // in the graph.
@@ -1516,7 +1521,7 @@ void RegularVioBackend::removeOldRegularityFactors_Slow(
           }
         }
       }  // The plane has NOT a prior.
-    }    // The plane is NOT fully constraint.
+    }  // The plane is NOT fully constraint.
   }
 }
 

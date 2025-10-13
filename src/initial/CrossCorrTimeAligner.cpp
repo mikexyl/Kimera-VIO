@@ -103,7 +103,7 @@ size_t CrossCorrTimeAligner::addNewImuDataFrameRate(
     }
 
     rot_pim.integrateMeasurement(
-        imu_acc_gyrs.block<3, 1>(3, i), Eigen::Vector3d::Zero(), imu_period_s_);
+        imu_acc_gyrs.block<3, 1>(3, i), Eigen::Vector3d::Zero(), imu_period_s_, {}, {});
   }
 
   const double last_dt = UtilsNumerical::NsecToSec(
@@ -113,7 +113,7 @@ size_t CrossCorrTimeAligner::addNewImuDataFrameRate(
     rot_pim.integrateMeasurement(
         imu_acc_gyrs.block<3, 1>(3, imu_stamps.cols() - 1),
         Eigen::Vector3d::Zero(),
-        last_dt);
+        last_dt, {}, {});
   }
 
   imu_buffer_->push(CrossCorrTimeAligner::Measurement(

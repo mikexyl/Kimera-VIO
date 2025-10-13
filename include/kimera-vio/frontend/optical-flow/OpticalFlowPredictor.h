@@ -15,9 +15,9 @@
 
 #pragma once
 
-#include <opencv2/opencv.hpp>
-
 #include <gtsam/geometry/Rot3.h>
+
+#include <opencv2/opencv.hpp>
 
 #include "kimera-vio/utils/Macros.h"
 #include "kimera-vio/utils/UtilsOpenCV.h"
@@ -45,6 +45,8 @@ class OpticalFlowPredictor {
                                  const gtsam::Rot3& cam1_R_cam2,
                                  KeypointsCV* next_kps) = 0;
   virtual cv::Mat predictDenseFlow(const gtsam::Rot3& cam1_R_cam2) = 0;
+
+  virtual cv::Mat getHomography(const gtsam::Rot3& cam1_R_cam2) = 0;
 };
 
 /**
@@ -64,6 +66,10 @@ class NoOpticalFlowPredictor : public OpticalFlowPredictor {
                          const gtsam::Rot3& /* inter_frame */,
                          KeypointsCV* next_kps) override;
   cv::Mat predictDenseFlow(const gtsam::Rot3& cam1_R_cam2) { return cv::Mat(); }
+
+  cv::Mat getHomography(const gtsam::Rot3& cam1_R_cam2) override {
+    return cv::Mat::eye(3, 3, CV_32F);
+  }
 };
 
 /**
@@ -83,6 +89,13 @@ class RotationalOpticalFlowPredictor : public OpticalFlowPredictor {
   bool predictSparseFlow(const KeypointsCV& prev_kps,
                          const gtsam::Rot3& cam1_R_cam2,
                          KeypointsCV* next_kps) override;
+
+  cv::Mat getHomography(const gtsam::Rot3& cam1_R_cam2) override {
+    cv::Matx33f R = UtilsOpenCV::gtsamMatrix3ToCvMat(cam1_R_cam2.matrix());
+    cv::Matx33f H = K_ * R.t() * K_inverse_;
+    return cv::Mat(H);
+  }
+
   // NOT TESTED
   cv::Mat predictDenseFlow(const gtsam::Rot3& cam1_R_cam2) override;
 

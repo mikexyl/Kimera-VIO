@@ -22,7 +22,6 @@
 #include <gtsam/geometry/StereoCamera.h>
 
 #include <opencv2/opencv.hpp>
-
 #include <optional>
 
 #include "kimera-vio/frontend/Camera.h"
@@ -31,6 +30,8 @@
 #include "kimera-vio/frontend/StereoFrame.h"
 #include "kimera-vio/frontend/Tracker-definitions.h"
 #include "kimera-vio/frontend/VisionImuTrackerParams.h"
+#include "kimera-vio/frontend/feature-tracker/LighterGlueCV.h"
+#include "kimera-vio/frontend/feature-tracker/OpticalFlowCV.h"
 #include "kimera-vio/frontend/optical-flow/OpticalFlowPredictor.h"
 #include "kimera-vio/utils/Macros.h"
 #include "kimera-vio/visualizer/Display-definitions.h"
@@ -56,7 +57,9 @@ class Tracker {
    */
   Tracker(const TrackerParams& tracker_params,
           const Camera::ConstPtr& camera,
-          DisplayQueue* display_queue = nullptr);
+          DisplayQueue* display_queue = nullptr,
+          std::shared_ptr<Ort::Env> env = nullptr,
+          bool use_of_tracker = true);
 
   virtual ~Tracker() = default;
 
@@ -67,11 +70,23 @@ class Tracker {
   cv::Mat cam_mask_;
 
  public:
+  bool mergeLandmark(Frame* frame,
+                     int q_kp_i,
+                     cv::flann::Index* kd_tree = nullptr);
+
   void featureTracking(Frame* ref_frame,
                        Frame* cur_frame,
                        const gtsam::Rot3& inter_frame_rotation,
                        const FeatureDetectorParams& feature_detector_params,
-                       std::optional<cv::Mat> R = std::nullopt);
+                       std::optional<cv::Mat> R = std::nullopt,
+                       bool invalidate_landmarks = true);
+
+  void featureTrackingDesc(Frame::Ptr ref_frame,
+                           Frame::Ptr cur_frame,
+                           const gtsam::Rot3& inter_frame_rotation,
+                           const FeatureDetectorParams& feature_detector_params,
+                           std::optional<cv::Mat> R = std::nullopt,
+                           bool invalidate_landmarks = true);
 
   /**
    * @brief updateMap Updates the map of landmarks in the time horizon of
@@ -105,6 +120,8 @@ class Tracker {
       const KeypointMatches& matches_ref_cur,
       std::vector<int>* inliers,
       const gtsam::Pose3& cam_lkf_Pose_cam_kf = gtsam::Pose3());
+
+  TrackingStatus detectZeroMotionOF(Frame* ref_frame, Frame* cur_frame);
 
   /**
    * @brief geometricOutlierRejection3d3d
@@ -163,8 +180,8 @@ class Tracker {
    * @param [in] F_points 3D landmarks in the generic frame F.
    * @param [out] F_Pose_cam_estimate Output of pnp ransac.
    * @param[in/out] inliers
-   * @param [in] F_Pose_cam_prior Optional prior pose of the camera with respect to
-   * reference frame F.
+   * @param [in] F_Pose_cam_prior Optional prior pose of the camera with respect
+   * to reference frame F.
    */
   bool pnp(const BearingVectors& cam_bearing_vectors,
            const Landmarks& F_points,
@@ -200,6 +217,10 @@ class Tracker {
   static void findMatchingKeypoints(const Frame& ref_frame,
                                     const Frame& cur_frame,
                                     KeypointMatches* matches_ref_cur);
+
+  static void findMatchingKeypointsOF(const Frame& ref_frame,
+                                      const Frame& cur_frame,
+                                      KeypointMatches* matches_ref_cur);
 
   static void findMatchingStereoKeypoints(
       const StereoFrame& ref_stereoFrame,
@@ -346,6 +367,9 @@ class Tracker {
   //! Most up-to-date map of landmarks with optimized 3D poses from backend.
   //! WARNING: do not use this without locking first its mutex.
   LandmarksMap landmarks_map_;
+
+  FeatureTracker::Ptr feature_tracker_ = nullptr;
+  FeatureTracker::Ptr optical_flow_tracker_ = nullptr;
 };
 
 }  // namespace VIO

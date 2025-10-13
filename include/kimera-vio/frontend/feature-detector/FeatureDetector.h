@@ -14,10 +14,12 @@
 
 #pragma once
 
+#include <xfeat-cpp/xfeat_cv.h>
+
 #include <Eigen/Eigen>
 #include <opencv2/features2d.hpp>
-#include <vector>
 #include <optional>
+#include <vector>
 
 #include "kimera-vio/frontend/Frame.h"
 #include "kimera-vio/frontend/feature-detector/FeatureDetector-definitions.h"
@@ -32,12 +34,14 @@ class FeatureDetector {
   KIMERA_DELETE_COPY_CONSTRUCTORS(FeatureDetector);
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
-  FeatureDetector(const FeatureDetectorParams& feature_detector_params);
+  FeatureDetector(const FeatureDetectorParams& feature_detector_params,
+                  std::shared_ptr<Ort::Env> env = nullptr);
   virtual ~FeatureDetector() = default;
 
  public:
   void featureDetection(Frame* cur_frame,
-                        std::optional<cv::Mat> R = std::nullopt);
+                        std::optional<cv::Mat> R = std::nullopt,
+                        Frame* ref_frame = nullptr);
 
   /**
    * @brief rawFeatureDetection Raw feature detection: in image, out keypoints
@@ -48,11 +52,24 @@ class FeatureDetector {
       const cv::Mat& img,
       const cv::Mat& mask = cv::Mat());
 
+  static LandmarkId lmk_id;
+  static LandmarkId of_lmk_id;
+
  private:
   // Returns landmark_count (updated from the new keypoints),
   // and nr or extracted corners.
-  KeypointsCV featureDetection(const Frame& cur_frame,
-                               const int& need_n_corners);
+  KeypointsCV featureDetection(Frame* cur_frame,
+                               Frame* ref_frame,
+                               const int& need_n_corners,
+                               std::vector<int>* tracked_kp_id);
+
+  void featureDetectionTracked(Frame* cur_frame,
+                               Frame* ref_frame,
+                               std::optional<cv::Mat> R = std::nullopt);
+
+  void featureDetectionNew(Frame* cur_frame,
+                           Frame* ref_frame,
+                           std::optional<cv::Mat> R = std::nullopt);
 
   // Parameters.
   const FeatureDetectorParams feature_detector_params_;

@@ -34,11 +34,13 @@ typedef cv::Mat OrbDescriptor;
 typedef std::vector<OrbDescriptor> OrbDescriptorVec;
 
 enum class LoopClosureDetectorType {
-  BoW = 0u,  //! Bag of Words approach
+  BoW = 0u,      //! Bag of Words approach
+  NetVLAD = 1u,  //! NetVLAD approach
 };
 
 enum class LCDStatus : int {
   LOOP_DETECTED,
+  LOOP_DETECTED_ROT,
   NO_MATCHES,
   LOW_NSS_FACTOR,
   LOW_SCORE,
@@ -57,9 +59,10 @@ struct LCDFrame {
            const FrameId& id_kf,
            const std::vector<cv::KeyPoint>& keypoints,
            const Landmarks& keypoints_3d,
-           const OrbDescriptorVec& descriptors_vec,
-           const OrbDescriptor& descriptors_mat,
-           const BearingVectors& bearing_vectors)
+           const std::vector<cv::Mat>& descriptors_vec,
+           const cv::Mat& descriptors_mat,
+           const BearingVectors& bearing_vectors,
+           const Pose3& W_Pose_Blkf = Pose3())
       : timestamp_(timestamp),
         id_(id),
         id_kf_(id_kf),
@@ -67,7 +70,8 @@ struct LCDFrame {
         keypoints_3d_(keypoints_3d),
         descriptors_vec_(descriptors_vec),
         descriptors_mat_(descriptors_mat),
-        bearing_vectors_(bearing_vectors) {}
+        bearing_vectors_(bearing_vectors),
+        W_Pose_Blkf_(W_Pose_Blkf) {}
 
   virtual ~LCDFrame() = default;
 
@@ -80,9 +84,12 @@ struct LCDFrame {
   FrameId id_kf_;
   std::vector<cv::KeyPoint> keypoints_;
   Landmarks keypoints_3d_;
-  OrbDescriptorVec descriptors_vec_;
-  OrbDescriptor descriptors_mat_;
+  std::vector<LandmarkId> landmark_ids;
+  std::vector<cv::Mat> descriptors_vec_;
+  cv::Mat descriptors_mat_;
   BearingVectors bearing_vectors_;
+  Pose3 W_Pose_Blkf_;  // VIO pose of the frame in the world frame
+  CameraParams cam_params_;
 
  protected:
   virtual void saveBytes(std::ostream& buffer) const;
@@ -99,8 +106,8 @@ struct StereoLCDFrame : LCDFrame {
                  const FrameId& id_kf,
                  const std::vector<cv::KeyPoint>& keypoints,
                  const Landmarks& keypoints_3d,
-                 const OrbDescriptorVec& descriptors_vec,
-                 const OrbDescriptor& descriptors_mat,
+                 const std::vector<cv::Mat>& descriptors_vec,
+                 const cv::Mat& descriptors_mat,
                  const BearingVectors& bearing_vectors,
                  const StatusKeypointsCV& left_keypoints_rectified,
                  const StatusKeypointsCV& right_keypoints_rectified)
@@ -176,13 +183,20 @@ struct MatchIsland {
 };  // struct MatchIsland
 
 struct LoopResult {
-  inline bool isLoop() const { return status_ == LCDStatus::LOOP_DETECTED; }
+  inline bool isLoop() const {
+    return status_ == LCDStatus::LOOP_DETECTED or
+           status_ == LCDStatus::LOOP_DETECTED_ROT;
+  }
 
   static std::string asString(const LCDStatus& status) {
     std::string status_str = "";
     switch (status) {
       case LCDStatus::LOOP_DETECTED: {
         status_str = "LOOP_DETECTED";
+        break;
+      }
+      case LCDStatus::LOOP_DETECTED_ROT: {
+        status_str = "LOOP_DETECTED_ROT";
         break;
       }
       case LCDStatus::NO_MATCHES: {
@@ -218,9 +232,9 @@ struct LoopResult {
   }
 
   LCDStatus status_ = LCDStatus::NO_MATCHES;
-  FrameId query_id_;
-  FrameId match_id_;
-  gtsam::Pose3 relative_pose_;
+  std::vector<FrameId> query_id_;
+  std::vector<FrameId> match_id_;
+  std::vector<gtsam::Pose3> relative_pose_;
 };  // struct LoopResult
 
 struct LcdDebugInfo {
@@ -277,20 +291,29 @@ struct LcdInput : public PipelinePayload {
            const FrontendOutputPacketBase::Ptr& frontend_output,
            const FrameId& cur_kf_id,
            const PointsWithIdMap& W_points_with_ids,
-           const gtsam::Pose3& W_Pose_Blkf)
+           const gtsam::Pose3& W_Pose_Blkf,
+           const gtsam::Pose3& W_Pose_smoother = gtsam::Pose3(),
+           const gtsam::Values& backend_states = gtsam::Values(),
+           const PointsWithIdMap& landmark_in_window = PointsWithIdMap())
       : PipelinePayload(timestamp),
         frontend_output_(frontend_output),
         cur_kf_id_(cur_kf_id),
-        W_points_with_ids_(W_points_with_ids),
-        W_Pose_Blkf_(W_Pose_Blkf) {
+        landmark_in_window_(landmark_in_window),
+        landmark_out_window_(W_points_with_ids),
+        W_Pose_Blkf_(W_Pose_Blkf),
+        W_Pose_smoother_(W_Pose_smoother),
+        backend_states_(backend_states) {
     CHECK(frontend_output);
     CHECK_EQ(timestamp, frontend_output->timestamp_);
   }
 
   const FrontendOutputPacketBase::Ptr frontend_output_;
   const FrameId cur_kf_id_;
-  const PointsWithIdMap W_points_with_ids_;
+  const PointsWithIdMap landmark_in_window_;
+  const PointsWithIdMap landmark_out_window_;
   const gtsam::Pose3 W_Pose_Blkf_;
+  const gtsam::Pose3 W_Pose_smoother_;
+  const gtsam::Values backend_states_;
 };
 
 }  // namespace VIO

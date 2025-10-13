@@ -70,8 +70,21 @@ using PointWithId = std::pair<LandmarkId, Landmark>;
 using PointsWithId = std::vector<PointWithId>;
 // TODO(Toni):  there is the same in vio_types.cpp, replace by that one, since
 // now the frontend also has such concept.
-using PointsWithIdMap = std::unordered_map<LandmarkId, Landmark>;
+using PointsWithIdMap = LandmarksMap;
 using LmkIdToLmkTypeMap = std::unordered_map<LandmarkId, LandmarkType>;
+
+struct FeatureObs : std::pair<FrameId, StereoPoint2> {
+  FeatureObs(const FrameId& frame_id,
+             const StereoPoint2& px,
+             double px_sigma,
+             double score = 1.)
+      : std::pair<FrameId, StereoPoint2>(frame_id, px),
+        px_sigma_(px_sigma),
+        score_(score) {}
+
+  double px_sigma_ = -1.;
+  double score_ = 1;
+};
 
 ////////////////////////////////////////////////////////////////////////////////
 // FeatureTrack
@@ -83,13 +96,14 @@ class FeatureTrack {
   // TODO(Toni): add getters for feature track length
  public:
   //! Observation: {FrameId, Px-Measurement}
-  std::vector<std::pair<FrameId, StereoPoint2>> obs_;
+  std::vector<FeatureObs> obs_;
 
   // Is the lmk in the graph?
   bool in_ba_graph_ = false;
 
-  FeatureTrack(FrameId frame_id, const StereoPoint2& px) {
-    obs_.push_back(std::make_pair(frame_id, px));
+  FeatureTrack(FrameId frame_id, const StereoPoint2& px, double px_sigma = -1.)
+      : in_ba_graph_(false) {
+    obs_.emplace_back(frame_id, px, px_sigma);
   }
 
   void print() const {
@@ -298,7 +312,9 @@ struct BackendOutput : public PipelinePayload {
                 const int& landmark_count,
                 const DebugVioInfo& debug_info,
                 const PointsWithIdMap& landmarks_with_id_map,
-                const LmkIdToLmkTypeMap& lmk_id_to_lmk_type_map)
+                const LmkIdToLmkTypeMap& lmk_id_to_lmk_type_map,
+                const PointsWithIdMap& landmarks_in_local_window = {},
+                const gtsam::Pose3& W_Pose_smoother = gtsam::Pose3())
       : PipelinePayload(timestamp_kf),
         W_State_Blkf_(timestamp_kf, W_Pose_Blkf, W_Vel_Blkf, imu_bias_lkf),
         state_(state),
@@ -307,8 +323,10 @@ struct BackendOutput : public PipelinePayload {
         cur_kf_id_(cur_kf_id),
         landmark_count_(landmark_count),
         debug_info_(debug_info),
-        landmarks_with_id_map_(landmarks_with_id_map),
-        lmk_id_to_lmk_type_map_(lmk_id_to_lmk_type_map) {}
+        landmarks_out_local_window_(landmarks_with_id_map),
+        landmarks_in_local_window_(landmarks_in_local_window),
+        lmk_id_to_lmk_type_map_(lmk_id_to_lmk_type_map),
+        W_Pose_smoother_(W_Pose_smoother) {}
 
   BackendOutput(const VioNavStateTimestamped& vio_navstate_timestamped,
                 const gtsam::Values& state,
@@ -318,7 +336,9 @@ struct BackendOutput : public PipelinePayload {
                 const int& landmark_count,
                 const DebugVioInfo& debug_info,
                 const PointsWithIdMap& landmarks_with_id_map,
-                const LmkIdToLmkTypeMap& lmk_id_to_lmk_type_map)
+                const LmkIdToLmkTypeMap& lmk_id_to_lmk_type_map,
+                const PointsWithIdMap& landmarks_in_local_window = {},
+                const gtsam::Pose3& W_Pose_smoother = gtsam::Pose3())
       : PipelinePayload(vio_navstate_timestamped.timestamp_),
         W_State_Blkf_(vio_navstate_timestamped),
         state_(state),
@@ -327,8 +347,10 @@ struct BackendOutput : public PipelinePayload {
         cur_kf_id_(cur_kf_id),
         landmark_count_(landmark_count),
         debug_info_(debug_info),
-        landmarks_with_id_map_(landmarks_with_id_map),
-        lmk_id_to_lmk_type_map_(lmk_id_to_lmk_type_map) {}
+        landmarks_out_local_window_(landmarks_with_id_map),
+        landmarks_in_local_window_(landmarks_in_local_window),
+        lmk_id_to_lmk_type_map_(lmk_id_to_lmk_type_map),
+        W_Pose_smoother_(W_Pose_smoother) {}
 
   const VioNavStateTimestamped W_State_Blkf_;
   const gtsam::Values state_;
@@ -337,8 +359,10 @@ struct BackendOutput : public PipelinePayload {
   const FrameId cur_kf_id_;
   const int landmark_count_;
   const DebugVioInfo debug_info_;
-  const PointsWithIdMap landmarks_with_id_map_;
+  const PointsWithIdMap landmarks_out_local_window_;
+  const PointsWithIdMap landmarks_in_local_window_;
   const LmkIdToLmkTypeMap lmk_id_to_lmk_type_map_;
+  const gtsam::Pose3 W_Pose_smoother_;
 };
 
 ////////////////////////////////////////////////////////////////////////////////

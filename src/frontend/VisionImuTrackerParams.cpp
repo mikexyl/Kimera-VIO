@@ -14,11 +14,11 @@
 
 #include "kimera-vio/frontend/VisionImuTrackerParams.h"
 
-#include <string>
-#include <utility>
-
 #include <gflags/gflags.h>
 #include <glog/logging.h>
+
+#include <string>
+#include <utility>
 
 #include "kimera-vio/common/vio_types.h"
 #include "kimera-vio/utils/YamlParser.h"
@@ -78,7 +78,9 @@ void TrackerParams::print() const {
                         optimize_2d3d_pose_from_inliers_,
                         // OTHER parameters
                         "disparityThreshold_: ",
-                        disparityThreshold_);
+                        disparityThreshold_,
+                        "tracker type:",
+                        VIO::to_underlying(tracker_type_));
   LOG(INFO) << out.str();
 }
 
@@ -126,7 +128,8 @@ bool TrackerParams::parseYAML(const std::string& filepath) {
   pnp_algorithm_ = static_cast<Pose3d2dAlgorithm>(pnp_algorithm);
 
   int optical_flow_predictor_type;
-  yaml_parser.getYamlParam("optical_flow_predictor_type", &optical_flow_predictor_type);
+  yaml_parser.getYamlParam("optical_flow_predictor_type",
+                           &optical_flow_predictor_type);
   optical_flow_predictor_type_ =
       static_cast<OpticalFlowPredictorType>(optical_flow_predictor_type);
 
@@ -134,6 +137,20 @@ bool TrackerParams::parseYAML(const std::string& filepath) {
 
   yaml_parser.getYamlParam("optimize_2d3d_pose_from_inliers",
                            &optimize_2d3d_pose_from_inliers_);
+
+  yaml_parser.getYamlParam("feature_tracker_type", &tracker_type_);
+  yaml_parser.getYamlParam("num_features", &num_features_);
+  yaml_parser.getYamlParam("track_on_keyframe", &track_on_keyframe_);
+  yaml_parser.getYamlParam("lg_model_path", &lighterglue_model_path_);
+
+  yaml_parser.getYamlParam("gpu_bf_min_sim", &gpu_bf_min_sim_);
+  yaml_parser.getYamlParam("search_radius", &search_radius_);
+
+  yaml_parser.getYamlParam("max_lmk_merge_px", &max_lmk_merge_px_);
+  yaml_parser.getYamlParam("min_lmk_merge_sim", &min_lmk_merge_sim_);
+
+  yaml_parser.getYamlParam("vilib_cell_width", &vilib_cell_width);
+  yaml_parser.getYamlParam("vilib_cell_height", &vilib_cell_height);
 
   return true;
 }

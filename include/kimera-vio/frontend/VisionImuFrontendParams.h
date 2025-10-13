@@ -73,6 +73,9 @@ struct FrontendParams : public PipelineParams {
   bool log_mono_tracking_images_ = false;
   //! Display/Save stereo tracking rectified and unrectified images.
   bool log_stereo_matching_images_ = false;
+
+  int kf_queue_size_ = 20;
+  float rematch_threshold_ = 0.3;
 };
 
 }  // namespace VIO

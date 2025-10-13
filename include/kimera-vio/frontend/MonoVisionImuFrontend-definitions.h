@@ -27,7 +27,7 @@ namespace VIO {
 
 using MonoFrontendInputPayload = MonoImuSyncPacket;
 
-using MonoMeasurement = std::pair<LandmarkId, gtsam::StereoPoint2>;
+using MonoMeasurement = StereoMeasurement;
 using MonoMeasurements = std::vector<MonoMeasurement>;
 using MonoMeasurementsUniquePtr = std::unique_ptr<MonoMeasurements>;
 using StatusMonoMeasurements =

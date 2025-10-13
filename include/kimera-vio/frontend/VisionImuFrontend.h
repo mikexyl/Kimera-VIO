@@ -50,7 +50,8 @@ class VisionImuFrontend {
   typedef std::function<void(double imu_time_shift_s)> ImuTimeShiftCallback;
 
  public:
-  VisionImuFrontend(const FrontendParams& frontend_params,
+  VisionImuFrontend(std::shared_ptr<Ort::Env> env,
+                    const FrontendParams& frontend_params,
                     const ImuParams& imu_params,
                     const ImuBias& imu_initial_bias,
                     DisplayQueue* display_queue,
@@ -136,7 +137,9 @@ class VisionImuFrontend {
   virtual FrontendOutputPacketBase::UniquePtr nominalSpin(
       FrontendInputPacketBase::UniquePtr&& input) = 0;
 
-  virtual bool shouldBeKeyframe(const Frame& frame, const Frame& lkf) const;
+  virtual bool shouldBeKeyframe(const Frame& frame,
+                                const Frame& lkf,
+                                size_t* n_tracked = nullptr) const;
 
   /* ------------------------------------------------------------------------ */
   // Reset ImuFrontend gravity. Trivial gravity is needed for initial alignment.
@@ -201,7 +204,7 @@ class VisionImuFrontend {
   ImuFrontend::UniquePtr imu_frontend_;
 
   // Tracker
-  Tracker::UniquePtr tracker_;
+  Tracker::Ptr tracker_;
   TrackerStatusSummary tracker_status_summary_;
 
   // Display queue
@@ -218,6 +221,8 @@ class VisionImuFrontend {
   std::optional<OdometryParams> odom_params_;
   // world_Pose_body for the last keyframe
   std::optional<gtsam::Pose3> world_OdomPose_body_lkf_;
+
+  std::shared_ptr<Ort::Env> ort_env_{nullptr};  // ONNX Runtime environment
 };
 
 }  // namespace VIO

@@ -80,6 +80,7 @@ class LoopClosureDetectorParams : public PipelineParams {
   bool refine_pose_ = true;
   PoseRecoveryType pose_recovery_type_ = PoseRecoveryType::k3d3d;
   static constexpr double max_pose_recovery_translation_ = 1e3;
+  int min_pnp_num_landmarks_ = 10;
   //////////////////////////////////////////////////////////////////////////////
 
   ///////////////////////// ORB feature matching params ////////////////////////
@@ -122,6 +123,22 @@ class LoopClosureDetectorParams : public PipelineParams {
   int max_lc_cached_before_optimize_ = 10;
 
   FrameCacheConfig frame_cache;
+
+  // lighterglue parameters
+  int lcd_lg_num_features_ = 500;  // num features to track
+  std::string lcd_lg_model_path_{};
+  std::string lcd_faiss_index_path_{};
+  std::string xfeat_nv_head_model_path_{};
+  std::string netvlad_model_path_{};
+  int lcd_min_matched_features_ = 5;
+
+  int local_window_size_ = 50;  // number of most recent keyframes to skip when
+  // detecting loops
+
+  double min_lmk_obs_ratio_ = 0.25;
+  double min_lmk_obs_cnt_ = 4;
+  float min_lmk_parallax_ = 20;
+  float max_lmk_reproj_error = 36;
 };
 
 }  // namespace VIO
