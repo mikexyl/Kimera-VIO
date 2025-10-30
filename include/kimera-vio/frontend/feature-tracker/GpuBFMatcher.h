@@ -49,73 +49,7 @@ class GpuBFMatcher : public FeatureTracker {
                  int search_radius,
                  const std::vector<cv::Point2f>& predictedPts,
                  DMatchVec* matches) override {
-    CHECK_NOTNULL(gpu_matcher_);
-    CHECK_NOTNULL(ref_frame);
-    CHECK_NOTNULL(cur_frame);
-    CHECK_NOTNULL(matches);
-
-    CHECK(not ref_frame->keypoints_.empty());
-    CHECK(not cur_frame->keypoints_.empty());
-
-    std::vector<cv::DMatch> matches_vec;
-    if (use_ransac_) {
-      double fx = camera_params_->intrinsics_[0];
-      double fy = camera_params_->intrinsics_[1];
-      double cx = camera_params_->intrinsics_[2];
-      double cy = camera_params_->intrinsics_[3];
-
-      std::vector<cv::Point2f> pts1, pts2;
-      for (const auto& kp : ref_frame->keypoints_undistorted_) {
-        pts1.emplace_back(kp.second);
-      }
-      for (const auto& kp : cur_frame->keypoints_undistorted_) {
-        pts2.emplace_back(kp.second);
-      }
-      auto indices =
-          gpu_matcher_->match_mkpts_gpuRansac_E(ref_frame->descriptors_,
-                                                cur_frame->descriptors_,
-                                                pts1,
-                                                pts2,
-                                                min_sim_,
-                                                search_radius,
-                                                50,
-                                                fx,
-                                                fy,
-                                                cx,
-                                                cy);
-      for (const auto& match : indices.matches) {
-        matches_vec.emplace_back(match.first, match.second, 0.0f);
-      }
-    } else {
-      xfeat::DetectionResult det0, det1;
-      // keypoints vec to mat
-      det0.keypoints = cv::Mat(ref_frame->keypoints_.size(), 2, CV_32F);
-      for (size_t i = 0; i < ref_frame->keypoints_.size(); ++i) {
-        det0.keypoints.at<float>(i, 0) = ref_frame->keypoints_[i].x;
-        det0.keypoints.at<float>(i, 1) = ref_frame->keypoints_[i].y;
-      }
-      det0.descriptors = ref_frame->descriptors_;
-
-      det1.keypoints = cv::Mat(cur_frame->keypoints_.size(), 2, CV_32F);
-      for (size_t i = 0; i < cur_frame->keypoints_.size(); ++i) {
-        det1.keypoints.at<float>(i, 0) = cur_frame->keypoints_[i].x;
-        det1.keypoints.at<float>(i, 1) = cur_frame->keypoints_[i].y;
-      }
-      det1.descriptors = cur_frame->descriptors_;
-
-      matches_vec = gpu_matcher_->match(
-          det0, det1, min_sim_, homography, search_radius, 1);
-    }
-
-    // copy matches to DMatchVec
-    matches->clear();
-    matches->reserve(matches_vec.size());
-    for (const auto& match : matches_vec) {
-      matches->emplace_back(match.queryIdx, match.trainIdx, match.distance);
-    }
-
-    VLOG(1) << "found " << matches->size() << " matches, time gap: "
-            << (cur_frame->timestamp_ - ref_frame->timestamp_) / 1e6 << " ms";
+    LOG(FATAL) << "GpuBFMatcher removed.";
   }
 
  private:

@@ -5,6 +5,11 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Fix for Clang 20 + Boost compatibility
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  add_compile_options(-Wno-error=non-template-argument-depends-on-template-parameter)
+endif()
+
 # Make sure that custom modules like FindXXXX are found
 # Prefer to use system installation of gflags/glog
 set(GFLAGS_PREFER_EXPORTED_GFLAGS_CMAKE_CONFIGURATION TRUE)
