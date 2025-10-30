@@ -39,6 +39,7 @@ class VisionImuFrontendFactory {
       DisplayQueue* display_queue,
       bool log_output,
       std::optional<OdometryParams> odom_params) {
+    CHECK_NOTNULL(env);
     switch (frontend_type) {
       case FrontendType::kMonoImu: {
         return std::make_unique<MonoVisionImuFrontend>(env,

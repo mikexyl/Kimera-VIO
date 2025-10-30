@@ -112,3 +112,5 @@ vilib_cell_height: 32
 
 kf_queue_size: 10
 rematch_threshold: 0.5
+
+xfeat_use_of_points: 1

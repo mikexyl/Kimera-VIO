@@ -1180,9 +1180,6 @@ cv::Mat Tracker::getTrackerImage(const Frame& ref_frame,
     }
   }
 
-  LOG(INFO) << "Min tracked score: " << min_tracked_score
-            << ", max tracked score: " << max_tracked_score;
-
   for (size_t i = 0; i < cur_frame.keypoints_.size(); ++i) {
     const cv::Point2f& px_cur = cur_frame.keypoints_.at(i);
     double px_sigma = 5;
@@ -1560,15 +1557,6 @@ void Tracker::featureTrackingDesc(
       max_score = cur_frame->scores_.at(cur_i);
     }
   }
-
-  LOG(INFO) << "Feature tracking: Added " << n_added_matches
-            << " tracked keypoints. Score range: [" << min_score << ", "
-            << max_score << "]";
-  // if (n_added_matches == 0) {
-  //   LOG(INFO) << "No extra tracked keypoints.";
-  // } else {
-  //   LOG(INFO) << "Extra tracked keypoints: " << n_added_matches;
-  // }
 
   // invalidate all keypoints that were not tracked in the ref frame
   if (invalidate_landmarks) {

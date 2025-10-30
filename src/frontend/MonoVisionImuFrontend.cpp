@@ -53,6 +53,8 @@ MonoVisionImuFrontend::MonoVisionImuFrontend(
 
   frontend_params_.tracker_params_.print();
 
+  CHECK_NOTNULL(ort_env_);
+
   static constexpr bool kFrontendTrackerUseOF = true;
   tracker_ = std::make_shared<Tracker>(frontend_params_.tracker_params_,
                                        mono_camera_,
@@ -361,9 +363,6 @@ StatusMonoMeasurementsPtr MonoVisionImuFrontend::processFrame(
       }
 
       if (best_kf_to_rematch) {
-        LOG(INFO) << "Rematching with keyframe: " << best_kf_to_rematch->id_;
-        LOG(INFO) << "Rematching interval: "
-                  << mono_frame_k_->id_ - best_kf_to_rematch->id_;
         tracker_->featureTrackingDesc(best_kf_to_rematch,
                                       mono_frame_k_,
                                       {},

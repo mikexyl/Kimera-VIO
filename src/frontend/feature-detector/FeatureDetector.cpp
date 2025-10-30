@@ -103,6 +103,7 @@ FeatureDetector::FeatureDetector(
           feature_detector_params_.max_nr_keypoints_before_anms_;
       xfeat_params.keypoint_detection = 0;  // Use xfeat to detect keypoints
 
+      CHECK_NOTNULL(env);
       auto xfeat = xfeat::XFeatCV::create(*env, xfeat_params);
       feature_detector_ = xfeat;
       break;
