@@ -269,9 +269,9 @@ MonoImuPipeline::MonoImuPipeline(const VioParams& params,
 
     if (FLAGS_use_lcd) {
       CHECK(lcd_module_);
-      lcd_module_->registerOutputCallback([&](const LcdOutput::Ptr& output) {
-        visualizer_module_->fillLoopClosureQueue(output);
-      });
+      // lcd_module_->registerOutputCallback([&](const LcdOutput::Ptr& output) {
+      //   visualizer_module_->fillLoopClosureQueue(output);
+      // });
     }
   }
 

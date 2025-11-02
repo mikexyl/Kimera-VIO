@@ -4,7 +4,7 @@ klt_win_size: 24
 klt_max_iter: 30
 klt_max_level: 4
 klt_eps: 0.1
-maxFeatureAge: 100
+maxFeatureAge: 200
 
 # Detector Params
 # 0: FAST
@@ -12,7 +12,7 @@ maxFeatureAge: 100
 # 2: AGAST
 # 3: GFTT, aka Good Features To Track
 feature_detector_type: 4
-maxFeaturesPerFrame: 2000
+maxFeaturesPerFrame: 500
 
 # Good Features To Track specific parameters
 quality_level: 0.001
@@ -43,7 +43,7 @@ nr_vertical_bins: 5
 binning_mask: []
 
 # Subpixel corner refinement for the monocular case
-enable_subpixel_corner_finder: 1
+enable_subpixel_corner_finder: 0
 max_iters: 40
 epsilon_error: 0.001
 window_size: 10
@@ -51,7 +51,7 @@ zero_zone: -1
 
 subpixelRefinementStereo: 0
 useSuccessProbabilities: 1
-useRANSAC: 1
+useRANSAC: 0
 minNrMonoInliers: 10
 minNrStereoInliers: 5
 ransac_threshold_mono: 1e-06
@@ -64,7 +64,7 @@ ransac_randomize: 0
 min_intra_keyframe_time: 0.2
 max_intra_keyframe_time: 10.0
 max_disparity_since_lkf: 200 #large value to disable
-minNumberFeatures: 0
+minNumberFeatures: 50
 useStereoTracking: 0
 disparityThreshold: 0.5
 # Type of optical flow predictor to aid feature tracking:
@@ -73,8 +73,8 @@ disparityThreshold: 0.5
 optical_flow_predictor_type: 1
 
 # 2D-2D pose estimation method
-use_2d2d_tracking: 1
-2d2d_algorithm: 1 # Nister
+use_2d2d_tracking: 0
+2d2d_algorithm: 0 # Nister
 optimize_2d2d_pose_from_inliers: 0
 
 # 3D-3D pose estimation
@@ -96,8 +96,20 @@ interp_nearest_path: /workspaces/src/xfeat-cpp/onnx_model/interpolator_nearest_6
 xfeat_use_gpu: 1
 matcher_type: 0 # 0: Brute Force, 1: FLANN, 2: LighterGlue
 
-feature_tracker_type: 3 # 0: OpticalFlow, 1: LighterGlue 2: Flann 3: GpuBFMatcher
-num_features: 2000
-lg_model_path: /workspaces/src/xfeat-cpp/onnx_model/lg_640x480_1000.onnx
-gpu_bf_min_sim: 0.5 # Minimum similarity for GpuBFMatcher
+feature_tracker_type: 1 # 0: OpticalFlow, 1: LighterGlue 2: Flann 3: GpuBFMatcher
+num_features: 500
+lg_model_path: /workspaces/src/xfeat-cpp/onnx_model/lg_640x480_dyn.onnx
+gpu_bf_min_sim: 0.3 # Minimum similarity for GpuBFMatcher
 search_radius: 30
+
+track_on_keyframe: 1
+min_lmk_merge_sim: -0.5
+max_lmk_merge_px: 8
+
+vilib_cell_width: 64
+vilib_cell_height: 64
+
+kf_queue_size: 10
+rematch_threshold: 0.5
+
+xfeat_use_of_points: 1
