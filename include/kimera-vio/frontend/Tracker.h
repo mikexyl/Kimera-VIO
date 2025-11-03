@@ -81,8 +81,8 @@ class Tracker {
                        std::optional<cv::Mat> R = std::nullopt,
                        bool invalidate_landmarks = true);
 
-  void featureTrackingDesc(Frame::Ptr ref_frame,
-                           Frame::Ptr cur_frame,
+  void featureTrackingDesc(Frame* ref_frame,
+                           Frame* cur_frame,
                            const gtsam::Rot3& inter_frame_rotation,
                            const FeatureDetectorParams& feature_detector_params,
                            std::optional<cv::Mat> R = std::nullopt,

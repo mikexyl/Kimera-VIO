@@ -119,12 +119,6 @@ class VLADLoopClosureDetector
   template <typename... Args>
   VLADLoopClosureDetector(Ort::Env& env, Args&&... args)
       : LoopClosureDetector(std::forward<Args>(args)...) {
-    if (stereo_camera_) {
-      throw std::runtime_error("not implemented for stereo cameras");
-    } else {
-      VLOG(5) << "VLADLoopClosureDetector: using monocular camera";
-    }
-
     CHECK(!lcd_params_.lcd_lg_model_path_.empty())
         << "VLADLoopClosureDetector: lcd_lg_model_path_ must be set!";
     CHECK(!lcd_params_.lcd_faiss_index_path_.empty())

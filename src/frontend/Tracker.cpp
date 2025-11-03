@@ -1460,8 +1460,8 @@ bool Tracker::pnp(const BearingVectors& cam_bearing_vectors,
 }
 
 void Tracker::featureTrackingDesc(
-    Frame::Ptr ref_frame,
-    Frame::Ptr cur_frame,
+    Frame* ref_frame,
+    Frame* cur_frame,
     const gtsam::Rot3& ref_R_cur,
     const FeatureDetectorParams& feature_detector_params,
     std::optional<cv::Mat> R,
@@ -1497,12 +1497,8 @@ void Tracker::featureTrackingDesc(
   std::vector<float> error;
   auto time_lukas_kanade_tic = utils::Timer::tic();
   DMatchVec matches;
-  feature_tracker_->trackDesc(ref_frame.get(),
-                              cur_frame.get(),
-                              H,
-                              tracker_params_.search_radius_,
-                              {},
-                              &matches);
+  feature_tracker_->trackDesc(
+      ref_frame, cur_frame, H, tracker_params_.search_radius_, {}, &matches);
   VLOG(1) << "Optical Flow Timing [ms]: "
           << utils::Timer::toc(time_lukas_kanade_tic).count();
   VLOG(2) << "Finished Optical Flow Pyr LK tracking.";

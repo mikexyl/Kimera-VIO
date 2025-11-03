@@ -175,9 +175,23 @@ StereoImuPipeline::StereoImuPipeline(const VioParams& params,
   }
 
   if (FLAGS_use_lcd) {
+    LoopClosureDetectorType lcd_type;
+
+    switch (FLAGS_use_lcd) {
+      case 1:  // ORB+DBoW2
+        lcd_type = LoopClosureDetectorType::BoW;
+        break;
+      case 2:  // XFeat+Vlad+LG
+        lcd_type = LoopClosureDetectorType::NetVLAD;
+        break;
+      default:
+        LOG(FATAL) << "Invalid value for --use_lcd: " << FLAGS_use_lcd
+                   << ". Valid values are 0 (disabled), 1 (ORB+DBoW2), "
+                   << "and 2 (XFeat+Vlad+LG).";
+    }
     lcd_module_ = std::make_unique<LcdModule>(
         parallel_run_,
-        LcdFactory::createLcd(LoopClosureDetectorType::BoW,
+        LcdFactory::createLcd(lcd_type,
                               params.lcd_params_,
                               stereo_camera_->getLeftCamParams(),
                               stereo_camera_->getBodyPoseLeftCamRect(),
@@ -185,7 +199,8 @@ StereoImuPipeline::StereoImuPipeline(const VioParams& params,
                               params.frontend_params_.stereo_matching_params_,
                               std::nullopt,
                               FLAGS_log_output,
-                              std::move(preloaded_vocab)));
+                              std::move(preloaded_vocab),
+                              ort_env_));
     //! Register input callbacks
     vio_backend_module_->registerOutputCallback(
         std::bind(&LcdModule::fillBackendQueue,
@@ -228,12 +243,12 @@ StereoImuPipeline::StereoImuPipeline(const VioParams& params,
               ->fillFrontendQueue(converted_output);
         });
 
-    if (mesher_module_) {
-      mesher_module_->registerOutputCallback(
-          std::bind(&VisualizerModule::fillMesherQueue,
-                    std::ref(*CHECK_NOTNULL(visualizer_module_.get())),
-                    std::placeholders::_1));
-    }
+    // if (mesher_module_) {
+    //   mesher_module_->registerOutputCallback(
+    //       std::bind(&VisualizerModule::fillMesherQueue,
+    //                 std::ref(*CHECK_NOTNULL(visualizer_module_.get())),
+    //                 std::placeholders::_1));
+    // }
 
     //! Actual displaying of visual data is done in the main thread.
     CHECK(params.display_params_);

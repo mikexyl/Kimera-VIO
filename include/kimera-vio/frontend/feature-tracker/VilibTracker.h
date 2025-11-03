@@ -79,9 +79,10 @@ class VilibTracker : public FeatureTracker {
              cv::OutputArray err,
              std::vector<float>* std,
              std::vector<float>* scores) override {
-    if (ref_frame) {
-      CHECK_EQ(ref_frame->id_, prev_frame_id_);
-    }
+    // TODO: change for stereo mode accordingly
+    // if (ref_frame) {
+    //   CHECK_EQ(ref_frame->id_, prev_frame_id_);
+    // }
 
     size_t num_prev_keypoints = ref_frame ? ref_frame->of_keypoints_.size() : 0;
 
