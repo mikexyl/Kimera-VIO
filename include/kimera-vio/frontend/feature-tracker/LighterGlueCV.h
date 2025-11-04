@@ -69,8 +69,8 @@ class LighterGlueCV : public FeatureTracker {
       det1.scores.at<float>(i) = cur_frame->scores_[i];
     }
 
-    cv::Size image_size0(640, 480);  // Default size, can be changed
-    cv::Size image_size1(640, 480);  // Default size, can be changed
+    cv::Size image_size0(320, 224);  // Default size, can be changed
+    cv::Size image_size1(320, 224);  // Default size, can be changed
 
     lg_matcher_.match(det0, image_size0, det1, image_size1, matches);
 

@@ -144,7 +144,9 @@ class VLADLoopClosureDetector
                                      env,
                                      lcd_params_.xfeat_nv_head_model_path_,
                                      lcd_params_.netvlad_model_path_,
-                                     kVLADLCDUseGPU);
+                                     kVLADLCDUseGPU,
+                                     lcd_params_.network_input_height_ / 16,
+                                     lcd_params_.network_input_width_ / 16);
   }
 
   /* ------------------------------------------------------------------------
@@ -236,10 +238,9 @@ class VLADLoopClosureDetector
     matches_match_query->clear();
     std::vector<cv::DMatch> matches;
 
-    // TODO(mikexyl): use the actual image size from the frames
-    // but since the onnx models have to use a fixed size, so good for now
-    static cv::Size image_size0 =
-        cv::Size(640, 480);  // Default size, can be changed
+    // Use configured network input size for matching (width, height)
+    cv::Size image_size0(static_cast<int>(lcd_params_.network_input_width_),
+                         static_cast<int>(lcd_params_.network_input_height_));
 
     cv::Mat ref_kp_mat(ref.keypoints_.size(), 2, CV_32F);
     for (size_t i = 0; i < ref.keypoints_.size(); ++i) {

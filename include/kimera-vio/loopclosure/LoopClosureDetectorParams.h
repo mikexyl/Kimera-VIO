@@ -139,6 +139,9 @@ class LoopClosureDetectorParams : public PipelineParams {
   double min_lmk_obs_cnt_ = 4;
   float min_lmk_parallax_ = 20;
   float max_lmk_reproj_error = 36;
+
+  int network_input_width_ = 320;
+  int network_input_height_ = 224;
 };
 
 }  // namespace VIO
