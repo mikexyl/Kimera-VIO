@@ -1180,8 +1180,31 @@ cv::Mat Tracker::getTrackerImage(const Frame& ref_frame,
     }
   }
 
-  LOG(INFO) << "Min tracked score: " << min_tracked_score
-            << ", max tracked score: " << max_tracked_score;
+  // also visualize of_keypoints
+  for (size_t i = 0; i < cur_frame.of_keypoints_.size(); ++i) {
+    const cv::Point2f& px_cur = cur_frame.of_keypoints_.at(i);
+    double px_sigma = 5;
+    if (i < cur_frame.prim_stds_.size()) {
+      px_sigma = cur_frame.prim_stds_.at(i);
+    }
+    if (cur_frame.of_landmarks_.at(i) == -1) {  // Untracked landmarks are red.
+      cv::circle(img_rgb, px_cur, 4, red, 2);
+    } else {
+      const auto& it = std::find(ref_frame.of_landmarks_.begin(),
+                                 ref_frame.of_landmarks_.end(),
+                                 cur_frame.of_landmarks_.at(i));
+      if (it != ref_frame.of_landmarks_.end()) {
+        cv::Scalar color = blue;
+        cv::circle(img_rgb, px_cur, px_sigma, color, 1);
+        cv::circle(img_rgb, px_cur, 4, blue, -1);
+
+        // draw line to reference frame
+        int i = std::distance(ref_frame.of_landmarks_.begin(), it);
+        const cv::Point2f& px_ref = ref_frame.of_keypoints_.at(i);
+        cv::line(img_rgb, px_ref, px_cur, color, 1);
+      }
+    }
+  }
 
   for (size_t i = 0; i < cur_frame.keypoints_.size(); ++i) {
     const cv::Point2f& px_cur = cur_frame.keypoints_.at(i);
@@ -1216,17 +1239,7 @@ cv::Mat Tracker::getTrackerImage(const Frame& ref_frame,
       }
     }
   }
-  // find the mean and std of scores
-  if (!scores.empty()) {
-    const float mean =
-        std::accumulate(scores.begin(), scores.end(), 0.0f) / scores.size();
-    float sq_sum =
-        std::inner_product(scores.begin(), scores.end(), scores.begin(), 0.0f);
-    const float stdev = std::sqrt(sq_sum / scores.size() - mean * mean);
-    auto [min, max] = std::minmax_element(scores.begin(), scores.end());
-    LOG(INFO) << "Feature tracking scores - Mean: " << mean
-              << ", Std: " << stdev << ", Min: " << *min << ", Max: " << *max;
-  }
+
   return img_rgb;
 }
 
@@ -1523,6 +1536,19 @@ void Tracker::featureTrackingDesc(
   double max_score = std::numeric_limits<double>::lowest();
   size_t n_added_matches = 0;
 
+  // copying optical flow tracks of features that are not tracked by matcher
+  // already
+  for (size_t i = 0; i < ref_frame->of_keypoints_.size(); ++i) {
+    auto ref_lmk_id = ref_frame->of_landmarks_.at(i);
+    auto it = std::find(cur_frame->of_landmarks_.begin(),
+                        cur_frame->of_landmarks_.end(),
+                        ref_lmk_id);
+    if (it != cur_frame->of_landmarks_.end()) {
+      auto cur_kp_id = std::distance(cur_frame->of_landmarks_.begin(), it);
+      cur_frame->landmarks_.at(cur_kp_id) = ref_frame->landmarks_.at(i);
+    }
+  }
+
   for (auto match : matches) {
     auto ref_i = match.queryIdx;
     auto cur_i = match.trainIdx;
@@ -1556,15 +1582,6 @@ void Tracker::featureTrackingDesc(
       max_score = cur_frame->scores_.at(cur_i);
     }
   }
-
-  LOG(INFO) << "Feature tracking: Added " << n_added_matches
-            << " tracked keypoints. Score range: [" << min_score << ", "
-            << max_score << "]";
-  // if (n_added_matches == 0) {
-  //   LOG(INFO) << "No extra tracked keypoints.";
-  // } else {
-  //   LOG(INFO) << "Extra tracked keypoints: " << n_added_matches;
-  // }
 
   // invalidate all keypoints that were not tracked in the ref frame
   if (invalidate_landmarks) {

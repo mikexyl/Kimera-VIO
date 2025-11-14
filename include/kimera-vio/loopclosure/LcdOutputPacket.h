@@ -56,7 +56,8 @@ struct LcdOutput : PipelinePayload {
                          const gtsam::Values& states,
                          const gtsam::NonlinearFactorGraph& nfg);
 
-  void setFrameInformation(const Landmarks& keypoints_3d,
+  void setFrameInformation(const KeypointsCV& keypoints_2d,
+                           const Landmarks& keypoints_3d,
                            const BearingVectors& versors,
                            const std::map<int, double>& bow_vec,
                            const cv::Mat& descriptors_mat);
@@ -75,6 +76,7 @@ struct LcdOutput : PipelinePayload {
   gtsam::Values states_;
   gtsam::NonlinearFactorGraph nfg_;
   // frame information
+  KeypointsCV keypoints_2d_;
   Landmarks keypoints_3d_;
   BearingVectors versors_;
   std::map<int, double> bow_vec_;

@@ -51,7 +51,7 @@ zero_zone: -1
 
 subpixelRefinementStereo: 0
 useSuccessProbabilities: 1
-useRANSAC: 0
+useRANSAC: 1
 minNrMonoInliers: 10
 minNrStereoInliers: 5
 ransac_threshold_mono: 1e-06
@@ -104,12 +104,12 @@ search_radius: 30
 
 track_on_keyframe: 1
 min_lmk_merge_sim: -0.5
-max_lmk_merge_px: 8
+max_lmk_merge_px: 0
 
 vilib_cell_width: 64
 vilib_cell_height: 64
 
-kf_queue_size: 0
+kf_queue_size: 10
 rematch_threshold: 0.5
 
 xfeat_use_of_points: 1

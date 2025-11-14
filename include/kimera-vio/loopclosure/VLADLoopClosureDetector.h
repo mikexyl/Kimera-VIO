@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cuda_runtime.h>
 #include <xfeat-cpp/faiss_database.h>
 #include <xfeat-cpp/xfeat_cv.h>
 #include <xfeat-cpp/xfeat_netvlad_onnx.h>
@@ -36,7 +37,16 @@ struct XfeatNVWrapper : xfeat::XfeatNetVLADONNX {
           "XfeatNVWrapper: M1 and x_prep must be of type CV_32F");
     }
 
+    // time the transform
+    auto start = std::chrono::high_resolution_clock::now();
     global_desc = Base::transform(M1, x_prep);
+    auto end = std::chrono::high_resolution_clock::now();
+    LOG(INFO) << "global desc dims: " << global_desc.rows << " x "
+              << global_desc.cols << " computed in "
+              << std::chrono::duration_cast<std::chrono::milliseconds>(end -
+                                                                       start)
+                     .count()
+              << " ms";
   }
 
   void add(const GlobalDesc& global_desc) {
@@ -121,8 +131,7 @@ class VLADLoopClosureDetector
       : LoopClosureDetector(std::forward<Args>(args)...) {
     CHECK(!lcd_params_.lcd_lg_model_path_.empty())
         << "VLADLoopClosureDetector: lcd_lg_model_path_ must be set!";
-    CHECK(!lcd_params_.lcd_faiss_index_path_.empty())
-        << "VLADLoopClosureDetector: lcd_faiss_index_path_ must be set!";
+    CHECK(lcd_params_.lcd_faiss_index_path_.empty());
 
     // should not need to run feature detection again, so the detector should be
     // empty
@@ -137,9 +146,24 @@ class VLADLoopClosureDetector
             .n_kpts = lcd_params_.lcd_lg_num_features_,
         });
 
+    size_t free_before, total;
+    cudaMemGetInfo(&free_before, &total);
+
+    auto faiss_mode = Database::Database::IndexMode::kIVFFlat;
+    int faiss_dim = 0;
+    if (lcd_params_.lcd_faiss_index_path_.empty()) {
+      faiss_mode = Database::Database::IndexMode::kFlat;
+      faiss_dim = 512;
+    }
+
     auto faiss_db = std::make_unique<Database::Database>(
-        Database::Database::IndexMode::kIVFFlat,
-        lcd_params_.lcd_faiss_index_path_);
+        faiss_mode, lcd_params_.lcd_faiss_index_path_, false, faiss_dim);
+
+    size_t free_after, total_after;
+    cudaMemGetInfo(&free_after, &total_after);
+    LOG(INFO) << "GPU memory usage for loading FAISS index: "
+              << (free_before - free_after) / (1024.0 * 1024.0) << " MB";
+
     db_ = std::make_unique<Database>(std::move(faiss_db),
                                      env,
                                      lcd_params_.xfeat_nv_head_model_path_,

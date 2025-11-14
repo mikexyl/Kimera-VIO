@@ -291,7 +291,24 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::spinOnce(
   output_payload->setMapInformation(
       w_Pose_map, map_Pose_odom, pgo_states, pgo_nfg);
 
-  output_payload->setFrameInformation(curr_frame->keypoints_3d_,
+  Landmarks keypoints_3d;
+  if (curr_frame->keypoints_3d_.empty()) {
+    // read from landmark manager
+    for (const auto& lmk_id : curr_frame->landmark_ids) {
+      const auto& lmk = landmark_manager_->getLandmark(lmk_id);
+      if (lmk) {
+        keypoints_3d.push_back(*lmk);
+      } else {
+        keypoints_3d.push_back(gtsam::Point3::Zero());
+      }
+    }
+  }
+
+  KeypointsCV keypoints_2d;
+  cv::KeyPoint::convert(curr_frame->keypoints_, keypoints_2d);
+
+  output_payload->setFrameInformation(keypoints_2d,
+                                      keypoints_3d,
                                       curr_frame->bearing_vectors_,
                                       globalDescToMap(curr_bow_vec),
                                       curr_frame->descriptors_mat_);
@@ -868,8 +885,9 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::recoverPoseBody(
       //   }
 
       //   if (camQuery_points.size() > lcd_params_.min_pnp_num_landmarks_) {
-      //     Pose3 camQuery_T_camMatch_2d_copy = camMatch_T_camQuery_2d.inverse();
-      //     success = tracker_->pnp(camMatch_bearing_vectors,
+      //     Pose3 camQuery_T_camMatch_2d_copy =
+      //     camMatch_T_camQuery_2d.inverse(); success =
+      //     tracker_->pnp(camMatch_bearing_vectors,
       //                             camQuery_points,
       //                             &camQuery_T_camMatch_3d,
       //                             inliers,

@@ -361,9 +361,6 @@ StatusMonoMeasurementsPtr MonoVisionImuFrontend::processFrame(
       }
 
       if (best_kf_to_rematch) {
-        LOG(INFO) << "Rematching with keyframe: " << best_kf_to_rematch->id_;
-        LOG(INFO) << "Rematching interval: "
-                  << mono_frame_k_->id_ - best_kf_to_rematch->id_;
         tracker_->featureTrackingDesc(best_kf_to_rematch.get(),
                                       mono_frame_k_.get(),
                                       {},
