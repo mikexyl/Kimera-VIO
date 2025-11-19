@@ -517,7 +517,7 @@ void VioBackend::addLandmarkToGraph(const LandmarkId& lmk_id,
   smart_noise->setDCSMapping(/*phi_min*/ 10,
                              /*phi_max*/ 50,
                              /*gamma*/ 1);
-  smart_noise->enableDCS(false);
+  smart_noise->enableDCS(true);
 
   SmartStereoFactor::shared_ptr new_factor(new SmartStereoFactor(
       smart_noise, smart_factors_params_, B_Pose_leftCamRect_));
