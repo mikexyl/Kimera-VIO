@@ -27,11 +27,11 @@ fast_thresh: 10
 equalizeImage: 0
 nominalBaseline: 0.40
 toleranceTemplateMatching: 0.15
-templ_cols: 201 #must be odd
+templ_cols: 128 #must be odd
 templ_rows: 21 
 stripe_extra_rows: 0
-minPointDist: 0.5
-maxPointDist: 30
+minPointDist: 2
+maxPointDist: 1000
 bidirectionalMatching: 0
 
 # Non-maximum suppression params
