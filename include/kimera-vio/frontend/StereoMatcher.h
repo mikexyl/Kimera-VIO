@@ -15,6 +15,8 @@
 
 #pragma once
 
+#include <libsgm.h>
+
 #include "kimera-vio/frontend/StereoCamera.h"
 #include "kimera-vio/frontend/StereoMatchingParams.h"
 #include "kimera-vio/utils/Macros.h"
@@ -49,7 +51,6 @@ class StereoMatcher {
   void denseStereoReconstruction(const cv::Mat& left_img_rectified,
                                  const cv::Mat& right_img_rectified,
                                  cv::Mat* disparity_img);
-
 
   /**
    * @brief sparseStereoReconstruction
@@ -111,6 +112,8 @@ class StereoMatcher {
 
   //! Parameters for dense stereo matching
   DenseStereoParams dense_stereo_params_;
+
+  std::shared_ptr<sgm::StereoSGM> sgm_{nullptr};
 };
 
 }  // namespace VIO

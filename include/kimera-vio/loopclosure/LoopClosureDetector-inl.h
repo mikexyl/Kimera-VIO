@@ -592,22 +592,22 @@ FrameId LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::
       stereo_frame.left_frame_, descriptors_mat, &descriptors_vec);
 
   // Fill StereoFrame with ORB keypoints and perform stereo matching.
-  StereoFrame cp_stereo_frame(stereo_frame);
-  rewriteStereoFrameFeatures(keypoints, &cp_stereo_frame);
+  // StereoFrame cp_stereo_frame(stereo_frame);
+  // rewriteStereoFrameFeatures(keypoints, &cp_stereo_frame);
 
   // Build and store LCDFrame object.
   return cache_.addFrame(std::make_shared<StereoLCDFrame>(
-      cp_stereo_frame.timestamp_,
+      stereo_frame.timestamp_,
       FrameCache::NEW_ID,
-      cp_stereo_frame.id_,
+      stereo_frame.id_,
       keypoints,
       // keypoints_3d_ are in local (camera) frame
-      cp_stereo_frame.keypoints_3d_,
+      stereo_frame.keypoints_3d_,
       descriptors_vec,
       descriptors_mat,
-      cp_stereo_frame.left_frame_.versors_,
-      cp_stereo_frame.left_keypoints_rectified_,
-      cp_stereo_frame.right_keypoints_rectified_));
+      stereo_frame.left_frame_.versors_,
+      stereo_frame.left_keypoints_rectified_,
+      stereo_frame.right_keypoints_rectified_));
 }
 
 /* ------------------------------------------------------------------------
