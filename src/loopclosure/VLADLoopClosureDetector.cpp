@@ -1,7 +1,6 @@
 #include "kimera-vio/loopclosure/VLADLoopClosureDetector.h"
 
 namespace VIO {
-class VLADLoopClosureDetector;
 
 DEFINE_double(max_nss_vlad_distance,
               0.06,

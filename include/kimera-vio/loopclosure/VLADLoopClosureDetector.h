@@ -133,6 +133,23 @@ class VLADLoopClosureDetector
         << "VLADLoopClosureDetector: lcd_lg_model_path_ must be set!";
     CHECK(lcd_params_.lcd_faiss_index_path_.empty());
 
+    // Sparse stereo reconstruction members (only if stereo_camera is provided)
+    if (stereo_camera_) {
+      VLOG(5) << "LoopClosureDetector initializing in stereo mode.";
+      auto lcd_stereo_params = stereo_matching_params_;
+      // In LCD we set min_dist and max_dist to not discard points
+      // TODO: Find better solution instead of hardcoding
+      static const bool kVLADLCDDisableStereoMatchDepthCheck = false;
+      if (kVLADLCDDisableStereoMatchDepthCheck) {
+        lcd_stereo_params.min_point_dist_ = 0.01;
+        lcd_stereo_params.max_point_dist_ = 100.0;
+      }
+      stereo_matcher_ =
+          std::make_unique<StereoMatcher>(stereo_camera_, lcd_stereo_params);
+    } else {
+      VLOG(5) << "LoopClosureDetector initializing in mono mode.";
+    }
+
     // should not need to run feature detection again, so the detector should be
     // empty
     feature_detector_.reset(new DummyFeatureDetector());

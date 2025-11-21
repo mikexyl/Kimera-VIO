@@ -138,6 +138,11 @@ void StereoMatcher::sparseStereoReconstruction(StereoFrame* stereo_frame) {
   stereo_camera_->undistortRectifyLeftKeypoints(
       stereo_frame->left_frame_.keypoints_,
       &stereo_frame->left_keypoints_rectified_);
+
+  CHECK(!stereo_frame->getLeftImgRectified().empty() &&
+        !stereo_frame->getRightImgRectified().empty())
+      << "sparseStereoMatching: rectified images are empty!";
+
   sparseStereoReconstruction(stereo_frame->getLeftImgRectified(),
                              stereo_frame->getRightImgRectified(),
                              stereo_frame->left_keypoints_rectified_,
@@ -158,20 +163,25 @@ void StereoMatcher::sparseStereoReconstruction(StereoFrame* stereo_frame) {
   stereo_frame->keypoints_3d_.clear();
   stereo_frame->keypoints_3d_.reserve(
       stereo_frame->right_keypoints_rectified_.size());
+  size_t n_valid_points = 0;
   for (size_t i = 0; i < stereo_frame->right_keypoints_rectified_.size(); i++) {
     if (stereo_frame->right_keypoints_rectified_[i].first ==
         KeypointStatus::VALID) {
       // NOTE: versors are already in the rectified frame.
-      Vector3 versor = stereo_frame->left_frame_.versors_[i];
+      Vector3 versor = stereo_frame->left_frame_.versors_.at(i);
       CHECK_GE(versor(2), 1e-3)
           << "sparseStereoMatching: found point with nonpositive depth!";
       // keypoints_depth_ is not the norm of the vector, it is the z component.
       stereo_frame->keypoints_3d_.push_back(
-          versor * stereo_frame->keypoints_depth_[i] / versor(2));
+          versor * stereo_frame->keypoints_depth_.at(i) / versor(2));
+      n_valid_points++;
     } else {
       stereo_frame->keypoints_3d_.push_back(Vector3::Zero());
     }
   }
+  LOG(INFO) << "StereoMatcher: Sparse stereo reconstruction found "
+            << n_valid_points << " valid 3D points out of "
+            << stereo_frame->right_keypoints_rectified_.size() << " keypoints.";
 }
 
 void StereoMatcher::sparseStereoReconstruction(
@@ -185,12 +195,19 @@ void StereoMatcher::sparseStereoReconstruction(
   CHECK(stereo_calib);
   const auto& baseline = stereo_calib->baseline();
   const auto& fx = stereo_calib->fx();
+  auto start_time = std::chrono::high_resolution_clock::now();
   getRightKeypointsRectified(left_img_rectified,
                              right_img_rectified,
                              left_keypoints_rectified,
                              fx,
                              baseline,
                              right_keypoints_rectified);
+  auto end_time = std::chrono::high_resolution_clock::now();
+  auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+                      end_time - start_time)
+                      .count();
+  VLOG(1) << "StereoMatcher: sparseStereoReconstruction took " << duration
+          << " ms for " << left_keypoints_rectified.size() << " keypoints.";
 }
 
 void StereoMatcher::getRightKeypointsRectified(

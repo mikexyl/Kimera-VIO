@@ -12,7 +12,7 @@ maxFeatureAge: 200
 # 2: AGAST
 # 3: GFTT, aka Good Features To Track
 feature_detector_type: 4
-maxFeaturesPerFrame: 1000
+maxFeaturesPerFrame: 500
 
 # Good Features To Track specific parameters
 quality_level: 0.001
@@ -35,7 +35,7 @@ maxPointDist: 10
 bidirectionalMatching: 0
 
 # Non-maximum suppression params
-max_nr_keypoints_before_anms: 1000
+max_nr_keypoints_before_anms: 500
 enable_non_max_suppression: 0
 non_max_suppression_type: 6
 nr_horizontal_bins: 7
@@ -65,7 +65,7 @@ min_intra_keyframe_time: 0.2
 max_intra_keyframe_time: 10.0
 max_disparity_since_lkf: 200 #large value to disable
 minNumberFeatures: 100
-useStereoTracking: 0
+useStereoTracking: 1
 disparityThreshold: 0.5
 # Type of optical flow predictor to aid feature tracking:
 # 0: Static - assumes no optical flow between images (aka static camera).

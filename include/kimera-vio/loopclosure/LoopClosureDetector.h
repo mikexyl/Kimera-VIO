@@ -527,6 +527,7 @@ class LoopClosureDetector : public LoopClosureDetectorBase {
 
   // Store camera parameters and StereoFrame stuff once
   StereoCamera::ConstPtr stereo_camera_;
+  StereoMatchingParams stereo_matching_params_;
   StereoMatcher::UniquePtr stereo_matcher_;
 
   // Rgbd specific camera

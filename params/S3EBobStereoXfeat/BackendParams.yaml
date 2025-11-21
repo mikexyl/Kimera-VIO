@@ -8,7 +8,7 @@ autoInitialize: 1
 roundOnAutoInitialize: 0
 initialPositionSigma: 1e-05
 initialRollPitchSigma: 0.174533 # 10.0/180.0*M_PI
-initialYawSigma: 0.01
+initialYawSigma: 0.017
 initialVelocitySigma: 0.001
 initialAccBiasSigma: 0.001
 initialGyroBiasSigma: 0.001
@@ -25,7 +25,7 @@ degeneracyMode: 1
 # rankTolerance: threshold to decide whether triangulation is result.degenerate
 # (the rank is the number of singular values of the triangulation matrix which
 # are larger than rankTolerance)
-rankTolerance: 1
+rankTolerance: 1e-2
 # /** landmarkDistanceThreshold
 #   * if the landmark is triangulated at distance larger than this,
 #   * result is flagged as degenerate.

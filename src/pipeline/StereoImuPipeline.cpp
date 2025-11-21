@@ -116,9 +116,9 @@ StereoImuPipeline::StereoImuPipeline(const VioParams& params,
 
   //! Params for what the Backend outputs.
   // TODO(Toni): put this into Backend params.
+  static constexpr bool kBackendOutputLandmarks = true;
   BackendOutputParams backend_output_params(
-      static_cast<VisualizationType>(FLAGS_viz_type) !=
-          VisualizationType::kNone,
+      kBackendOutputLandmarks,
       FLAGS_min_num_obs_for_mesher_points,
       FLAGS_visualize && FLAGS_visualize_lmk_type);
 

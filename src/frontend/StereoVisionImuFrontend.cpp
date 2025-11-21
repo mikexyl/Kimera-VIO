@@ -270,12 +270,45 @@ void StereoVisionImuFrontend::processFirstStereoFrame(
                             false);
 
   CHECK(feature_detector_);
+  CHECK(stereoFrame_km1_ == nullptr);
   feature_detector_->featureDetection(
       &stereoFrame_k_->left_frame_, std::nullopt, nullptr);
 
   // Get 3D points via stereo.
   VLOG(2) << "calling sparseStereoReconstruction \n";
   stereo_matcher_.sparseStereoReconstruction(stereoFrame_k_.get());
+  // save the rectified image for debugging
+  auto left_img_rectified = stereoFrame_k_->getLeftImgRectified();
+  auto right_img_rectified = stereoFrame_k_->getRightImgRectified();
+  // stitch two images side by side
+  cv::Mat stereo_img_rectified(
+      left_img_rectified.rows,
+      left_img_rectified.cols + right_img_rectified.cols,
+      left_img_rectified.type());
+  left_img_rectified.copyTo(stereo_img_rectified(
+      cv::Rect(0, 0, left_img_rectified.cols, left_img_rectified.rows)));
+  right_img_rectified.copyTo(
+      stereo_img_rectified(cv::Rect(left_img_rectified.cols,
+                                    0,
+                                    right_img_rectified.cols,
+                                    right_img_rectified.rows)));
+  std::string img_name = "/tmp/first_stereo_rectified.png";
+  cv::imwrite(img_name, stereo_img_rectified);
+  VLOG(2) << "Saved first rectified stereo image to: " << img_name << "\n";
+
+  // also save the raw image for debugging
+  auto left_img_raw = stereoFrame_k_->left_frame_.img_;
+  auto right_img_raw = stereoFrame_k_->right_frame_.img_;
+  // stitch two images side by side
+  cv::Mat stereo_img_raw(left_img_raw.rows,
+                         left_img_raw.cols + right_img_raw.cols,
+                         left_img_raw.type());
+  left_img_raw.copyTo(
+      stereo_img_raw(cv::Rect(0, 0, left_img_raw.cols, left_img_raw.rows)));
+  right_img_raw.copyTo(stereo_img_raw(
+      cv::Rect(left_img_raw.cols, 0, right_img_raw.cols, right_img_raw.rows)));
+  img_name = "/tmp/first_stereo_raw.png";
+  cv::imwrite(img_name, stereo_img_raw);
 
   // Prepare for next iteration.
   stereoFrame_km1_ = stereoFrame_k_;
@@ -324,26 +357,17 @@ StatusStereoMeasurementsPtr StereoVisionImuFrontend::processStereoFrame(
                             false);
 
   // feature tracking failed for all points, move on to the next frame
-  if (left_frame_k->keypoints_.size() == 0) {
-    VLOG(2)
-        << "feature tracking failed for all points, moving to next frame \n";
-    feature_detector_->featureDetection(left_frame_k, stereo_camera_->getR1());
-    stereoFrame_km1_ = stereoFrame_k_;
-    stereoFrame_k_.reset();
-    ++frame_count_;
-    StereoMeasurements smart_stereo_measurements;
-    return std::make_shared<StatusStereoMeasurements>(
-        std::make_pair(tracker_status_summary_, smart_stereo_measurements));
-  }
-
-  if (feature_tracks) {
-    // TODO(Toni): these feature tracks are not outlier rejected...
-    // TODO(Toni): this image should already be computed and inside the
-    // display_queue
-    // if it is sent to the tracker.
-    *feature_tracks = tracker_->getTrackerImage(stereoFrame_lkf_->left_frame_,
-                                                stereoFrame_k_->left_frame_);
-  }
+  // if (left_frame_k->keypoints_.size() == 0) {
+  //   VLOG(2)
+  //       << "feature tracking failed for all points, moving to next frame \n";
+  //   feature_detector_->featureDetection(left_frame_k,
+  //   stereo_camera_->getR1()); stereoFrame_km1_ = stereoFrame_k_;
+  //   stereoFrame_k_.reset();
+  //   ++frame_count_;
+  //   StereoMeasurements smart_stereo_measurements;
+  //   return std::make_shared<StatusStereoMeasurements>(
+  //       std::make_pair(tracker_status_summary_, smart_stereo_measurements));
+  // }
 
   VLOG(2) << "Finished feature tracking.";
   //////////////////////////////////////////////////////////////////////////////
@@ -471,6 +495,15 @@ StatusStereoMeasurementsPtr StereoVisionImuFrontend::processStereoFrame(
   } else {
     CHECK_EQ(smart_stereo_measurements.size(), 0u);
     stereoFrame_k_->setIsKeyframe(false);
+  }
+
+  if (feature_tracks) {
+    // TODO(Toni): these feature tracks are not outlier rejected...
+    // TODO(Toni): this image should already be computed and inside the
+    // display_queue
+    // if it is sent to the tracker.
+    *feature_tracks = tracker_->getTrackerImage(stereoFrame_lkf_->left_frame_,
+                                                stereoFrame_k_->left_frame_);
   }
 
   // Update keyframe to reference frame for next iteration.
