@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cuda_runtime.h>
 #include <xfeat-cpp/faiss_database.h>
 #include <xfeat-cpp/xfeat_cv.h>
 #include <xfeat-cpp/xfeat_netvlad_onnx.h>
@@ -36,7 +37,16 @@ struct XfeatNVWrapper : xfeat::XfeatNetVLADONNX {
           "XfeatNVWrapper: M1 and x_prep must be of type CV_32F");
     }
 
+    // time the transform
+    auto start = std::chrono::high_resolution_clock::now();
     global_desc = Base::transform(M1, x_prep);
+    auto end = std::chrono::high_resolution_clock::now();
+    LOG(INFO) << "global desc dims: " << global_desc.rows << " x "
+              << global_desc.cols << " computed in "
+              << std::chrono::duration_cast<std::chrono::milliseconds>(end -
+                                                                       start)
+                     .count()
+              << " ms";
   }
 
   void add(const GlobalDesc& global_desc) {
@@ -119,16 +129,26 @@ class VLADLoopClosureDetector
   template <typename... Args>
   VLADLoopClosureDetector(Ort::Env& env, Args&&... args)
       : LoopClosureDetector(std::forward<Args>(args)...) {
-    if (stereo_camera_) {
-      throw std::runtime_error("not implemented for stereo cameras");
-    } else {
-      VLOG(5) << "VLADLoopClosureDetector: using monocular camera";
-    }
-
     CHECK(!lcd_params_.lcd_lg_model_path_.empty())
         << "VLADLoopClosureDetector: lcd_lg_model_path_ must be set!";
-    CHECK(!lcd_params_.lcd_faiss_index_path_.empty())
-        << "VLADLoopClosureDetector: lcd_faiss_index_path_ must be set!";
+    CHECK(lcd_params_.lcd_faiss_index_path_.empty());
+
+    // Sparse stereo reconstruction members (only if stereo_camera is provided)
+    if (stereo_camera_) {
+      VLOG(5) << "LoopClosureDetector initializing in stereo mode.";
+      auto lcd_stereo_params = stereo_matching_params_;
+      // In LCD we set min_dist and max_dist to not discard points
+      // TODO: Find better solution instead of hardcoding
+      static const bool kVLADLCDDisableStereoMatchDepthCheck = false;
+      if (kVLADLCDDisableStereoMatchDepthCheck) {
+        lcd_stereo_params.min_point_dist_ = 0.01;
+        lcd_stereo_params.max_point_dist_ = 100.0;
+      }
+      stereo_matcher_ =
+          std::make_unique<StereoMatcher>(stereo_camera_, lcd_stereo_params);
+    } else {
+      VLOG(5) << "LoopClosureDetector initializing in mono mode.";
+    }
 
     // should not need to run feature detection again, so the detector should be
     // empty
@@ -143,14 +163,31 @@ class VLADLoopClosureDetector
             .n_kpts = lcd_params_.lcd_lg_num_features_,
         });
 
+    size_t free_before, total;
+    cudaMemGetInfo(&free_before, &total);
+
+    auto faiss_mode = Database::Database::IndexMode::kIVFFlat;
+    int faiss_dim = 0;
+    if (lcd_params_.lcd_faiss_index_path_.empty()) {
+      faiss_mode = Database::Database::IndexMode::kFlat;
+      faiss_dim = 512;
+    }
+
     auto faiss_db = std::make_unique<Database::Database>(
-        Database::Database::IndexMode::kIVFFlat,
-        lcd_params_.lcd_faiss_index_path_);
+        faiss_mode, lcd_params_.lcd_faiss_index_path_, false, faiss_dim);
+
+    size_t free_after, total_after;
+    cudaMemGetInfo(&free_after, &total_after);
+    LOG(INFO) << "GPU memory usage for loading FAISS index: "
+              << (free_before - free_after) / (1024.0 * 1024.0) << " MB";
+
     db_ = std::make_unique<Database>(std::move(faiss_db),
                                      env,
                                      lcd_params_.xfeat_nv_head_model_path_,
                                      lcd_params_.netvlad_model_path_,
-                                     kVLADLCDUseGPU);
+                                     kVLADLCDUseGPU,
+                                     lcd_params_.network_input_height_ / 16,
+                                     lcd_params_.network_input_width_ / 16);
   }
 
   /* ------------------------------------------------------------------------
@@ -242,10 +279,9 @@ class VLADLoopClosureDetector
     matches_match_query->clear();
     std::vector<cv::DMatch> matches;
 
-    // TODO(mikexyl): use the actual image size from the frames
-    // but since the onnx models have to use a fixed size, so good for now
-    static cv::Size image_size0 =
-        cv::Size(640, 480);  // Default size, can be changed
+    // Use configured network input size for matching (width, height)
+    cv::Size image_size0(static_cast<int>(lcd_params_.network_input_width_),
+                         static_cast<int>(lcd_params_.network_input_height_));
 
     cv::Mat ref_kp_mat(ref.keypoints_.size(), 2, CV_32F);
     for (size_t i = 0; i < ref.keypoints_.size(); ++i) {

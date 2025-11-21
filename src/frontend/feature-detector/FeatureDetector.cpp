@@ -253,14 +253,16 @@ KeypointsCV FeatureDetector::featureDetection(Frame* cur_frame,
   if (ref_frame) {
     existing_lmks.insert(ref_frame->landmarks_.begin(),
                          ref_frame->landmarks_.end());
-    VLOG(1) << "prev lmk id range: "
-            << *std::minmax_element(ref_frame->landmarks_.begin(),
-                                    ref_frame->landmarks_.end())
-                    .first
-            << " - "
-            << *std::minmax_element(ref_frame->landmarks_.begin(),
-                                    ref_frame->landmarks_.end())
-                    .second;
+    if (!ref_frame->landmarks_.empty()) {
+      VLOG(1) << "prev lmk id range: "
+              << *std::minmax_element(ref_frame->landmarks_.begin(),
+                                      ref_frame->landmarks_.end())
+                      .first
+              << " - "
+              << *std::minmax_element(ref_frame->landmarks_.begin(),
+                                      ref_frame->landmarks_.end())
+                      .second;
+    }
   }
 
   for (size_t i = 0u; i < cur_frame->keypoints_.size(); ++i) {
@@ -286,19 +288,11 @@ KeypointsCV FeatureDetector::featureDetection(Frame* cur_frame,
     CHECK_NOTNULL(xfeat_detector);
     std::vector<cv::Vec2d> keypoint_stds;
 
+    CHECK(!cur_frame->of_keypoints_.empty())
+        << "XFEAT with tracked features not supported yet.";
+    CHECK(!cur_frame->img_.empty()) << "Image is empty!";
     for (size_t i = 0; i < cur_frame->of_keypoints_.size(); i++) {
       keypoints.emplace_back(cv::KeyPoint(cur_frame->of_keypoints_.at(i), 1.0));
-    }
-
-    if (not keypoints.empty()) {
-      VLOG(1) << "cur lmk id range: "
-              << *std::minmax_element(cur_frame->landmarks_.begin(),
-                                      cur_frame->landmarks_.end())
-                      .first
-              << " - "
-              << *std::minmax_element(cur_frame->landmarks_.begin(),
-                                      cur_frame->landmarks_.end())
-                      .second;
     }
 
     auto input_kpts = keypoints;

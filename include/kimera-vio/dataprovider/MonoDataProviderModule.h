@@ -100,7 +100,7 @@ class MonoDataProviderModule : public DataProviderModule {
   virtual void shutdownQueues() override;
 
   //! Checks if the module has work to do (should check input queues are empty)
-  virtual inline bool hasWork() const { return !left_frame_queue_.empty(); }
+  virtual inline bool hasWork() const override { return !left_frame_queue_.empty(); }
 
  protected:
   //! Input data

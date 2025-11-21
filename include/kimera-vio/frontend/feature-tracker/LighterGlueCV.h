@@ -69,8 +69,8 @@ class LighterGlueCV : public FeatureTracker {
       det1.scores.at<float>(i) = cur_frame->scores_[i];
     }
 
-    cv::Size image_size0(640, 480);  // Default size, can be changed
-    cv::Size image_size1(640, 480);  // Default size, can be changed
+    cv::Size image_size0(320, 224);  // Default size, can be changed
+    cv::Size image_size1(320, 224);  // Default size, can be changed
 
     lg_matcher_.match(det0, image_size0, det1, image_size1, matches);
 
@@ -104,12 +104,23 @@ class LighterGlueCV : public FeatureTracker {
     CHECK_NOTNULL(cur_frame);
     CHECK_NOTNULL(matches);
 
-    CHECK(not ref_frame->keypoints_undistorted_.empty());
-    CHECK(not cur_frame->keypoints_undistorted_.empty());
-    CHECK_EQ(ref_frame->keypoints_undistorted_.size(),
-             ref_frame->keypoints_.size());
-    CHECK_EQ(cur_frame->keypoints_undistorted_.size(),
-             cur_frame->keypoints_.size());
+    // Add safety checks
+    CHECK(!ref_frame->keypoints_.empty()) << "Reference frame keypoints are empty!";
+    CHECK(!cur_frame->keypoints_.empty()) << "Current frame keypoints are empty!";
+    CHECK(!ref_frame->descriptors_.empty()) << "Reference frame descriptors are empty!";
+    CHECK(!cur_frame->descriptors_.empty()) << "Current frame descriptors are empty!";
+    CHECK(!ref_frame->scores_.empty()) << "Reference frame scores are empty!";
+    CHECK(!cur_frame->scores_.empty()) << "Current frame scores are empty!";
+    CHECK(!ref_frame->img_.empty()) << "Reference frame image is empty!";
+    CHECK(!cur_frame->img_.empty()) << "Current frame image is empty!";
+    CHECK_EQ(ref_frame->keypoints_.size(), ref_frame->descriptors_.rows)
+        << "Reference frame keypoints/descriptors size mismatch!";
+    CHECK_EQ(cur_frame->keypoints_.size(), cur_frame->descriptors_.rows)
+        << "Current frame keypoints/descriptors size mismatch!";
+    CHECK_EQ(ref_frame->keypoints_.size(), ref_frame->scores_.size())
+        << "Reference frame keypoints/scores size mismatch!";
+    CHECK_EQ(cur_frame->keypoints_.size(), cur_frame->scores_.size())
+        << "Current frame keypoints/scores size mismatch!";
 
     xfeat::DetectionResult det0, det1;
     // keypoints vec to mat

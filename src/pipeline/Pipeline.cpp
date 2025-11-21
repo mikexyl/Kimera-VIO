@@ -84,10 +84,18 @@ Pipeline::Pipeline(const VioParams& params)
       backend_thread_(nullptr),
       mesher_thread_(nullptr),
       lcd_thread_(nullptr),
-      visualizer_thread_(nullptr),
-      ort_env_(new Ort::Env(ORT_LOGGING_LEVEL_WARNING,
-                            "Kimera-VIO"))  // Default logging level
-{
+      visualizer_thread_(nullptr) {
+  // Create ONNX Runtime environment with conservative settings for multi-process usage
+  // ThreadingOptions to limit resource usage
+  Ort::ThreadingOptions threading_options;
+  threading_options.SetGlobalIntraOpNumThreads(1);
+  threading_options.SetGlobalInterOpNumThreads(1);
+  
+  ort_env_ = std::make_shared<Ort::Env>(
+      threading_options,
+      ORT_LOGGING_LEVEL_WARNING,
+      "Kimera-VIO");
+  
   if (FLAGS_deterministic_random_number_generator) {
     setDeterministicPipeline();
   }

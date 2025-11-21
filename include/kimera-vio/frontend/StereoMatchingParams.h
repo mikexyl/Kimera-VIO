@@ -79,6 +79,9 @@ struct DenseStereoParams {
   int p2_ = 240;
   int disp_12_max_diff_ = -1;
   bool use_mode_HH_ = true;
+  // Downscale factor for SGM processing (1 = no downscaling, 2 = half size, etc.)
+  // Higher values reduce GPU memory usage but may reduce accuracy
+  int sgm_downscale_factor_ = 2;
 };
 
 }  // namespace VIO

@@ -171,6 +171,8 @@ bool LoopClosureDetectorParams::parseYAML(const std::string& filepath) {
   yaml_parser.getYamlParam("xfeat_nv_head_model_path",
                            &xfeat_nv_head_model_path_);
   yaml_parser.getYamlParam("netvlad_model_path", &netvlad_model_path_);
+  yaml_parser.getYamlParam("network_input_width", &network_input_width_);
+  yaml_parser.getYamlParam("network_input_height", &network_input_height_);
   yaml_parser.getYamlParam("local_window_size", &local_window_size_);
   yaml_parser.getYamlParam("min_lmk_obs_ratio", &min_lmk_obs_ratio_);
   yaml_parser.getYamlParam("min_lmk_obs_count", &min_lmk_obs_cnt_);
@@ -265,6 +267,9 @@ void LoopClosureDetectorParams::print() const {
                         frame_cache.num_frames_per_file,
                         "frame_cahce.remove_cache_on_exit",
                         frame_cache.remove_cache_on_exit);
+  // network input spatial dimensions
+  PipelineParams::print(out, "network_input_width_", network_input_width_,
+                        "network_input_height_", network_input_height_);
   LOG(INFO) << out.str();
 }
 
@@ -313,7 +318,9 @@ bool LoopClosureDetectorParams::equals(const LoopClosureDetectorParams& lp2,
          (frame_cache.num_frames_per_file ==
           lp2.frame_cache.num_frames_per_file) &&
          (frame_cache.remove_cache_on_exit ==
-          lp2.frame_cache.remove_cache_on_exit);
+          lp2.frame_cache.remove_cache_on_exit) &&
+         (network_input_width_ == lp2.network_input_width_) &&
+         (network_input_height_ == lp2.network_input_height_);
 }
 
 }  // namespace VIO

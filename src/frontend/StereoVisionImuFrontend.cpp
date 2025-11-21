@@ -51,13 +51,17 @@ StereoVisionImuFrontend::StereoVisionImuFrontend(
       stereo_matcher_(stereo_camera, frontend_params.stereo_matching_params_),
       output_images_path_("./outputImages/") {
   CHECK(stereo_camera_);
+  CHECK(ort_env_);
 
   feature_detector_ = std::make_unique<FeatureDetector>(
-      frontend_params.feature_detector_params_);
+      frontend_params.feature_detector_params_, ort_env_);
 
+  static constexpr bool kFrontendTrackerUseOF = true;
   tracker_ = std::make_unique<Tracker>(frontend_params_.tracker_params_,
                                        stereo_camera_->getOriginalLeftCamera(),
-                                       display_queue);
+                                       display_queue,
+                                       ort_env_,
+                                       kFrontendTrackerUseOF);
 
   if (VLOG_IS_ON(1)) tracker_->tracker_params_.print();
 }
@@ -258,13 +262,53 @@ void StereoVisionImuFrontend::processFirstStereoFrame(
       << "Keypoints already present in first frame: please do not extract"
          " keypoints manually";
 
-  // Perform feature detection.
+  tracker_->featureTracking(nullptr,
+                            &stereoFrame_k_->left_frame_,
+                            {},
+                            frontend_params_.feature_detector_params_,
+                            stereo_camera_->getR1(),
+                            false);
+
   CHECK(feature_detector_);
-  feature_detector_->featureDetection(left_frame, stereo_camera_->getR1());
+  CHECK(stereoFrame_km1_ == nullptr);
+  feature_detector_->featureDetection(
+      &stereoFrame_k_->left_frame_, std::nullopt, nullptr);
 
   // Get 3D points via stereo.
   VLOG(2) << "calling sparseStereoReconstruction \n";
   stereo_matcher_.sparseStereoReconstruction(stereoFrame_k_.get());
+  // save the rectified image for debugging
+  auto left_img_rectified = stereoFrame_k_->getLeftImgRectified();
+  auto right_img_rectified = stereoFrame_k_->getRightImgRectified();
+  // stitch two images side by side
+  cv::Mat stereo_img_rectified(
+      left_img_rectified.rows,
+      left_img_rectified.cols + right_img_rectified.cols,
+      left_img_rectified.type());
+  left_img_rectified.copyTo(stereo_img_rectified(
+      cv::Rect(0, 0, left_img_rectified.cols, left_img_rectified.rows)));
+  right_img_rectified.copyTo(
+      stereo_img_rectified(cv::Rect(left_img_rectified.cols,
+                                    0,
+                                    right_img_rectified.cols,
+                                    right_img_rectified.rows)));
+  std::string img_name = "/tmp/first_stereo_rectified.png";
+  cv::imwrite(img_name, stereo_img_rectified);
+  VLOG(2) << "Saved first rectified stereo image to: " << img_name << "\n";
+
+  // also save the raw image for debugging
+  auto left_img_raw = stereoFrame_k_->left_frame_.img_;
+  auto right_img_raw = stereoFrame_k_->right_frame_.img_;
+  // stitch two images side by side
+  cv::Mat stereo_img_raw(left_img_raw.rows,
+                         left_img_raw.cols + right_img_raw.cols,
+                         left_img_raw.type());
+  left_img_raw.copyTo(
+      stereo_img_raw(cv::Rect(0, 0, left_img_raw.cols, left_img_raw.rows)));
+  right_img_raw.copyTo(stereo_img_raw(
+      cv::Rect(left_img_raw.cols, 0, right_img_raw.cols, right_img_raw.rows)));
+  img_name = "/tmp/first_stereo_raw.png";
+  cv::imwrite(img_name, stereo_img_raw);
 
   // Prepare for next iteration.
   stereoFrame_km1_ = stereoFrame_k_;
@@ -309,29 +353,21 @@ StatusStereoMeasurementsPtr StereoVisionImuFrontend::processStereoFrame(
                             left_frame_k,
                             ref_frame_R_cur_frame,
                             frontend_params_.feature_detector_params_,
-                            stereo_camera_->getR1());
+                            stereo_camera_->getR1(),
+                            false);
 
   // feature tracking failed for all points, move on to the next frame
-  if (left_frame_k->keypoints_.size() == 0) {
-    VLOG(2)
-        << "feature tracking failed for all points, moving to next frame \n";
-    feature_detector_->featureDetection(left_frame_k, stereo_camera_->getR1());
-    stereoFrame_km1_ = stereoFrame_k_;
-    stereoFrame_k_.reset();
-    ++frame_count_;
-    StereoMeasurements smart_stereo_measurements;
-    return std::make_shared<StatusStereoMeasurements>(
-        std::make_pair(tracker_status_summary_, smart_stereo_measurements));
-  }
-
-  if (feature_tracks) {
-    // TODO(Toni): these feature tracks are not outlier rejected...
-    // TODO(Toni): this image should already be computed and inside the
-    // display_queue
-    // if it is sent to the tracker.
-    *feature_tracks = tracker_->getTrackerImage(stereoFrame_lkf_->left_frame_,
-                                                stereoFrame_k_->left_frame_);
-  }
+  // if (left_frame_k->keypoints_.size() == 0) {
+  //   VLOG(2)
+  //       << "feature tracking failed for all points, moving to next frame \n";
+  //   feature_detector_->featureDetection(left_frame_k,
+  //   stereo_camera_->getR1()); stereoFrame_km1_ = stereoFrame_k_;
+  //   stereoFrame_k_.reset();
+  //   ++frame_count_;
+  //   StereoMeasurements smart_stereo_measurements;
+  //   return std::make_shared<StatusStereoMeasurements>(
+  //       std::make_pair(tracker_status_summary_, smart_stereo_measurements));
+  // }
 
   VLOG(2) << "Finished feature tracking.";
   //////////////////////////////////////////////////////////////////////////////
@@ -346,6 +382,17 @@ StatusStereoMeasurementsPtr StereoVisionImuFrontend::processStereoFrame(
 
     tracker_status_summary_.kfTrackingStatus_mono_ = TrackingStatus::INVALID;
     tracker_status_summary_.kfTrackingStatus_stereo_ = TrackingStatus::INVALID;
+
+    feature_detector_->featureDetection(&stereoFrame_k_->left_frame_,
+                                        std::nullopt,
+                                        &stereoFrame_km1_->left_frame_);
+
+    tracker_->featureTrackingDesc(&stereoFrame_lkf_->left_frame_,
+                                  &stereoFrame_k_->left_frame_,
+                                  {},
+                                  frontend_params_.feature_detector_params_,
+                                  std::nullopt,
+                                  false);
 
     double sparse_stereo_time = 0;
     if (frontend_params_.useRANSAC_) {
@@ -417,17 +464,6 @@ StatusStereoMeasurementsPtr StereoVisionImuFrontend::processStereoFrame(
     last_keyframe_timestamp_ = stereoFrame_k_->timestamp_;
     stereoFrame_k_->setIsKeyframe(true);
 
-    // Perform feature detection (note: this must be after RANSAC,
-    // since if we discard more features, we need to extract more)
-    CHECK(feature_detector_);
-    feature_detector_->featureDetection(left_frame_k, stereo_camera_->getR1());
-
-    // Get 3D points via stereo, including newly extracted
-    // (this might be only for the visualization).
-    start_time = utils::Timer::tic();
-    stereo_matcher_.sparseStereoReconstruction(stereoFrame_k_.get());
-    sparse_stereo_time += utils::Timer::toc(start_time).count();
-
     // Log images if needed.
     if (logger_ &&
         (FLAGS_visualize_frontend_images || FLAGS_save_frontend_images)) {
@@ -459,6 +495,15 @@ StatusStereoMeasurementsPtr StereoVisionImuFrontend::processStereoFrame(
   } else {
     CHECK_EQ(smart_stereo_measurements.size(), 0u);
     stereoFrame_k_->setIsKeyframe(false);
+  }
+
+  if (feature_tracks) {
+    // TODO(Toni): these feature tracks are not outlier rejected...
+    // TODO(Toni): this image should already be computed and inside the
+    // display_queue
+    // if it is sent to the tracker.
+    *feature_tracks = tracker_->getTrackerImage(stereoFrame_lkf_->left_frame_,
+                                                stereoFrame_k_->left_frame_);
   }
 
   // Update keyframe to reference frame for next iteration.
@@ -527,8 +572,11 @@ void StereoVisionImuFrontend::getSmartStereoMeasurements(
       // precision!
       uR = rightKeypoints.at(i).second.x;
     }
+    float px_sigma = stereoFrame_kf->left_frame_.prim_stds_.at(i);
+    float score = stereoFrame_kf->left_frame_.scores_.at(i);
+
     smart_stereo_measurements->push_back(
-        {landmarkId_kf[i], gtsam::StereoPoint2(uL, uR, v), -1});
+        {landmarkId_kf[i], gtsam::StereoPoint2(uL, uR, v), px_sigma, score});
   }
 }
 

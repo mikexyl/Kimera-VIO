@@ -63,10 +63,12 @@ void LcdOutput::setMapInformation(const gtsam::Pose3& W_Pose_Map,
   nfg_ = nfg;
 }
 
-void LcdOutput::setFrameInformation(const Landmarks& keypoints_3d,
+void LcdOutput::setFrameInformation(const KeypointsCV& keypoints_2d,
+                                    const Landmarks& keypoints_3d,
                                     const BearingVectors& versors,
                                     const std::map<int, double>& bow_vec,
                                     const cv::Mat& descriptors_mat) {
+  keypoints_2d_ = keypoints_2d;
   keypoints_3d_ = keypoints_3d;
   versors_ = versors;
   bow_vec_ = bow_vec;

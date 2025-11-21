@@ -27,6 +27,9 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::
       feature_detector_(nullptr),
       feature_matcher_(nullptr),
       stereo_camera_(stereo_camera ? stereo_camera.value() : nullptr),
+      stereo_matching_params_(stereo_matching_params
+                                  ? stereo_matching_params.value()
+                                  : StereoMatchingParams()),
       stereo_matcher_(nullptr),
       rgbd_camera_(rgbd_camera ? rgbd_camera.value() : nullptr),
       db_(nullptr),
@@ -291,7 +294,15 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::spinOnce(
   output_payload->setMapInformation(
       w_Pose_map, map_Pose_odom, pgo_states, pgo_nfg);
 
-  output_payload->setFrameInformation(curr_frame->keypoints_3d_,
+  KeypointsCV keypoints_2d;
+  cv::KeyPoint::convert(curr_frame->keypoints_, keypoints_2d);
+
+  CHECK_EQ(curr_frame->keypoints_.size(), curr_frame->keypoints_3d_.size());
+  CHECK_EQ(curr_frame->keypoints_3d_.size(),
+           curr_frame->bearing_vectors_.size());
+
+  output_payload->setFrameInformation(keypoints_2d,
+                                      curr_frame->keypoints_3d_,
                                       curr_frame->bearing_vectors_,
                                       globalDescToMap(curr_bow_vec),
                                       curr_frame->descriptors_mat_);
@@ -576,26 +587,27 @@ FrameId LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::
   typename Database::Desc descriptors_mat;
   typename Database::DescVector descriptors_vec;
   getNewFeaturesAndDescriptors(
-      stereo_frame.left_frame_.img_, &keypoints, &descriptors_mat);
-  descriptorMatToVec(descriptors_mat, &descriptors_vec);
+      stereo_frame.left_frame_, &keypoints, &descriptors_mat);
+  descriptorMatToVec(
+      stereo_frame.left_frame_, descriptors_mat, &descriptors_vec);
 
   // Fill StereoFrame with ORB keypoints and perform stereo matching.
-  StereoFrame cp_stereo_frame(stereo_frame);
-  rewriteStereoFrameFeatures(keypoints, &cp_stereo_frame);
+  // StereoFrame cp_stereo_frame(stereo_frame);
+  // rewriteStereoFrameFeatures(keypoints, &cp_stereo_frame);
 
   // Build and store LCDFrame object.
   return cache_.addFrame(std::make_shared<StereoLCDFrame>(
-      cp_stereo_frame.timestamp_,
+      stereo_frame.timestamp_,
       FrameCache::NEW_ID,
-      cp_stereo_frame.id_,
+      stereo_frame.id_,
       keypoints,
       // keypoints_3d_ are in local (camera) frame
-      cp_stereo_frame.keypoints_3d_,
+      stereo_frame.keypoints_3d_,
       descriptors_vec,
       descriptors_mat,
-      cp_stereo_frame.left_frame_.versors_,
-      cp_stereo_frame.left_keypoints_rectified_,
-      cp_stereo_frame.right_keypoints_rectified_));
+      stereo_frame.left_frame_.versors_,
+      stereo_frame.left_keypoints_rectified_,
+      stereo_frame.right_keypoints_rectified_));
 }
 
 /* ------------------------------------------------------------------------
@@ -868,8 +880,9 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::recoverPoseBody(
       //   }
 
       //   if (camQuery_points.size() > lcd_params_.min_pnp_num_landmarks_) {
-      //     Pose3 camQuery_T_camMatch_2d_copy = camMatch_T_camQuery_2d.inverse();
-      //     success = tracker_->pnp(camMatch_bearing_vectors,
+      //     Pose3 camQuery_T_camMatch_2d_copy =
+      //     camMatch_T_camQuery_2d.inverse(); success =
+      //     tracker_->pnp(camMatch_bearing_vectors,
       //                             camQuery_points,
       //                             &camQuery_T_camMatch_3d,
       //                             inliers,

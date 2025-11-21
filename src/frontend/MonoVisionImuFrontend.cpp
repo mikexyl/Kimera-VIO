@@ -308,8 +308,8 @@ StatusMonoMeasurementsPtr MonoVisionImuFrontend::processFrame(
     mono_camera_->undistortKeypoints(mono_frame_k_->keypoints_,
                                      &mono_frame_k_->keypoints_undistorted_);
 
-    tracker_->featureTrackingDesc(mono_frame_lkf_,
-                                  mono_frame_k_,
+    tracker_->featureTrackingDesc(mono_frame_lkf_.get(),
+                                  mono_frame_k_.get(),
                                   {},
                                   frontend_params_.feature_detector_params_,
                                   std::nullopt,
@@ -361,11 +361,8 @@ StatusMonoMeasurementsPtr MonoVisionImuFrontend::processFrame(
       }
 
       if (best_kf_to_rematch) {
-        LOG(INFO) << "Rematching with keyframe: " << best_kf_to_rematch->id_;
-        LOG(INFO) << "Rematching interval: "
-                  << mono_frame_k_->id_ - best_kf_to_rematch->id_;
-        tracker_->featureTrackingDesc(best_kf_to_rematch,
-                                      mono_frame_k_,
+        tracker_->featureTrackingDesc(best_kf_to_rematch.get(),
+                                      mono_frame_k_.get(),
                                       {},
                                       frontend_params_.feature_detector_params_,
                                       std::nullopt,

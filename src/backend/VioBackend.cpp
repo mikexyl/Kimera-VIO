@@ -425,9 +425,6 @@ bool VioBackend::addVisualInertialStateAndOptimize(
   int nr_states_include_invalid = std::max(
       backend_params_.nr_states_, static_cast<double>(n_until_enough_valid));
   smoother_->smootherLag() = nr_states_include_invalid;
-  LOG(INFO) << "Setting smoother lag to: " << smoother_->smootherLag()
-            << " states, to include " << n_states_valid
-            << " valid states in the optimization.";
 
   // Add odometry factors if they're available and have non-zero precision
   if (odometry_body_pose && odom_params_ &&
@@ -1436,20 +1433,8 @@ bool VioBackend::updateSmoother(Smoother::Result* result,
   try {
     // Update smoother.
     VLOG(10) << "Starting update of smoother_...";
-    size_t n_new_factors = new_factors.size();
-    size_t n_deleted_factors = delete_slots.size();
-    size_t n_all_factors = smoother_->getFactors().size();
     *result =
         smoother_->update(new_factors, new_values, timestamps, delete_slots);
-    LOG(INFO) << "Smoother update: " << n_new_factors << "x"
-              << new_factors.keys().size() << " new factors, "
-              << n_deleted_factors << " deleted factors, " << n_all_factors
-              << " total factors."
-              << " elim keys: "
-              << smoother_->getISAM2Result().getVariablesReeliminated()
-              << " relin keys: "
-              << smoother_->getISAM2Result().getVariablesRelinearized()
-              << " total keys: " << smoother_->getFactors().keys().size();
     VLOG(10) << "Finished update of smoother_.";
     if (debug_smoother_) {
       printSmootherInfo(new_factors, delete_slots, "CATCHING EXCEPTION", false);

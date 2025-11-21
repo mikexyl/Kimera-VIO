@@ -17,15 +17,15 @@
 #pragma once
 
 #include <ctype.h>
+#include <gtsam/geometry/Cal3_S2.h>
+#include <gtsam/geometry/StereoPoint2.h>
+#include <opencv2/highgui/highgui_c.h>
 #include <stdio.h>
 #include <stdlib.h>
+
 #include <algorithm>
 #include <iostream>
 #include <iterator>
-#include <string>
-#include <vector>
-
-#include <opencv2/highgui/highgui_c.h>
 #include <opencv2/calib3d/calib3d.hpp>
 #include <opencv2/core/core.hpp>
 #include <opencv2/features2d/features2d.hpp>
@@ -33,9 +33,8 @@
 #include <opencv2/imgproc/imgproc.hpp>
 #include <opencv2/opencv.hpp>
 #include <opencv2/video/tracking.hpp>
-
-#include <gtsam/geometry/Cal3_S2.h>
-#include <gtsam/geometry/StereoPoint2.h>
+#include <string>
+#include <vector>
 
 #include "kimera-vio/frontend/Frame.h"
 #include "kimera-vio/frontend/StereoFrame-definitions.h"
@@ -65,9 +64,7 @@ class StereoFrame {
     left_frame_.isKeyframe_ = is_kf;
     right_frame_.isKeyframe_ = is_kf;
   }
-  inline void setIsRectified(bool is_rect) {
-    is_rectified_ = is_rect;
-  }
+  inline void setIsRectified(bool is_rect) { is_rectified_ = is_rect; }
   void setRectifiedImages(const cv::Mat& left_rectified_img,
                           const cv::Mat& right_rectified_img);
 
@@ -133,7 +130,6 @@ class StereoFrame {
       const StatusKeypointsCV& right_keypoints_rectified) const;
   void print() const;
 
-
  private:
   // These must be private because they must always match with other members.
   // Can only be a kf if left and right frames are kf as well.
@@ -169,6 +165,9 @@ class StereoFrame {
   //! disparity; in the rectified left frame.
   // TODO(TONI): this should use the eigen's default allocator...
   Landmarks keypoints_3d_;
+
+  cv::Mat left_disp_img_;  // left disparity image
+  cv::Mat left_depth_img_;
 };
 
 }  // namespace VIO

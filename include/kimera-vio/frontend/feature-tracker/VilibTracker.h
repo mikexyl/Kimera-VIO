@@ -30,7 +30,7 @@ class VilibTracker : public FeatureTracker {
     ShiTomasiOptions() = default;
     ShiTomasiOptions(const DetectorOptions& other) : DetectorOptions(other) {}
     vilib::conv_filter_border_type border_type{
-        vilib::conv_filter_border_type::BORDER_SKIP};
+        vilib::conv_filter_border_type::BORDER_WRAP};
     float quality_level{0.1};
   };
 
@@ -79,14 +79,21 @@ class VilibTracker : public FeatureTracker {
              cv::OutputArray err,
              std::vector<float>* std,
              std::vector<float>* scores) override {
-    if (ref_frame) {
-      CHECK_EQ(ref_frame->id_, prev_frame_id_);
-    }
+    // TODO: change for stereo mode accordingly
+    // if (ref_frame) {
+    //   CHECK_EQ(ref_frame->id_, prev_frame_id_);
+    // }
 
     size_t num_prev_keypoints = ref_frame ? ref_frame->of_keypoints_.size() : 0;
 
     cv::Mat gray_image;
     cv::cvtColor(cur_frame->img_, gray_image, cv::COLOR_BGR2GRAY);
+    // Verify dimensions match expected parameters
+    CHECK_EQ(gray_image.cols, params_.width) << "Image width mismatch";
+    CHECK_EQ(gray_image.rows, params_.height) << "Image height mismatch";
+    CHECK_EQ(gray_image.type(), CV_8UC1) << "Expected CV_8UC1 image type";
+    CHECK_EQ(gray_image.step[0], gray_image.cols * gray_image.elemSize())
+        << "Image pitch/stride invalid for CUDA";
 
     auto vilib_frame = std::make_shared<vilib::Frame>(
         gray_image, cur_frame->timestamp_, params_.n_pyramid_levels_);

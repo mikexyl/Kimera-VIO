@@ -139,6 +139,7 @@ target_link_libraries(${PROJECT_NAME}
     gtsam_unstable
     opengv
     xfeat-cpp::xfeat-cpp
+    xfeat-cpp::sgm
     vio-factors
     vilib
 )

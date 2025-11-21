@@ -41,7 +41,7 @@ namespace VIO {
 // TODO(Toni): Fast-forwarding bcs of an issue wiht includes:
 // if you include here the display-definitions.h, a million errors appear, this
 // should go away after properly cleaning what each file includes.
-class DisplayInputBase;
+struct DisplayInputBase;
 using DisplayQueue = ThreadsafeQueue<std::unique_ptr<DisplayInputBase>>;
 
 class Tracker {
@@ -81,8 +81,8 @@ class Tracker {
                        std::optional<cv::Mat> R = std::nullopt,
                        bool invalidate_landmarks = true);
 
-  void featureTrackingDesc(Frame::Ptr ref_frame,
-                           Frame::Ptr cur_frame,
+  void featureTrackingDesc(Frame* ref_frame,
+                           Frame* cur_frame,
                            const gtsam::Rot3& inter_frame_rotation,
                            const FeatureDetectorParams& feature_detector_params,
                            std::optional<cv::Mat> R = std::nullopt,

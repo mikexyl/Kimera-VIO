@@ -14,20 +14,47 @@
 
 #include "kimera-vio/frontend/StereoMatcher.h"
 
+#include <cuda_runtime.h>
 #include <glog/logging.h>
+#include <libsgm.h>
 
 #include <opencv2/calib3d.hpp>
 
 #include "kimera-vio/frontend/StereoFrame.h"
 #include "kimera-vio/utils/Macros.h"
 
+namespace sgm {
+class StereoSGM;
+}
 namespace VIO {
 
 StereoMatcher::StereoMatcher(const StereoCamera::ConstPtr& stereo_camera,
                              const StereoMatchingParams& stereo_matching_params)
     : stereo_camera_(stereo_camera),
       stereo_matching_params_(stereo_matching_params),
-      dense_stereo_params_() {}
+      dense_stereo_params_() {
+  dense_stereo_params_.use_sgbm_ = true;
+  dense_stereo_params_.use_mode_HH_ = false;
+  dense_stereo_params_.min_disparity_ = 0;  // Always 0 for libSGM
+  dense_stereo_params_.num_disparities_ = stereo_matching_params_.templ_cols_;
+  dense_stereo_params_.sad_window_size_ = 5;
+  // LibSGM uses different P1/P2 scaling - use more conservative values
+  int P1 = 10;            // Small penalty for small disparity changes
+  int P2 = 120;           // Larger penalty for large disparity changes
+  int disp12MaxDiff = 2;  // Relaxed LR consistency check (was 1, too strict)
+  int preFilterCap = 31;
+  int uniquenessRatio = 10;     // 10% margin for uniqueness (90% confidence)
+  int speckleWindowSize = 100;  // Larger window for speckle filtering
+  int speckleRange = 2;
+  dense_stereo_params_.p1_ = P1;
+  dense_stereo_params_.p2_ = P2;
+  dense_stereo_params_.disp_12_max_diff_ = disp12MaxDiff;
+  dense_stereo_params_.pre_filter_cap_ = preFilterCap;
+  dense_stereo_params_.uniqueness_ratio_ = uniquenessRatio;
+  dense_stereo_params_.speckle_window_size_ = speckleWindowSize;
+  dense_stereo_params_.speckle_range_ = speckleRange;
+  dense_stereo_params_.median_blur_disparity_ = true;
+}
 
 void StereoMatcher::denseStereoReconstruction(
     const cv::Mat& left_img_rectified,
@@ -42,55 +69,158 @@ void StereoMatcher::denseStereoReconstruction(
   CHECK_EQ(disparity_img->type(), CV_32F);
   CHECK(stereo_camera_);
 
-  // Setup stereo matcher
-  cv::Ptr<cv::StereoMatcher> cv_stereo_matcher;
-  if (dense_stereo_params_.use_sgbm_) {
-    int mode;
-    if (dense_stereo_params_.use_mode_HH_) {
-      mode = cv::StereoSGBM::MODE_HH;
-    } else {
-      mode = cv::StereoSGBM::MODE_SGBM;
-    }
-    cv_stereo_matcher =
-        cv::StereoSGBM::create(dense_stereo_params_.min_disparity_,
-                               dense_stereo_params_.num_disparities_,
-                               dense_stereo_params_.sad_window_size_,
-                               dense_stereo_params_.p1_,
-                               dense_stereo_params_.p2_,
-                               dense_stereo_params_.disp_12_max_diff_,
-                               dense_stereo_params_.pre_filter_cap_,
-                               dense_stereo_params_.uniqueness_ratio_,
-                               dense_stereo_params_.speckle_window_size_,
-                               dense_stereo_params_.speckle_range_,
-                               mode);
+  // LibSGM only supports grayscale images - convert if needed
+  cv::Mat left_gray, right_gray;
+  if (left_img_rectified.channels() == 3) {
+    cv::cvtColor(left_img_rectified, left_gray, cv::COLOR_BGR2GRAY);
+    cv::cvtColor(right_img_rectified, right_gray, cv::COLOR_BGR2GRAY);
+  } else if (left_img_rectified.channels() == 1) {
+    left_gray = left_img_rectified;
+    right_gray = right_img_rectified;
   } else {
-    cv::Ptr<cv::StereoBM> sbm =
-        cv::StereoBM::create(dense_stereo_params_.num_disparities_,
-                             dense_stereo_params_.sad_window_size_);
+    LOG(FATAL) << "Input image must have 1 or 3 channels, got "
+               << left_img_rectified.channels();
+  }
 
-    sbm->setPreFilterType(dense_stereo_params_.pre_filter_type_);
-    sbm->setPreFilterSize(dense_stereo_params_.pre_filter_size_);
-    sbm->setPreFilterCap(dense_stereo_params_.pre_filter_cap_);
-    sbm->setMinDisparity(dense_stereo_params_.min_disparity_);
-    sbm->setTextureThreshold(dense_stereo_params_.texture_threshold_);
-    sbm->setUniquenessRatio(dense_stereo_params_.uniqueness_ratio_);
-    sbm->setSpeckleRange(dense_stereo_params_.speckle_range_);
-    sbm->setSpeckleWindowSize(dense_stereo_params_.speckle_window_size_);
-    const cv::Rect& roi1 = stereo_camera_->getROI1();
-    const cv::Rect& roi2 = stereo_camera_->getROI2();
-    if (!roi1.empty() && !roi2.empty()) {
-      sbm->setROI1(roi1);
-      sbm->setROI2(roi2);
+  // Downsample images for SGM to reduce GPU memory usage
+  cv::Mat left_sgm, right_sgm;
+  int downscale_factor = std::max(1, dense_stereo_params_.sgm_downscale_factor_);
+  if (downscale_factor > 1) {
+    cv::resize(left_gray, left_sgm, 
+               cv::Size(left_gray.cols / downscale_factor, 
+                       left_gray.rows / downscale_factor),
+               0, 0, cv::INTER_AREA);
+    cv::resize(right_gray, right_sgm,
+               cv::Size(right_gray.cols / downscale_factor,
+                       right_gray.rows / downscale_factor),
+               0, 0, cv::INTER_AREA);
+    VLOG(1) << "Downsampled images from " << left_gray.cols << "x" << left_gray.rows
+            << " to " << left_sgm.cols << "x" << left_sgm.rows
+            << " (factor: " << downscale_factor << ") for SGM processing";
+  } else {
+    left_sgm = left_gray;
+    right_sgm = right_gray;
+  }
+
+  // Setup stereo matcher
+  if (sgm_ == nullptr) {
+    if (dense_stereo_params_.use_sgbm_ and sgm_ == nullptr) {
+      if (dense_stereo_params_.use_mode_HH_) {
+        LOG(FATAL) << "Only MODE_SGBM is supported for now.";
+      }
+      sgm::StereoSGM::Parameters sgm_params;
+      sgm_params.P1 = dense_stereo_params_.p1_;
+      sgm_params.P2 = dense_stereo_params_.p2_;
+      sgm_params.uniqueness =
+          1.0f - dense_stereo_params_.uniqueness_ratio_ / 100.0f;
+      sgm_params.subpixel = false;
+      sgm_params.min_disp = dense_stereo_params_.min_disparity_;
+      sgm_params.LR_max_diff = dense_stereo_params_.disp_12_max_diff_;
+      sgm_params.census_type = sgm::CensusType::SYMMETRIC_CENSUS_9x7;
+      sgm_params.path_type = sgm::PathType::SCAN_8PATH;
+
+      int in_bit = 8;
+      // Use downsampled image dimensions for SGM initialization
+      int sgm_num_disparities = dense_stereo_params_.num_disparities_ / downscale_factor;
+      sgm_num_disparities = std::max(16, (sgm_num_disparities / 16) * 16); // Round to multiple of 16
+      sgm_ = std::make_shared<sgm::StereoSGM>(
+          left_sgm.cols,
+          left_sgm.rows,
+          sgm_num_disparities,
+          in_bit,
+          16,
+          sgm::EXECUTE_INOUT_HOST2HOST,
+          sgm_params);
+
+      VLOG(1) << "LibSGM parameters: P1=" << sgm_params.P1
+              << ", P2=" << sgm_params.P2
+              << ", uniqueness=" << sgm_params.uniqueness
+              << ", num_disp=" << sgm_num_disparities
+              << ", LR_max_diff=" << sgm_params.LR_max_diff
+              << ", input_channels=" << left_img_rectified.channels()
+              << " (converted to grayscale)"
+              << ", downscale_factor=" << downscale_factor
+              << ", SGM image size=" << left_sgm.cols << "x" << left_sgm.rows;
+      // cv_stereo_matcher =
+      //     cv::StereoSGBM::create(dense_stereo_params_.min_disparity_,
+      //                            dense_stereo_params_.num_disparities_,
+      //                            dense_stereo_params_.sad_window_size_,
+      //                            dense_stereo_params_.p1_ * n_channel,
+      //                            dense_stereo_params_.p2_ * n_channel,
+      //                            dense_stereo_params_.disp_12_max_diff_,
+      //                            dense_stereo_params_.pre_filter_cap_,
+      //                            dense_stereo_params_.uniqueness_ratio_,
+      //                            dense_stereo_params_.speckle_window_size_,
+      //                            dense_stereo_params_.speckle_range_,
+      //                            mode);
     } else {
-      LOG(WARNING) << "ROIs are empty.";
+      LOG(FATAL) << "Only CUDA SGM dense stereo is supported for now.";
     }
-
-    cv_stereo_matcher = sbm;
   }
 
   // Reconstruct scene
-  cv_stereo_matcher->compute(
-      left_img_rectified, right_img_rectified, *disparity_img);
+  // LibSGM outputs CV_16S format (disparity scaled by 16 when subpixel=true)
+  cv::Mat disparity_16s_sgm(left_sgm.size(), CV_16S);
+  
+  // Synchronize CUDA before libsgm execution to avoid conflicts with vilib/ONNX
+  cudaError_t sync_err = cudaDeviceSynchronize();
+  if (sync_err != cudaSuccess) {
+    LOG(ERROR) << "CUDA sync error before libsgm: " << cudaGetErrorString(sync_err);
+    cudaGetLastError();  // Clear error
+  }
+  
+  sgm_->execute(left_sgm.data, right_sgm.data, disparity_16s_sgm.data);
+  
+  // Check for errors immediately after libsgm
+  cudaError_t exec_err = cudaGetLastError();
+  if (exec_err != cudaSuccess) {
+    LOG(ERROR) << "CUDA error after libsgm execute: " << cudaGetErrorString(exec_err)
+               << " - This indicates GPU memory corruption!";
+  }
+  
+  // Synchronize after libsgm to ensure completion before other CUDA ops
+  sync_err = cudaDeviceSynchronize();
+  if (sync_err != cudaSuccess) {
+    LOG(ERROR) << "CUDA sync error after libsgm: " << cudaGetErrorString(sync_err)
+               << " - GPU may be in unstable state!";
+    cudaGetLastError();  // Clear error to allow continuation
+  }
+
+  // Get invalid disparity value
+  int invalid_disp = sgm_->get_invalid_disparity();
+
+  // Upsample disparity back to original resolution if downsampled
+  cv::Mat disparity_16s;
+  if (downscale_factor > 1) {
+    cv::resize(disparity_16s_sgm, disparity_16s,
+               cv::Size(left_gray.cols, left_gray.rows),
+               0, 0, cv::INTER_LINEAR);
+    // Scale disparity values by downscale factor (disparity scales with image size)
+    disparity_16s *= downscale_factor;
+    VLOG(1) << "Upsampled disparity from " << disparity_16s_sgm.cols << "x" << disparity_16s_sgm.rows
+            << " to " << disparity_16s.cols << "x" << disparity_16s.rows
+            << " and scaled disparities by " << downscale_factor;
+  } else {
+    disparity_16s = disparity_16s_sgm;
+  }
+
+  // Create mask for invalid disparities before conversion
+  cv::Mat valid_mask = disparity_16s != (invalid_disp * downscale_factor);
+
+  // Convert from CV_16S to CV_32F and divide by 16 to get actual disparity
+  disparity_16s.convertTo(*disparity_img, CV_32F);
+
+  // Optionally, smooth the disparity image BEFORE marking invalid pixels
+  // This prevents median blur from blending invalid values with valid ones
+  if (dense_stereo_params_.median_blur_disparity_) {
+    cv::Mat disparity_valid;
+    disparity_img->copyTo(disparity_valid, valid_mask);
+    cv::medianBlur(disparity_valid, disparity_valid, 5);
+    disparity_valid.copyTo(*disparity_img, valid_mask);
+  }
+
+  // Set invalid pixels to -1 (negative to indicate invalid)
+  disparity_img->setTo(-1.0f, ~valid_mask);
 
   // Optionally, post-filter disparity
   if (dense_stereo_params_.post_filter_disparity_) {
@@ -99,11 +229,6 @@ void StereoMatcher::denseStereoReconstruction(
     // Ptr<StereoMatcher> right_matcher = createRightMatcher(left_matcher);
     // See
     // https://docs.opencv.org/3.3.1/d3/d14/tutorial_ximgproc_disparity_filtering.html#gsc.tab=0
-  }
-
-  // Optionally, smooth the disparity image
-  if (dense_stereo_params_.median_blur_disparity_) {
-    cv::medianBlur(*disparity_img, *disparity_img, 5);
   }
 
   static constexpr bool debug = false;
@@ -138,15 +263,128 @@ void StereoMatcher::sparseStereoReconstruction(StereoFrame* stereo_frame) {
   stereo_camera_->undistortRectifyLeftKeypoints(
       stereo_frame->left_frame_.keypoints_,
       &stereo_frame->left_keypoints_rectified_);
-  sparseStereoReconstruction(stereo_frame->getLeftImgRectified(),
-                             stereo_frame->getRightImgRectified(),
-                             stereo_frame->left_keypoints_rectified_,
-                             &stereo_frame->right_keypoints_rectified_);
 
-  //! Fill out keypoint depths
-  getDepthFromRectifiedMatches(stereo_frame->left_keypoints_rectified_,
-                               stereo_frame->right_keypoints_rectified_,
-                               &stereo_frame->keypoints_depth_);
+  CHECK(!stereo_frame->getLeftImgRectified().empty() &&
+        !stereo_frame->getRightImgRectified().empty())
+      << "sparseStereoMatching: rectified images are empty!";
+
+  // Use dense stereo reconstruction to get disparity image
+  cv::Mat disparity_img(stereo_frame->getLeftImgRectified().rows,
+                        stereo_frame->getLeftImgRectified().cols,
+                        CV_32F);
+  auto start_dense = std::chrono::high_resolution_clock::now();
+  denseStereoReconstruction(stereo_frame->getLeftImgRectified(),
+                            stereo_frame->getRightImgRectified(),
+                            &disparity_img);
+  auto end_dense = std::chrono::high_resolution_clock::now();
+  std::chrono::duration<double> dense_duration = end_dense - start_dense;
+
+  stereo_frame->left_disp_img_ = disparity_img.clone();
+
+  // Generate left depth image for visualization/debugging
+  // depth = fx * baseline / disparity (vectorized operation)
+  const auto& stereo_calib = stereo_camera_->getStereoCalib();
+  CHECK(stereo_calib);
+  double fx_b = stereo_calib->fx() * stereo_camera_->getBaseline();
+
+  LOG(INFO) << "baseline: " << stereo_camera_->getBaseline()
+            << ", fx: " << stereo_calib->fx() << ", fx_b: " << fx_b;
+
+  // Create mask for valid disparities (positive values)
+  cv::Mat valid_disp_mask = disparity_img > 0.0f;
+
+  // Compute depth only for valid disparities: depth = fx_b / disparity
+  stereo_frame->left_depth_img_ = cv::Mat::zeros(disparity_img.size(), CV_32F);
+  cv::divide(fx_b, disparity_img, stereo_frame->left_depth_img_, 1.0, CV_32F);
+
+  // Set invalid depths back to 0
+  stereo_frame->left_depth_img_.setTo(0.0f, ~valid_disp_mask);
+
+  stereo_frame->keypoints_depth_.clear();
+  stereo_frame->keypoints_depth_.reserve(
+      stereo_frame->left_keypoints_rectified_.size());
+  stereo_frame->right_keypoints_rectified_.clear();
+  stereo_frame->right_keypoints_rectified_.reserve(
+      stereo_frame->left_keypoints_rectified_.size());
+
+  size_t n_valid_depths = 0;
+  size_t n_invalid_disparity = 0;
+  size_t n_out_of_range = 0;
+  size_t n_bounds_check_failed = 0;
+
+  // Compute disparity statistics for diagnostics
+  double min_disp, max_disp;
+  cv::minMaxLoc(disparity_img, &min_disp, &max_disp);
+  int num_valid_disparities = cv::countNonZero(disparity_img > 0);
+
+  VLOG(1) << "Disparity image stats: min=" << min_disp << ", max=" << max_disp
+          << ", valid pixels=" << num_valid_disparities << " out of "
+          << (disparity_img.rows * disparity_img.cols);
+
+  for (const auto& left_kpt : stereo_frame->left_keypoints_rectified_) {
+    if (left_kpt.first != KeypointStatus::VALID) {
+      stereo_frame->right_keypoints_rectified_.push_back(
+          std::make_pair(left_kpt.first, KeypointCV(0.0, 0.0)));
+      stereo_frame->keypoints_depth_.push_back(0.0);
+      continue;
+    }
+
+    int x = static_cast<int>(std::round(left_kpt.second.x));
+    int y = static_cast<int>(std::round(left_kpt.second.y));
+
+    // Check bounds
+    if (x < 0 || x >= disparity_img.cols || y < 0 || y >= disparity_img.rows) {
+      stereo_frame->right_keypoints_rectified_.push_back(
+          std::make_pair(KeypointStatus::NO_DEPTH, KeypointCV(0.0, 0.0)));
+      stereo_frame->keypoints_depth_.push_back(0.0);
+      n_bounds_check_failed++;
+      continue;
+    }
+
+    float disparity = disparity_img.at<float>(y, x);
+
+    // Check if disparity is valid (negative values indicate invalid matches)
+    if (disparity <= 0.0f || !std::isfinite(disparity)) {
+      stereo_frame->right_keypoints_rectified_.push_back(
+          std::make_pair(KeypointStatus::NO_DEPTH, KeypointCV(0.0, 0.0)));
+      stereo_frame->keypoints_depth_.push_back(0.0);
+      n_invalid_disparity++;
+      VLOG(3) << "Invalid disparity " << disparity << " at keypoint (" << x
+              << ", " << y << ")";
+      continue;
+    }
+
+    double depth = fx_b / disparity;
+
+    // Check depth range
+    if (depth < stereo_matching_params_.min_point_dist_ ||
+        depth > stereo_matching_params_.max_point_dist_) {
+      stereo_frame->right_keypoints_rectified_.push_back(
+          std::make_pair(KeypointStatus::NO_DEPTH, KeypointCV(0.0, 0.0)));
+      stereo_frame->keypoints_depth_.push_back(0.0);
+      n_out_of_range++;
+      VLOG(3) << "Depth " << depth << " out of range ["
+              << stereo_matching_params_.min_point_dist_ << ", "
+              << stereo_matching_params_.max_point_dist_ << "] at keypoint ("
+              << x << ", " << y << "), disparity=" << disparity;
+      continue;
+    }
+
+    // Compute right keypoint location: right_x = left_x - disparity
+    KeypointCV right_kpt(left_kpt.second.x - disparity, left_kpt.second.y);
+    stereo_frame->right_keypoints_rectified_.push_back(
+        std::make_pair(KeypointStatus::VALID, right_kpt));
+    stereo_frame->keypoints_depth_.push_back(depth);
+    n_valid_depths++;
+  }
+
+  LOG(INFO) << "StereoMatcher: Dense stereo reconstruction found "
+            << n_valid_depths << " valid depths out of "
+            << stereo_frame->left_keypoints_rectified_.size()
+            << " keypoints, took " << dense_duration.count() << " seconds.";
+  LOG(INFO) << "  - Invalid disparities: " << n_invalid_disparity;
+  LOG(INFO) << "  - Out of depth range: " << n_out_of_range;
+  LOG(INFO) << "  - Out of bounds: " << n_bounds_check_failed;
 
   //! Fill out right frame keypoints
   CHECK_GT(stereo_frame->right_keypoints_rectified_.size(), 0);
@@ -158,20 +396,25 @@ void StereoMatcher::sparseStereoReconstruction(StereoFrame* stereo_frame) {
   stereo_frame->keypoints_3d_.clear();
   stereo_frame->keypoints_3d_.reserve(
       stereo_frame->right_keypoints_rectified_.size());
+  size_t n_valid_points = 0;
   for (size_t i = 0; i < stereo_frame->right_keypoints_rectified_.size(); i++) {
     if (stereo_frame->right_keypoints_rectified_[i].first ==
         KeypointStatus::VALID) {
       // NOTE: versors are already in the rectified frame.
-      Vector3 versor = stereo_frame->left_frame_.versors_[i];
+      Vector3 versor = stereo_frame->left_frame_.versors_.at(i);
       CHECK_GE(versor(2), 1e-3)
           << "sparseStereoMatching: found point with nonpositive depth!";
       // keypoints_depth_ is not the norm of the vector, it is the z component.
       stereo_frame->keypoints_3d_.push_back(
-          versor * stereo_frame->keypoints_depth_[i] / versor(2));
+          versor * stereo_frame->keypoints_depth_.at(i) / versor(2));
+      n_valid_points++;
     } else {
       stereo_frame->keypoints_3d_.push_back(Vector3::Zero());
     }
   }
+  LOG(INFO) << "StereoMatcher: Sparse stereo reconstruction found "
+            << n_valid_points << " valid 3D points out of "
+            << stereo_frame->right_keypoints_rectified_.size() << " keypoints.";
 }
 
 void StereoMatcher::sparseStereoReconstruction(
@@ -185,12 +428,19 @@ void StereoMatcher::sparseStereoReconstruction(
   CHECK(stereo_calib);
   const auto& baseline = stereo_calib->baseline();
   const auto& fx = stereo_calib->fx();
+  auto start_time = std::chrono::high_resolution_clock::now();
   getRightKeypointsRectified(left_img_rectified,
                              right_img_rectified,
                              left_keypoints_rectified,
                              fx,
                              baseline,
                              right_keypoints_rectified);
+  auto end_time = std::chrono::high_resolution_clock::now();
+  auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+                      end_time - start_time)
+                      .count();
+  VLOG(1) << "StereoMatcher: sparseStereoReconstruction took " << duration
+          << " ms for " << left_keypoints_rectified.size() << " keypoints.";
 }
 
 void StereoMatcher::getRightKeypointsRectified(
@@ -480,6 +730,10 @@ void StereoMatcher::getDepthFromRectifiedMatches(
   }
   CHECK_EQ(left_keypoints_rectified.size(), keypoints_depth->size())
       << "getDepthFromRectifiedMatches: depths size mismatch!";
+
+  VLOG(1) << "getDepthFromRectifiedMatches: Found " << nrValidDepths
+          << " valid depths out of " << left_keypoints_rectified.size()
+          << " keypoints.";
 }
 
 }  // namespace VIO
