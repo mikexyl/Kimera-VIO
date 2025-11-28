@@ -12,7 +12,7 @@ maxFeatureAge: 200
 # 2: AGAST
 # 3: GFTT, aka Good Features To Track
 feature_detector_type: 4
-maxFeaturesPerFrame: 300  # Reduced from 500 to save GPU memory with high-res images
+maxFeaturesPerFrame: 500
 
 # Good Features To Track specific parameters
 quality_level: 0.001
@@ -30,12 +30,12 @@ toleranceTemplateMatching: 0.15
 templ_cols: 128 #must be odd
 templ_rows: 21 
 stripe_extra_rows: 0
-minPointDist: 2
-maxPointDist: 1000
+minPointDist: 0.5
+maxPointDist: 70
 bidirectionalMatching: 0
 
 # Non-maximum suppression params
-max_nr_keypoints_before_anms: 300  # Reduced from 500
+max_nr_keypoints_before_anms: 500
 enable_non_max_suppression: 0
 non_max_suppression_type: 6
 nr_horizontal_bins: 7
@@ -97,7 +97,7 @@ xfeat_use_gpu: 1
 matcher_type: 0 # 0: Brute Force, 1: FLANN, 2: LighterGlue
 
 feature_tracker_type: 1 # 0: OpticalFlow, 1: LighterGlue 2: Flann 3: GpuBFMatcher
-num_features: 300  # Reduced from 500 to save GPU memory
+num_features: 500
 lg_model_path: /workspaces/src/xfeat-cpp/onnx_model/lg_320x224_dyn.onnx
 gpu_bf_min_sim: 0.3 # Minimum similarity for GpuBFMatcher
 search_radius: 30

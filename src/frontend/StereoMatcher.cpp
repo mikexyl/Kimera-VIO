@@ -84,18 +84,25 @@ void StereoMatcher::denseStereoReconstruction(
 
   // Downsample images for SGM to reduce GPU memory usage
   cv::Mat left_sgm, right_sgm;
-  int downscale_factor = std::max(1, dense_stereo_params_.sgm_downscale_factor_);
+  int downscale_factor =
+      std::max(1, dense_stereo_params_.sgm_downscale_factor_);
   if (downscale_factor > 1) {
-    cv::resize(left_gray, left_sgm, 
-               cv::Size(left_gray.cols / downscale_factor, 
-                       left_gray.rows / downscale_factor),
-               0, 0, cv::INTER_AREA);
-    cv::resize(right_gray, right_sgm,
+    cv::resize(left_gray,
+               left_sgm,
+               cv::Size(left_gray.cols / downscale_factor,
+                        left_gray.rows / downscale_factor),
+               0,
+               0,
+               cv::INTER_AREA);
+    cv::resize(right_gray,
+               right_sgm,
                cv::Size(right_gray.cols / downscale_factor,
-                       right_gray.rows / downscale_factor),
-               0, 0, cv::INTER_AREA);
-    VLOG(1) << "Downsampled images from " << left_gray.cols << "x" << left_gray.rows
-            << " to " << left_sgm.cols << "x" << left_sgm.rows
+                        right_gray.rows / downscale_factor),
+               0,
+               0,
+               cv::INTER_AREA);
+    VLOG(1) << "Downsampled images from " << left_gray.cols << "x"
+            << left_gray.rows << " to " << left_sgm.cols << "x" << left_sgm.rows
             << " (factor: " << downscale_factor << ") for SGM processing";
   } else {
     left_sgm = left_gray;
@@ -104,7 +111,7 @@ void StereoMatcher::denseStereoReconstruction(
 
   // Setup stereo matcher
   if (sgm_ == nullptr) {
-    if (dense_stereo_params_.use_sgbm_ and sgm_ == nullptr) {
+    if (dense_stereo_params_.use_sgbm_) {
       if (dense_stereo_params_.use_mode_HH_) {
         LOG(FATAL) << "Only MODE_SGBM is supported for now.";
       }
@@ -121,16 +128,17 @@ void StereoMatcher::denseStereoReconstruction(
 
       int in_bit = 8;
       // Use downsampled image dimensions for SGM initialization
-      int sgm_num_disparities = dense_stereo_params_.num_disparities_ / downscale_factor;
-      sgm_num_disparities = std::max(16, (sgm_num_disparities / 16) * 16); // Round to multiple of 16
-      sgm_ = std::make_shared<sgm::StereoSGM>(
-          left_sgm.cols,
-          left_sgm.rows,
-          sgm_num_disparities,
-          in_bit,
-          16,
-          sgm::EXECUTE_INOUT_HOST2HOST,
-          sgm_params);
+      int sgm_num_disparities =
+          dense_stereo_params_.num_disparities_ / downscale_factor;
+      sgm_num_disparities = std::max(
+          16, (sgm_num_disparities / 16) * 16);  // Round to multiple of 16
+      sgm_ = std::make_shared<sgm::StereoSGM>(left_sgm.cols,
+                                              left_sgm.rows,
+                                              sgm_num_disparities,
+                                              in_bit,
+                                              16,
+                                              sgm::EXECUTE_INOUT_HOST2HOST,
+                                              sgm_params);
 
       VLOG(1) << "LibSGM parameters: P1=" << sgm_params.P1
               << ", P2=" << sgm_params.P2
@@ -161,27 +169,60 @@ void StereoMatcher::denseStereoReconstruction(
   // Reconstruct scene
   // LibSGM outputs CV_16S format (disparity scaled by 16 when subpixel=true)
   cv::Mat disparity_16s_sgm(left_sgm.size(), CV_16S);
-  
+
   // Synchronize CUDA before libsgm execution to avoid conflicts with vilib/ONNX
   cudaError_t sync_err = cudaDeviceSynchronize();
   if (sync_err != cudaSuccess) {
-    LOG(ERROR) << "CUDA sync error before libsgm: " << cudaGetErrorString(sync_err);
+    LOG(ERROR) << "CUDA sync error before libsgm: "
+               << cudaGetErrorString(sync_err);
     cudaGetLastError();  // Clear error
   }
-  
+
+  // Log GPU memory usage before and after libsgm execution to detect
+  // possible memory increases / leaks.
+  size_t free_before = 0, total_before = 0;
+  size_t used_before = 0;
+  cudaError_t mem_err = cudaMemGetInfo(&free_before, &total_before);
+  if (mem_err == cudaSuccess) {
+    used_before = total_before - free_before;
+    LOG(INFO) << "GPU memory before libsgm: used=" << used_before
+              << " bytes, free=" << free_before << " bytes, total="
+              << total_before << " bytes";
+  } else {
+    LOG(ERROR) << "cudaMemGetInfo before libsgm failed: "
+               << cudaGetErrorString(mem_err);
+  }
+
   sgm_->execute(left_sgm.data, right_sgm.data, disparity_16s_sgm.data);
-  
+
+  // Log memory after execution and compute difference.
+  size_t free_after = 0, total_after = 0;
+  size_t used_after = 0;
+  mem_err = cudaMemGetInfo(&free_after, &total_after);
+  if (mem_err == cudaSuccess) {
+    used_after = total_after - free_after;
+    LOG(INFO) << "GPU memory after libsgm: used=" << used_after
+              << " bytes, free=" << free_after << " bytes, total="
+              << total_after << " bytes, increase=" << (used_after - used_before)
+              << " bytes";
+  } else {
+    LOG(ERROR) << "cudaMemGetInfo after libsgm failed: "
+               << cudaGetErrorString(mem_err);
+  }
+
   // Check for errors immediately after libsgm
   cudaError_t exec_err = cudaGetLastError();
   if (exec_err != cudaSuccess) {
-    LOG(ERROR) << "CUDA error after libsgm execute: " << cudaGetErrorString(exec_err)
+    LOG(ERROR) << "CUDA error after libsgm execute: "
+               << cudaGetErrorString(exec_err)
                << " - This indicates GPU memory corruption!";
   }
-  
+
   // Synchronize after libsgm to ensure completion before other CUDA ops
   sync_err = cudaDeviceSynchronize();
   if (sync_err != cudaSuccess) {
-    LOG(ERROR) << "CUDA sync error after libsgm: " << cudaGetErrorString(sync_err)
+    LOG(ERROR) << "CUDA sync error after libsgm: "
+               << cudaGetErrorString(sync_err)
                << " - GPU may be in unstable state!";
     cudaGetLastError();  // Clear error to allow continuation
   }
@@ -192,14 +233,19 @@ void StereoMatcher::denseStereoReconstruction(
   // Upsample disparity back to original resolution if downsampled
   cv::Mat disparity_16s;
   if (downscale_factor > 1) {
-    cv::resize(disparity_16s_sgm, disparity_16s,
+    cv::resize(disparity_16s_sgm,
+               disparity_16s,
                cv::Size(left_gray.cols, left_gray.rows),
-               0, 0, cv::INTER_LINEAR);
-    // Scale disparity values by downscale factor (disparity scales with image size)
+               0,
+               0,
+               cv::INTER_LINEAR);
+    // Scale disparity values by downscale factor (disparity scales with image
+    // size)
     disparity_16s *= downscale_factor;
-    VLOG(1) << "Upsampled disparity from " << disparity_16s_sgm.cols << "x" << disparity_16s_sgm.rows
-            << " to " << disparity_16s.cols << "x" << disparity_16s.rows
-            << " and scaled disparities by " << downscale_factor;
+    VLOG(1) << "Upsampled disparity from " << disparity_16s_sgm.cols << "x"
+            << disparity_16s_sgm.rows << " to " << disparity_16s.cols << "x"
+            << disparity_16s.rows << " and scaled disparities by "
+            << downscale_factor;
   } else {
     disparity_16s = disparity_16s_sgm;
   }
@@ -287,9 +333,6 @@ void StereoMatcher::sparseStereoReconstruction(StereoFrame* stereo_frame) {
   CHECK(stereo_calib);
   double fx_b = stereo_calib->fx() * stereo_camera_->getBaseline();
 
-  LOG(INFO) << "baseline: " << stereo_camera_->getBaseline()
-            << ", fx: " << stereo_calib->fx() << ", fx_b: " << fx_b;
-
   // Create mask for valid disparities (positive values)
   cv::Mat valid_disp_mask = disparity_img > 0.0f;
 
@@ -311,15 +354,6 @@ void StereoMatcher::sparseStereoReconstruction(StereoFrame* stereo_frame) {
   size_t n_invalid_disparity = 0;
   size_t n_out_of_range = 0;
   size_t n_bounds_check_failed = 0;
-
-  // Compute disparity statistics for diagnostics
-  double min_disp, max_disp;
-  cv::minMaxLoc(disparity_img, &min_disp, &max_disp);
-  int num_valid_disparities = cv::countNonZero(disparity_img > 0);
-
-  VLOG(1) << "Disparity image stats: min=" << min_disp << ", max=" << max_disp
-          << ", valid pixels=" << num_valid_disparities << " out of "
-          << (disparity_img.rows * disparity_img.cols);
 
   for (const auto& left_kpt : stereo_frame->left_keypoints_rectified_) {
     if (left_kpt.first != KeypointStatus::VALID) {
@@ -378,14 +412,6 @@ void StereoMatcher::sparseStereoReconstruction(StereoFrame* stereo_frame) {
     n_valid_depths++;
   }
 
-  LOG(INFO) << "StereoMatcher: Dense stereo reconstruction found "
-            << n_valid_depths << " valid depths out of "
-            << stereo_frame->left_keypoints_rectified_.size()
-            << " keypoints, took " << dense_duration.count() << " seconds.";
-  LOG(INFO) << "  - Invalid disparities: " << n_invalid_disparity;
-  LOG(INFO) << "  - Out of depth range: " << n_out_of_range;
-  LOG(INFO) << "  - Out of bounds: " << n_bounds_check_failed;
-
   //! Fill out right frame keypoints
   CHECK_GT(stereo_frame->right_keypoints_rectified_.size(), 0);
   stereo_camera_->distortUnrectifyRightKeypoints(
@@ -412,9 +438,6 @@ void StereoMatcher::sparseStereoReconstruction(StereoFrame* stereo_frame) {
       stereo_frame->keypoints_3d_.push_back(Vector3::Zero());
     }
   }
-  LOG(INFO) << "StereoMatcher: Sparse stereo reconstruction found "
-            << n_valid_points << " valid 3D points out of "
-            << stereo_frame->right_keypoints_rectified_.size() << " keypoints.";
 }
 
 void StereoMatcher::sparseStereoReconstruction(
@@ -428,19 +451,12 @@ void StereoMatcher::sparseStereoReconstruction(
   CHECK(stereo_calib);
   const auto& baseline = stereo_calib->baseline();
   const auto& fx = stereo_calib->fx();
-  auto start_time = std::chrono::high_resolution_clock::now();
   getRightKeypointsRectified(left_img_rectified,
                              right_img_rectified,
                              left_keypoints_rectified,
                              fx,
                              baseline,
                              right_keypoints_rectified);
-  auto end_time = std::chrono::high_resolution_clock::now();
-  auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-                      end_time - start_time)
-                      .count();
-  VLOG(1) << "StereoMatcher: sparseStereoReconstruction took " << duration
-          << " ms for " << left_keypoints_rectified.size() << " keypoints.";
 }
 
 void StereoMatcher::getRightKeypointsRectified(

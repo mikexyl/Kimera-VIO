@@ -1538,16 +1538,16 @@ void Tracker::featureTrackingDesc(
 
   // copying optical flow tracks of features that are not tracked by matcher
   // already
-  for (size_t i = 0; i < ref_frame->of_keypoints_.size(); ++i) {
-    auto ref_lmk_id = ref_frame->of_landmarks_.at(i);
-    auto it = std::find(cur_frame->of_landmarks_.begin(),
-                        cur_frame->of_landmarks_.end(),
-                        ref_lmk_id);
-    if (it != cur_frame->of_landmarks_.end()) {
-      auto cur_kp_id = std::distance(cur_frame->of_landmarks_.begin(), it);
-      cur_frame->landmarks_.at(cur_kp_id) = ref_frame->landmarks_.at(i);
-    }
-  }
+  // for (size_t i = 0; i < ref_frame->of_keypoints_.size(); ++i) {
+  //   auto ref_lmk_id = ref_frame->of_landmarks_.at(i);
+  //   auto it = std::find(cur_frame->of_landmarks_.begin(),
+  //                       cur_frame->of_landmarks_.end(),
+  //                       ref_lmk_id);
+  //   if (it != cur_frame->of_landmarks_.end()) {
+  //     auto cur_kp_id = std::distance(cur_frame->of_landmarks_.begin(), it);
+  //     cur_frame->landmarks_.at(cur_kp_id) = ref_frame->landmarks_.at(i);
+  //   }
+  // }
 
   for (auto match : matches) {
     auto ref_i = match.queryIdx;

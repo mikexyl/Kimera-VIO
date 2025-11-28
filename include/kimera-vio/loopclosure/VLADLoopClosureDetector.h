@@ -38,15 +38,7 @@ struct XfeatNVWrapper : xfeat::XfeatNetVLADONNX {
     }
 
     // time the transform
-    auto start = std::chrono::high_resolution_clock::now();
     global_desc = Base::transform(M1, x_prep);
-    auto end = std::chrono::high_resolution_clock::now();
-    LOG(INFO) << "global desc dims: " << global_desc.rows << " x "
-              << global_desc.cols << " computed in "
-              << std::chrono::duration_cast<std::chrono::milliseconds>(end -
-                                                                       start)
-                     .count()
-              << " ms";
   }
 
   void add(const GlobalDesc& global_desc) {

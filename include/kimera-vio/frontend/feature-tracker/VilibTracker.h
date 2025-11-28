@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cuda_runtime_api.h>
+#include <glog/logging.h>
 #include <vilib/config.h>
 #include <vilib/feature_detection/detector_base_gpu.h>
 #include <vilib/feature_detection/harris/harris_gpu.h>
@@ -71,6 +73,23 @@ class VilibTracker : public FeatureTracker {
     feature_tracker_->setDetectorGPU(detector, 0);
   }
 
+ private:
+  void logGpuMemoryUsage(const std::string& label) {
+    size_t free_byte;
+    size_t total_byte;
+    cudaError_t cuda_status = cudaMemGetInfo(&free_byte, &total_byte);
+    if (cudaSuccess != cuda_status) {
+      LOG(ERROR) << "Error getting GPU memory info: "
+                 << cudaGetErrorString(cuda_status);
+      return;
+    }
+    size_t used_byte = total_byte - free_byte;
+    LOG(INFO) << label
+              << " - GPU Memory: Used=" << used_byte / (1024.0 * 1024.0)
+              << " MB, Free=" << free_byte / (1024.0 * 1024.0)
+              << " MB, Total=" << total_byte / (1024.0 * 1024.0) << " MB";
+  }
+
   void track(Frame* ref_frame,
              Frame* cur_frame,
              const std::vector<cv::Point2f>& prevPts,
@@ -79,6 +98,8 @@ class VilibTracker : public FeatureTracker {
              cv::OutputArray err,
              std::vector<float>* std,
              std::vector<float>* scores) override {
+    logGpuMemoryUsage("Before tracking");
+
     // TODO: change for stereo mode accordingly
     // if (ref_frame) {
     //   CHECK_EQ(ref_frame->id_, prev_frame_id_);
@@ -101,6 +122,10 @@ class VilibTracker : public FeatureTracker {
         std::vector<std::shared_ptr<vilib::Frame>>({vilib_frame}));
     size_t n_tracked, n_detected;
     feature_tracker_->track(vilib_frame_bundle, n_tracked, n_detected);
+
+    logGpuMemoryUsage("After tracking");
+
+    feature_tracker_->showAdditionalStat(true);
 
     const Eigen::Matrix<double, 2, Eigen::Dynamic> features =
         vilib_frame->px_vec_;
