@@ -81,6 +81,11 @@ void TrackerParams::print() const {
                         disparityThreshold_,
                         "tracker type:",
                         VIO::to_underlying(tracker_type_));
+  // Vilib params
+  out << "vilib_cell_width: " << vilib_cell_width << '\n'
+      << "vilib_cell_height: " << vilib_cell_height << '\n'
+      << "vilib_downsample: " << vilib_downsample << '\n'
+      << "vilib_downsample_scale: " << vilib_downsample_scale << '\n';
   LOG(INFO) << out.str();
 }
 
@@ -151,6 +156,10 @@ bool TrackerParams::parseYAML(const std::string& filepath) {
 
   yaml_parser.getYamlParam("vilib_cell_width", &vilib_cell_width);
   yaml_parser.getYamlParam("vilib_cell_height", &vilib_cell_height);
+
+  // Optional downsampling for Vilib tracker
+  yaml_parser.getYamlParam("vilib_downsample", &vilib_downsample);
+  yaml_parser.getYamlParam("vilib_downsample_scale", &vilib_downsample_scale);
 
   return true;
 }

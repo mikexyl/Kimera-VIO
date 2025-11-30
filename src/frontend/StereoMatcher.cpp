@@ -185,7 +185,7 @@ void StereoMatcher::denseStereoReconstruction(
   cudaError_t mem_err = cudaMemGetInfo(&free_before, &total_before);
   if (mem_err == cudaSuccess) {
     used_before = total_before - free_before;
-    LOG(INFO) << "GPU memory before libsgm: used=" << used_before
+    VLOG(10) << "GPU memory before libsgm: used=" << used_before
               << " bytes, free=" << free_before << " bytes, total="
               << total_before << " bytes";
   } else {
@@ -201,7 +201,7 @@ void StereoMatcher::denseStereoReconstruction(
   mem_err = cudaMemGetInfo(&free_after, &total_after);
   if (mem_err == cudaSuccess) {
     used_after = total_after - free_after;
-    LOG(INFO) << "GPU memory after libsgm: used=" << used_after
+    VLOG(10) << "GPU memory after libsgm: used=" << used_after
               << " bytes, free=" << free_after << " bytes, total="
               << total_after << " bytes, increase=" << (used_after - used_before)
               << " bytes";

@@ -108,6 +108,11 @@ struct TrackerParams : public PipelineParams {
 
   int vilib_cell_width = 32;
   int vilib_cell_height = 32;
+  // Vilib downsampling: whether to downsample input images before tracking.
+  bool vilib_downsample = false;
+  // Scale factor applied to input image when downsampling for Vilib. Must be
+  // in (0, 1].
+  float vilib_downsample_scale = 0.5f;
 };
 
 }  // namespace VIO

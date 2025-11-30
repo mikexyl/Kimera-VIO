@@ -41,13 +41,32 @@ class VilibTracker : public FeatureTracker {
     int width, height;
     ShiTomasiOptions detector_options_;
     int n_pyramid_levels_{1};
+    // If true, images will be downsampled before tracking.
+    // The downsample scale is multiplied by the input width/height to obtain
+    // the internal tracker image size used to initialize the detector and
+    // pyramid structures. Must be in (0, 1].
+    bool downsample{false};
+    float downsample_scale{0.5f};
   };
 
   VilibTracker(const Params& params) : params_(params) {
+    // Compute internal tracker size. By default this is the input image size,
+    // but if downsampling is enabled use the provided scale.
+    tracker_width_ = params_.width;
+    tracker_height_ = params_.height;
+    if (params_.downsample) {
+      CHECK_GT(params_.downsample_scale, 0.0f);
+      CHECK_LE(params_.downsample_scale, 1.0f);
+      tracker_width_ = std::max(
+          1, static_cast<int>(params_.width * params_.downsample_scale));
+      tracker_height_ = std::max(
+          1, static_cast<int>(params_.height * params_.downsample_scale));
+    }
+
     std::shared_ptr<vilib::DetectorBaseGPU> detector =
         std::make_shared<vilib::HarrisGPU>(
-            params_.width,
-            params_.height,
+            tracker_width_,
+            tracker_height_,
             params_.detector_options_.cell_width,
             params_.detector_options_.cell_height,
             params_.detector_options_.min_level,
@@ -62,8 +81,8 @@ class VilibTracker : public FeatureTracker {
 
     params_.n_pyramid_levels_ = params_.detector_options_.max_level + 1;
     vilib::PyramidPool::init(IMAGE_PYRAMID_PREALLOCATION_ITEM_NUM,
-                             params_.width,
-                             params_.height,
+                             tracker_width_,
+                             tracker_height_,
                              1,
                              params_.n_pyramid_levels_,
                              vilib::IMAGE_PYRAMID_MEMORY_TYPE);
@@ -84,7 +103,7 @@ class VilibTracker : public FeatureTracker {
       return;
     }
     size_t used_byte = total_byte - free_byte;
-    LOG(INFO) << label
+    VLOG(10) << label
               << " - GPU Memory: Used=" << used_byte / (1024.0 * 1024.0)
               << " MB, Free=" << free_byte / (1024.0 * 1024.0)
               << " MB, Total=" << total_byte / (1024.0 * 1024.0) << " MB";
@@ -116,8 +135,26 @@ class VilibTracker : public FeatureTracker {
     CHECK_EQ(gray_image.step[0], gray_image.cols * gray_image.elemSize())
         << "Image pitch/stride invalid for CUDA";
 
+    // Optionally downsample the image before creating the vilib frame used for
+    // tracking. The detector and pyramid pool were initialized using the
+    // tracker size (tracker_width_/tracker_height_).
+    cv::Mat tracker_image = gray_image;
+    if (params_.downsample) {
+      if (gray_image.cols != tracker_width_ ||
+          gray_image.rows != tracker_height_) {
+        cv::Mat small;
+        cv::resize(gray_image,
+                   small,
+                   cv::Size(tracker_width_, tracker_height_),
+                   0,
+                   0,
+                   cv::INTER_AREA);
+        tracker_image = small;
+      }
+    }
+
     auto vilib_frame = std::make_shared<vilib::Frame>(
-        gray_image, cur_frame->timestamp_, params_.n_pyramid_levels_);
+        tracker_image, cur_frame->timestamp_, params_.n_pyramid_levels_);
     auto vilib_frame_bundle = std::make_shared<vilib::FrameBundle>(
         std::vector<std::shared_ptr<vilib::Frame>>({vilib_frame}));
     size_t n_tracked, n_detected;
@@ -125,7 +162,7 @@ class VilibTracker : public FeatureTracker {
 
     logGpuMemoryUsage("After tracking");
 
-    feature_tracker_->showAdditionalStat(true);
+    // feature_tracker_->showAdditionalStat(true);
 
     const Eigen::Matrix<double, 2, Eigen::Dynamic> features =
         vilib_frame->px_vec_;
@@ -142,8 +179,8 @@ class VilibTracker : public FeatureTracker {
     // populate next pts mat
     std::map<size_t, int> cur_kp_id_to_feature_id, cur_feature_id_to_kp_id;
     for (size_t i = 0; i < vilib_frame->num_features_; ++i) {
-      nextPts->at(i).x = features(0, i);
-      nextPts->at(i).y = features(1, i);
+      nextPts->at(i).x = features(0, i) / params_.downsample_scale;
+      nextPts->at(i).y = features(1, i) / params_.downsample_scale;
       cur_kp_id_to_feature_id[i] = ids[i];
       cur_feature_id_to_kp_id[ids[i]] = i;
     }
@@ -200,6 +237,10 @@ class VilibTracker : public FeatureTracker {
   std::shared_ptr<vilib::FeatureTrackerGPU> feature_tracker_;
   std::map<size_t, int> prev_kp_id_to_feature_id_;
   FrameId prev_frame_id_{0};
+
+  // Internal tracker image size (may be downsampled from the input image).
+  int tracker_width_{0};
+  int tracker_height_{0};
 
   Params params_;
 };

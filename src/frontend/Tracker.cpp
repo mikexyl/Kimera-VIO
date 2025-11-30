@@ -108,6 +108,9 @@ Tracker::Tracker(const TrackerParams& tracker_params,
         tracker_params_.num_features_;
     vilib_params.feature_tracker_options_.use_best_n_features =
         tracker_params_.num_features_;
+    // Propagate optional downsampling parameters for VilibTracker.
+    vilib_params.downsample = tracker_params_.vilib_downsample;
+    vilib_params.downsample_scale = tracker_params_.vilib_downsample_scale;
 
     optical_flow_tracker_ = std::make_shared<VilibTracker>(vilib_params);
   } else {
