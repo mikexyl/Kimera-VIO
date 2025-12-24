@@ -115,3 +115,8 @@ kf_queue_size: 0
 rematch_threshold: 0.5
 
 xfeat_use_of_points: 1
+
+stereoDepthMethod: LightStereo
+enginePath: /workspaces/src/xfeat-cpp/onnx_model/LightStereo-S-KITTI_480x640.engine
+dispWidth: 640
+dispHeight: 480

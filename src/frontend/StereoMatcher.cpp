@@ -16,44 +16,27 @@
 
 #include <cuda_runtime.h>
 #include <glog/logging.h>
-#include <libsgm.h>
 
 #include <opencv2/calib3d.hpp>
 
+#include "xfeat-cpp/stereo_depth.h"
+#include "xfeat-cpp/stereo_depth_libsgm.h"
+#ifdef HAVE_TENSORRT
+#include "xfeat-cpp/stereo_depth_lightstereo.h"
+#endif
 #include "kimera-vio/frontend/StereoFrame.h"
 #include "kimera-vio/utils/Macros.h"
 
-namespace sgm {
-class StereoSGM;
-}
 namespace VIO {
 
 StereoMatcher::StereoMatcher(const StereoCamera::ConstPtr& stereo_camera,
                              const StereoMatchingParams& stereo_matching_params)
     : stereo_camera_(stereo_camera),
       stereo_matching_params_(stereo_matching_params),
-      dense_stereo_params_() {
-  dense_stereo_params_.use_sgbm_ = true;
-  dense_stereo_params_.use_mode_HH_ = false;
-  dense_stereo_params_.min_disparity_ = 0;  // Always 0 for libSGM
-  dense_stereo_params_.num_disparities_ = stereo_matching_params_.templ_cols_;
-  dense_stereo_params_.sad_window_size_ = 5;
-  // LibSGM uses different P1/P2 scaling - use more conservative values
-  int P1 = 10;            // Small penalty for small disparity changes
-  int P2 = 120;           // Larger penalty for large disparity changes
-  int disp12MaxDiff = 2;  // Relaxed LR consistency check (was 1, too strict)
-  int preFilterCap = 31;
-  int uniquenessRatio = 10;     // 10% margin for uniqueness (90% confidence)
-  int speckleWindowSize = 100;  // Larger window for speckle filtering
-  int speckleRange = 2;
-  dense_stereo_params_.p1_ = P1;
-  dense_stereo_params_.p2_ = P2;
-  dense_stereo_params_.disp_12_max_diff_ = disp12MaxDiff;
-  dense_stereo_params_.pre_filter_cap_ = preFilterCap;
-  dense_stereo_params_.uniqueness_ratio_ = uniquenessRatio;
-  dense_stereo_params_.speckle_window_size_ = speckleWindowSize;
-  dense_stereo_params_.speckle_range_ = speckleRange;
-  dense_stereo_params_.median_blur_disparity_ = true;
+      dense_stereo_params_(stereo_matching_params.dense_stereo_params_) {
+  LOG(INFO) << "StereoMatcher initialized with stereo depth method: "
+            << stereoDepthMethodToString(
+                   dense_stereo_params_.stereo_depth_method_);
 }
 
 void StereoMatcher::denseStereoReconstruction(
@@ -70,195 +53,129 @@ void StereoMatcher::denseStereoReconstruction(
   CHECK(stereo_camera_);
 
   // LibSGM only supports grayscale images - convert if needed
-  cv::Mat left_gray, right_gray;
+  cv::Mat left_bgr, right_bgr;
   if (left_img_rectified.channels() == 3) {
-    cv::cvtColor(left_img_rectified, left_gray, cv::COLOR_BGR2GRAY);
-    cv::cvtColor(right_img_rectified, right_gray, cv::COLOR_BGR2GRAY);
+    left_bgr = left_img_rectified;
+    right_bgr = right_img_rectified;
   } else if (left_img_rectified.channels() == 1) {
-    left_gray = left_img_rectified;
-    right_gray = right_img_rectified;
+    LOG(FATAL)
+        << "Input images are grayscale but lightstereo requires BGR images.";
   } else {
     LOG(FATAL) << "Input image must have 1 or 3 channels, got "
                << left_img_rectified.channels();
   }
 
-  // Downsample images for SGM to reduce GPU memory usage
-  cv::Mat left_sgm, right_sgm;
-  int downscale_factor =
-      std::max(1, dense_stereo_params_.sgm_downscale_factor_);
-  if (downscale_factor > 1) {
-    cv::resize(left_gray,
-               left_sgm,
-               cv::Size(left_gray.cols / downscale_factor,
-                        left_gray.rows / downscale_factor),
-               0,
-               0,
-               cv::INTER_AREA);
-    cv::resize(right_gray,
-               right_sgm,
-               cv::Size(right_gray.cols / downscale_factor,
-                        right_gray.rows / downscale_factor),
-               0,
-               0,
-               cv::INTER_AREA);
-    VLOG(1) << "Downsampled images from " << left_gray.cols << "x"
-            << left_gray.rows << " to " << left_sgm.cols << "x" << left_sgm.rows
-            << " (factor: " << downscale_factor << ") for SGM processing";
-  } else {
-    left_sgm = left_gray;
-    right_sgm = right_gray;
-  }
-
   // Setup stereo matcher
-  if (sgm_ == nullptr) {
-    if (dense_stereo_params_.use_sgbm_) {
-      if (dense_stereo_params_.use_mode_HH_) {
-        LOG(FATAL) << "Only MODE_SGBM is supported for now.";
+  if (stereo_depth_ == nullptr) {
+    switch (dense_stereo_params_.stereo_depth_method_) {
+      case StereoDepthMethod::OPENCV_BM: {
+        VLOG(1) << "Using OpenCV Block Matching stereo depth";
+        xfeat::OpenCVStereoDepth::Params params;
+        params.algorithm = xfeat::OpenCVStereoDepth::Algorithm::BM;
+        params.min_disparity = dense_stereo_params_.min_disparity_;
+        params.num_disparities = dense_stereo_params_.num_disparities_;
+        params.block_size = dense_stereo_params_.sad_window_size_;
+        params.pre_filter_cap = dense_stereo_params_.pre_filter_cap_;
+        params.uniqueness_ratio = dense_stereo_params_.uniqueness_ratio_;
+        params.speckle_window_size = dense_stereo_params_.speckle_window_size_;
+        params.speckle_range = dense_stereo_params_.speckle_range_;
+        params.disp12_max_diff = dense_stereo_params_.disp_12_max_diff_;
+        stereo_depth_ = std::make_shared<xfeat::OpenCVStereoDepth>(params);
+        break;
       }
-      sgm::StereoSGM::Parameters sgm_params;
-      sgm_params.P1 = dense_stereo_params_.p1_;
-      sgm_params.P2 = dense_stereo_params_.p2_;
-      sgm_params.uniqueness =
-          1.0f - dense_stereo_params_.uniqueness_ratio_ / 100.0f;
-      sgm_params.subpixel = false;
-      sgm_params.min_disp = dense_stereo_params_.min_disparity_;
-      sgm_params.LR_max_diff = dense_stereo_params_.disp_12_max_diff_;
-      sgm_params.census_type = sgm::CensusType::SYMMETRIC_CENSUS_9x7;
-      sgm_params.path_type = sgm::PathType::SCAN_8PATH;
-
-      int in_bit = 8;
-      // Use downsampled image dimensions for SGM initialization
-      int sgm_num_disparities =
-          dense_stereo_params_.num_disparities_ / downscale_factor;
-      sgm_num_disparities = std::max(
-          16, (sgm_num_disparities / 16) * 16);  // Round to multiple of 16
-      sgm_ = std::make_shared<sgm::StereoSGM>(left_sgm.cols,
-                                              left_sgm.rows,
-                                              sgm_num_disparities,
-                                              in_bit,
-                                              16,
-                                              sgm::EXECUTE_INOUT_HOST2HOST,
-                                              sgm_params);
-
-      VLOG(1) << "LibSGM parameters: P1=" << sgm_params.P1
-              << ", P2=" << sgm_params.P2
-              << ", uniqueness=" << sgm_params.uniqueness
-              << ", num_disp=" << sgm_num_disparities
-              << ", LR_max_diff=" << sgm_params.LR_max_diff
-              << ", input_channels=" << left_img_rectified.channels()
-              << " (converted to grayscale)"
-              << ", downscale_factor=" << downscale_factor
-              << ", SGM image size=" << left_sgm.cols << "x" << left_sgm.rows;
-      // cv_stereo_matcher =
-      //     cv::StereoSGBM::create(dense_stereo_params_.min_disparity_,
-      //                            dense_stereo_params_.num_disparities_,
-      //                            dense_stereo_params_.sad_window_size_,
-      //                            dense_stereo_params_.p1_ * n_channel,
-      //                            dense_stereo_params_.p2_ * n_channel,
-      //                            dense_stereo_params_.disp_12_max_diff_,
-      //                            dense_stereo_params_.pre_filter_cap_,
-      //                            dense_stereo_params_.uniqueness_ratio_,
-      //                            dense_stereo_params_.speckle_window_size_,
-      //                            dense_stereo_params_.speckle_range_,
-      //                            mode);
-    } else {
-      LOG(FATAL) << "Only CUDA SGM dense stereo is supported for now.";
+      case StereoDepthMethod::OPENCV_SGBM: {
+        VLOG(1) << "Using OpenCV Semi-Global Block Matching stereo depth";
+        xfeat::OpenCVStereoDepth::Params params;
+        params.algorithm = xfeat::OpenCVStereoDepth::Algorithm::SGBM;
+        params.min_disparity = dense_stereo_params_.min_disparity_;
+        params.num_disparities = dense_stereo_params_.num_disparities_;
+        params.block_size = dense_stereo_params_.sad_window_size_;
+        params.P1 = dense_stereo_params_.p1_;
+        params.P2 = dense_stereo_params_.p2_;
+        params.uniqueness_ratio = dense_stereo_params_.uniqueness_ratio_;
+        params.speckle_window_size = dense_stereo_params_.speckle_window_size_;
+        params.speckle_range = dense_stereo_params_.speckle_range_;
+        params.disp12_max_diff = dense_stereo_params_.disp_12_max_diff_;
+        params.mode = dense_stereo_params_.use_mode_HH_
+                          ? cv::StereoSGBM::MODE_HH
+                          : cv::StereoSGBM::MODE_SGBM;
+        stereo_depth_ = std::make_shared<xfeat::OpenCVStereoDepth>(params);
+        break;
+      }
+      case StereoDepthMethod::LIBSGM: {
+        VLOG(1) << "Using LibSGM stereo depth (GPU-accelerated)";
+        xfeat::LibSGMStereoDepth::Params params;
+        params.num_disparities = dense_stereo_params_.num_disparities_;
+        params.num_disparities =
+            std::max(16, (params.num_disparities / 16) * 16);
+        params.P1 = dense_stereo_params_.p1_;
+        params.P2 = dense_stereo_params_.p2_;
+        params.uniqueness_ratio =
+            1.0f - dense_stereo_params_.uniqueness_ratio_ / 100.0f;
+        params.subpixel = false;
+        params.path_type = 1;  // SCAN_8PATH
+        params.min_disparity = dense_stereo_params_.min_disparity_;
+        params.lr_max_diff = dense_stereo_params_.disp_12_max_diff_;
+        params.census_type = 1;  // SYMMETRIC_CENSUS_9x7
+        params.use_gpu =
+            true;  // Will auto-fallback to CPU if OpenCV lacks CUDA
+        stereo_depth_ = std::make_shared<xfeat::LibSGMStereoDepth>(params);
+        VLOG(1) << "LibSGM parameters: P1=" << params.P1 << ", P2=" << params.P2
+                << ", uniqueness=" << params.uniqueness_ratio
+                << ", num_disp=" << params.num_disparities
+                << ", LR_max_diff=" << params.lr_max_diff;
+        break;
+      }
+      case StereoDepthMethod::LIGHTSTEREO: {
+#ifdef HAVE_TENSORRT
+        VLOG(1) << "Using LightStereo deep learning stereo depth (TensorRT)";
+        xfeat::LightStereoDepth::Params params;
+        params.engine_path = dense_stereo_params_.engine_path_;
+        params.max_disparity = dense_stereo_params_.num_disparities_;
+        params.target_size = cv::Size(dense_stereo_params_.disp_width_,
+                                      dense_stereo_params_.disp_height_);
+        stereo_depth_ = std::make_shared<xfeat::LightStereoDepth>(params);
+#else
+        LOG(FATAL) << "LightStereo selected but TensorRT support not compiled. "
+                   << "Please rebuild with TensorRT or choose a different "
+                      "stereo method.";
+#endif
+        break;
+      }
+      default:
+        LOG(FATAL) << "Unknown stereo depth method";
     }
   }
 
   // Reconstruct scene
-  // LibSGM outputs CV_16S format (disparity scaled by 16 when subpixel=true)
-  cv::Mat disparity_16s_sgm(left_sgm.size(), CV_16S);
+  // Output will be CV_16S format (disparity scaled by 16 if subpixel enabled)
+  cv::Mat disparity_32f(left_bgr.size(), CV_32F);
 
-  // Synchronize CUDA before libsgm execution to avoid conflicts with vilib/ONNX
-  cudaError_t sync_err = cudaDeviceSynchronize();
-  if (sync_err != cudaSuccess) {
-    LOG(ERROR) << "CUDA sync error before libsgm: "
-               << cudaGetErrorString(sync_err);
-    cudaGetLastError();  // Clear error
+  // Use our stereo depth interface
+  stereo_depth_->compute(left_bgr, right_bgr, disparity_32f);
+
+  // save the input images every 100 frames for debugging
+  static int frame_id = 0;
+  frame_id++;
+  if (frame_id % 100 == 0) {
+    cv::imwrite("/tmp/left_image.png", left_bgr);
+    cv::imwrite("/tmp/right_image.png", right_bgr);
+    cv::imwrite("/tmp/disparity_image.png", disparity_32f);
   }
 
-  // Log GPU memory usage before and after libsgm execution to detect
-  // possible memory increases / leaks.
-  size_t free_before = 0, total_before = 0;
-  size_t used_before = 0;
-  cudaError_t mem_err = cudaMemGetInfo(&free_before, &total_before);
-  if (mem_err == cudaSuccess) {
-    used_before = total_before - free_before;
-    VLOG(10) << "GPU memory before libsgm: used=" << used_before
-              << " bytes, free=" << free_before << " bytes, total="
-              << total_before << " bytes";
-  } else {
-    LOG(ERROR) << "cudaMemGetInfo before libsgm failed: "
-               << cudaGetErrorString(mem_err);
-  }
-
-  sgm_->execute(left_sgm.data, right_sgm.data, disparity_16s_sgm.data);
-
-  // Log memory after execution and compute difference.
-  size_t free_after = 0, total_after = 0;
-  size_t used_after = 0;
-  mem_err = cudaMemGetInfo(&free_after, &total_after);
-  if (mem_err == cudaSuccess) {
-    used_after = total_after - free_after;
-    VLOG(10) << "GPU memory after libsgm: used=" << used_after
-              << " bytes, free=" << free_after << " bytes, total="
-              << total_after << " bytes, increase=" << (used_after - used_before)
-              << " bytes";
-  } else {
-    LOG(ERROR) << "cudaMemGetInfo after libsgm failed: "
-               << cudaGetErrorString(mem_err);
-  }
-
-  // Check for errors immediately after libsgm
-  cudaError_t exec_err = cudaGetLastError();
-  if (exec_err != cudaSuccess) {
-    LOG(ERROR) << "CUDA error after libsgm execute: "
-               << cudaGetErrorString(exec_err)
-               << " - This indicates GPU memory corruption!";
-  }
-
-  // Synchronize after libsgm to ensure completion before other CUDA ops
-  sync_err = cudaDeviceSynchronize();
-  if (sync_err != cudaSuccess) {
-    LOG(ERROR) << "CUDA sync error after libsgm: "
-               << cudaGetErrorString(sync_err)
-               << " - GPU may be in unstable state!";
-    cudaGetLastError();  // Clear error to allow continuation
-  }
-
-  // Get invalid disparity value
-  int invalid_disp = sgm_->get_invalid_disparity();
-
-  // Upsample disparity back to original resolution if downsampled
-  cv::Mat disparity_16s;
-  if (downscale_factor > 1) {
-    cv::resize(disparity_16s_sgm,
-               disparity_16s,
-               cv::Size(left_gray.cols, left_gray.rows),
-               0,
-               0,
-               cv::INTER_LINEAR);
-    // Scale disparity values by downscale factor (disparity scales with image
-    // size)
-    disparity_16s *= downscale_factor;
-    VLOG(1) << "Upsampled disparity from " << disparity_16s_sgm.cols << "x"
-            << disparity_16s_sgm.rows << " to " << disparity_16s.cols << "x"
-            << disparity_16s.rows << " and scaled disparities by "
-            << downscale_factor;
-  } else {
-    disparity_16s = disparity_16s_sgm;
-  }
+  // Get invalid disparity value (standard invalid value for CV_16S)
+  int invalid_disp = -1;
 
   // Create mask for invalid disparities before conversion
-  cv::Mat valid_mask = disparity_16s != (invalid_disp * downscale_factor);
+  cv::Mat valid_mask = disparity_32f != invalid_disp;
 
-  // Convert from CV_16S to CV_32F and divide by 16 to get actual disparity
-  disparity_16s.convertTo(*disparity_img, CV_32F);
+  disparity_32f.copyTo(*disparity_img);
+
 
   // Optionally, smooth the disparity image BEFORE marking invalid pixels
   // This prevents median blur from blending invalid values with valid ones
   if (dense_stereo_params_.median_blur_disparity_) {
+    LOG(FATAL) << "Median blur removed";
     cv::Mat disparity_valid;
     disparity_img->copyTo(disparity_valid, valid_mask);
     cv::medianBlur(disparity_valid, disparity_valid, 5);

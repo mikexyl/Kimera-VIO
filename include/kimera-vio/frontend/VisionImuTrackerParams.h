@@ -88,8 +88,6 @@ struct TrackerParams : public PipelineParams {
     OPTICAL_FLOW = 0,
     LIGHTERGLUE,
     VILIB,
-    GPU_BF,
-    GPU_BF_RANSAC,
   } tracker_type_ = TrackerType::OPTICAL_FLOW;
 
   bool track_on_keyframe_ = false;

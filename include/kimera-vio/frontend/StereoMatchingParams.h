@@ -14,12 +14,53 @@
 
 #pragma once
 
+#include <opencv2/calib3d.hpp>  // Only for StereoBM (put in another file).
+
 #include "kimera-vio/frontend/StereoFrame-definitions.h"
 #include "kimera-vio/pipeline/PipelineParams.h"
 
-#include <opencv2/calib3d.hpp> // Only for StereoBM (put in another file).
-
 namespace VIO {
+
+// Stereo depth estimation methods
+enum class StereoDepthMethod {
+  OPENCV_BM,    // OpenCV Block Matching (CPU)
+  OPENCV_SGBM,  // OpenCV Semi-Global Block Matching (CPU)
+  LIBSGM,       // LibSGM (GPU-accelerated, falls back to CPU)
+  LIGHTSTEREO   // LightStereo deep learning (requires TensorRT)
+};
+struct DenseStereoParams {
+  bool use_sgbm_ = true;
+  bool post_filter_disparity_ = false;
+  bool median_blur_disparity_ = false;
+  int pre_filter_cap_ = 31;
+  int sad_window_size_ = 11;
+  int min_disparity_ = 1;
+  int num_disparities_ = 64;
+  int uniqueness_ratio_ = 0;
+  int speckle_range_ = 3;
+  int speckle_window_size_ = 500;
+  // bm parameters
+  int texture_threshold_ = 0;
+  int pre_filter_type_ = cv::StereoBM::PREFILTER_XSOBEL;
+  int pre_filter_size_ = 9;
+  // sgbm parameters
+  int p1_ = 120;
+  int p2_ = 240;
+  int disp_12_max_diff_ = -1;
+  bool use_mode_HH_ = true;
+  // Downscale factor for SGM processing (1 = no downscaling, 2 = half size,
+  // etc.) Higher values reduce GPU memory usage but may reduce accuracy
+  int sgm_downscale_factor_ = 2;
+  // Stereo depth estimation method to use
+  StereoDepthMethod stereo_depth_method_ = StereoDepthMethod::LIBSGM;
+
+  std::string engine_path_ = "";  // For LightStereo: path to TensorRT engine
+  int disp_height_ = 480;
+  int disp_width_ = 640;
+
+  // Parse parameters from YAML file
+  bool parseYAML(const std::string& filepath);
+};
 
 class StereoMatchingParams : public PipelineParams {
  public:
@@ -56,32 +97,41 @@ class StereoMatchingParams : public PipelineParams {
   bool subpixel_refinement_ = false;
   // do equalize image before processing options to use RGB-D vs. stereo.
   bool equalize_image_ = false;
+
+  DenseStereoParams dense_stereo_params_;
 };
 
-// TODO(Toni) make it a pipeline params and parseable.
-struct DenseStereoParams {
-  bool use_sgbm_ = true;
-  bool post_filter_disparity_ = false;
-  bool median_blur_disparity_ = false;
-  int pre_filter_cap_ = 31;
-  int sad_window_size_ = 11;
-  int min_disparity_ = 1;
-  int num_disparities_ = 64;
-  int uniqueness_ratio_ = 0;
-  int speckle_range_ = 3;
-  int speckle_window_size_ = 500;
-  // bm parameters
-  int texture_threshold_ = 0;
-  int pre_filter_type_ = cv::StereoBM::PREFILTER_XSOBEL;
-  int pre_filter_size_ = 9;
-  // sgbm parameters
-  int p1_ = 120;
-  int p2_ = 240;
-  int disp_12_max_diff_ = -1;
-  bool use_mode_HH_ = true;
-  // Downscale factor for SGM processing (1 = no downscaling, 2 = half size, etc.)
-  // Higher values reduce GPU memory usage but may reduce accuracy
-  int sgm_downscale_factor_ = 2;
-};
+// Helper function to convert enum to string
+inline const char* stereoDepthMethodToString(StereoDepthMethod method) {
+  switch (method) {
+    case StereoDepthMethod::OPENCV_BM:
+      return "OpenCV_BM";
+    case StereoDepthMethod::OPENCV_SGBM:
+      return "OpenCV_SGBM";
+    case StereoDepthMethod::LIBSGM:
+      return "LibSGM";
+    case StereoDepthMethod::LIGHTSTEREO:
+      return "LightStereo";
+    default:
+      return "Unknown";
+  }
+}
+
+// Helper function to parse StereoDepthMethod from string
+inline StereoDepthMethod stereoDepthMethodFromString(const std::string& str) {
+  if (str == "OpenCV_BM" || str == "OPENCV_BM") {
+    return StereoDepthMethod::OPENCV_BM;
+  } else if (str == "OpenCV_SGBM" || str == "OPENCV_SGBM") {
+    return StereoDepthMethod::OPENCV_SGBM;
+  } else if (str == "LibSGM" || str == "LIBSGM") {
+    return StereoDepthMethod::LIBSGM;
+  } else if (str == "LightStereo" || str == "LIGHTSTEREO") {
+    return StereoDepthMethod::LIGHTSTEREO;
+  } else {
+    LOG(WARNING) << "Unknown stereo depth method: " << str
+                 << ", defaulting to LibSGM";
+    return StereoDepthMethod::LIBSGM;
+  }
+}
 
 }  // namespace VIO
