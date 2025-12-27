@@ -15,11 +15,15 @@
 
 #pragma once
 
-#include <libsgm.h>
+#include <memory>
 
 #include "kimera-vio/frontend/StereoCamera.h"
 #include "kimera-vio/frontend/StereoMatchingParams.h"
 #include "kimera-vio/utils/Macros.h"
+
+namespace xfeat {
+class StereoDepth;
+}
 
 namespace VIO {
 
@@ -113,7 +117,7 @@ class StereoMatcher {
   //! Parameters for dense stereo matching
   DenseStereoParams dense_stereo_params_;
 
-  std::shared_ptr<sgm::StereoSGM> sgm_{nullptr};
+  std::shared_ptr<xfeat::StereoDepth> stereo_depth_{nullptr};
 };
 
 }  // namespace VIO

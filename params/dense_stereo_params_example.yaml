@@ -1,0 +1,137 @@
+%YAML:1.0
+# Dense Stereo Matching Parameters Configuration File
+# This file configures the dense stereo depth estimation for Kimera-VIO
+
+# ============================================================================
+# Stereo Depth Method Selection
+# ============================================================================
+# Choose between different stereo depth estimation algorithms:
+# - "OpenCV_BM"      : OpenCV Block Matching (fast, basic quality, CPU only)
+# - "OpenCV_SGBM"    : OpenCV Semi-Global Block Matching (good quality, CPU only)
+# - "LibSGM"         : LibSGM GPU-accelerated SGM (fast with GPU, auto CPU fallback)
+# - "LightStereo"    : Deep learning stereo (best quality, requires TensorRT)
+stereoDepthMethod: "LibSGM"
+
+# ============================================================================
+# General Stereo Parameters (used by all methods)
+# ============================================================================
+# Minimum disparity value (typically 0)
+minDisparity: 0
+
+# Number of disparity levels to search (must be divisible by 16)
+# Higher values allow detecting objects at closer range but increase computation
+numDisparities: 128
+
+# Block/window size for matching (must be odd, typically 3-21)
+# Larger values give smoother results but less detail
+sadWindowSize: 5
+
+# Uniqueness constraint (0-100)
+# Higher values ensure more unique matches
+uniquenessRatio: 10
+
+# Speckle filter parameters
+# Larger window size removes more speckles but may remove small valid regions
+speckleWindowSize: 100
+speckleRange: 2
+
+# Left-Right disparity consistency check
+# Maximum allowed difference (-1 to disable)
+disp12MaxDiff: 2
+
+# ============================================================================
+# SGBM-Specific Parameters (for OpenCV_SGBM and LibSGM)
+# ============================================================================
+# P1: Penalty for small disparity changes (pixels with similar intensity)
+# Typical value: 8 * channels * block_size^2
+P1: 10
+
+# P2: Penalty for large disparity changes
+# Typical value: 32 * channels * block_size^2
+# Should be larger than P1
+P2: 120
+
+# Use Hirschmuller mode (MODE_HH) instead of MODE_SGBM
+# MODE_HH is more accurate but slower (OpenCV_SGBM only)
+useModeHH: false
+
+# ============================================================================
+# Block Matching Parameters (for OpenCV_BM only)
+# ============================================================================
+# Pre-filter cap for BM algorithm
+preFilterCap: 31
+
+# Pre-filter type: 0 = NORMALIZED_RESPONSE, 1 = XSOBEL
+preFilterType: 1
+
+# Pre-filter size (must be odd, between 5 and 255)
+preFilterSize: 9
+
+# Texture threshold - filters out low-texture regions
+textureThreshold: 0
+
+# ============================================================================
+# LibSGM-Specific Parameters
+# ============================================================================
+# Downscale factor for SGM processing
+# 1 = no downscaling (high memory, best quality)
+# 2 = half resolution (medium memory, good quality)
+# 4 = quarter resolution (low memory, reduced quality)
+sgmDownscaleFactor: 2
+
+# ============================================================================
+# Post-Processing Parameters
+# ============================================================================
+# Apply median blur to disparity map for noise reduction
+medianBlurDisparity: true
+
+# Apply WLS filter for edge-aware smoothing (not yet implemented)
+postFilterDisparity: false
+
+# Legacy parameter (kept for backward compatibility)
+useSGBM: true
+
+# ============================================================================
+# Usage Examples
+# ============================================================================
+# 
+# 1. CPU-only system (no GPU):
+#    stereoDepthMethod: "OpenCV_SGBM"
+#
+# 2. GPU-accelerated system (CUDA available):
+#    stereoDepthMethod: "LibSGM"
+#    sgmDownscaleFactor: 2
+#
+# 3. Best quality with TensorRT:
+#    stereoDepthMethod: "LightStereo"
+#
+# 4. Fastest processing:
+#    stereoDepthMethod: "OpenCV_BM"
+#    or
+#    stereoDepthMethod: "LibSGM"
+#    sgmDownscaleFactor: 4
+#
+# 5. Close-range objects:
+#    numDisparities: 256
+#    sgmDownscaleFactor: 1  # if using LibSGM
+#
+# 6. Long-range objects:
+#    numDisparities: 64
+#
+# ============================================================================
+# Performance Tuning
+# ============================================================================
+#
+# To reduce GPU memory usage (LibSGM):
+# - Increase sgmDownscaleFactor (2 or 4)
+# - Reduce numDisparities
+#
+# To improve quality:
+# - Decrease sgmDownscaleFactor (use 1 if memory allows)
+# - Increase numDisparities for close objects
+# - Use LightStereo if TensorRT available
+#
+# To improve speed:
+# - Increase sgmDownscaleFactor
+# - Use OpenCV_BM for fastest CPU processing
+# - Use LibSGM with GPU for best GPU performance

@@ -23,7 +23,6 @@
 
 #include "kimera-vio/frontend/UndistorterRectifier.h"
 #include "kimera-vio/frontend/feature-detector/FeatureDetector.h"
-#include "kimera-vio/frontend/feature-tracker/GpuBFMatcher.h"
 #include "kimera-vio/frontend/feature-tracker/VilibTracker.h"
 #include "kimera-vio/frontend/optical-flow/OpticalFlowPredictorFactory.h"
 #include "kimera-vio/utils/Timer.h"
@@ -135,20 +134,9 @@ Tracker::Tracker(const TrackerParams& tracker_params,
       LOG(WARNING) << "can't use VILIB as the main feature tracker";
       break;
     }
-    case TrackerParams::TrackerType::GPU_BF: {
-      feature_tracker_ =
-          std::make_shared<GpuBFMatcher>(tracker_params_.num_features_,
-                                         tracker_params_.gpu_bf_min_sim_,
-                                         false);
-      break;
-    }
-    case TrackerParams::TrackerType::GPU_BF_RANSAC: {
-      feature_tracker_ =
-          std::make_shared<GpuBFMatcher>(tracker_params_.num_features_,
-                                         tracker_params_.gpu_bf_min_sim_,
-                                         true,
-                                         camera_->getCamParams());
-      break;
+    default: {
+      LOG(FATAL) << "Unknown tracker type! "
+                 << static_cast<int>(tracker_params_.tracker_type_);
     }
   }
 }

@@ -31,7 +31,7 @@ templ_cols: 128 #must be odd
 templ_rows: 11
 stripe_extra_rows: 0
 minPointDist: 0.5
-maxPointDist: 10
+maxPointDist: 100
 bidirectionalMatching: 0
 
 # Non-maximum suppression params
@@ -108,8 +108,16 @@ max_lmk_merge_px: 0
 
 vilib_cell_width: 32
 vilib_cell_height: 32
+vilib_downsample: 1
+vilib_downsample_scale: 0.5
 
 kf_queue_size: 0
 rematch_threshold: 0.5
 
 xfeat_use_of_points: 1
+
+stereoDepthMethod: ONNX_Stereo
+# enginePath: /workspaces/src/xfeat-cpp/onnx_model/LightStereo-M-KITTI_256x512.engine
+enginePath: /workspaces/src/ONNX-FastACVNet-Depth-Estimation/models/fast_acvnet_plus_generalization_opset11_288x512.onnx
+dispWidth: 512
+dispHeight: 288

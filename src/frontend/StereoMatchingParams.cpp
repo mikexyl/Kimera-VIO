@@ -88,6 +88,86 @@ bool StereoMatchingParams::parseYAML(const std::string& filepath) {
   yaml_parser.getYamlParam("maxPointDist", &max_point_dist_);
   yaml_parser.getYamlParam("bidirectionalMatching", &bidirectional_matching_);
   yaml_parser.getYamlParam("subpixelRefinementStereo", &subpixel_refinement_);
+
+  dense_stereo_params_.parseYAML(filepath);
+  return true;
+}
+
+bool DenseStereoParams::parseYAML(const std::string& filepath) {
+  YamlParser yaml_parser(filepath);
+
+  // Parse stereo depth method
+  if (yaml_parser.hasParam("stereoDepthMethod")) {
+    std::string method_str;
+    yaml_parser.getYamlParam("stereoDepthMethod", &method_str);
+    stereo_depth_method_ = stereoDepthMethodFromString(method_str);
+  }
+
+  // Parse other dense stereo parameters
+  if (yaml_parser.hasParam("useSGBM")) {
+    yaml_parser.getYamlParam("useSGBM", &use_sgbm_);
+  }
+  if (yaml_parser.hasParam("postFilterDisparity")) {
+    yaml_parser.getYamlParam("postFilterDisparity", &post_filter_disparity_);
+  }
+  if (yaml_parser.hasParam("medianBlurDisparity")) {
+    yaml_parser.getYamlParam("medianBlurDisparity", &median_blur_disparity_);
+  }
+  if (yaml_parser.hasParam("preFilterCap")) {
+    yaml_parser.getYamlParam("preFilterCap", &pre_filter_cap_);
+  }
+  if (yaml_parser.hasParam("sadWindowSize")) {
+    yaml_parser.getYamlParam("sadWindowSize", &sad_window_size_);
+  }
+  if (yaml_parser.hasParam("minDisparity")) {
+    yaml_parser.getYamlParam("minDisparity", &min_disparity_);
+  }
+  if (yaml_parser.hasParam("numDisparities")) {
+    yaml_parser.getYamlParam("numDisparities", &num_disparities_);
+  }
+  if (yaml_parser.hasParam("uniquenessRatio")) {
+    yaml_parser.getYamlParam("uniquenessRatio", &uniqueness_ratio_);
+  }
+  if (yaml_parser.hasParam("speckleRange")) {
+    yaml_parser.getYamlParam("speckleRange", &speckle_range_);
+  }
+  if (yaml_parser.hasParam("speckleWindowSize")) {
+    yaml_parser.getYamlParam("speckleWindowSize", &speckle_window_size_);
+  }
+  if (yaml_parser.hasParam("textureThreshold")) {
+    yaml_parser.getYamlParam("textureThreshold", &texture_threshold_);
+  }
+  if (yaml_parser.hasParam("preFilterType")) {
+    yaml_parser.getYamlParam("preFilterType", &pre_filter_type_);
+  }
+  if (yaml_parser.hasParam("preFilterSize")) {
+    yaml_parser.getYamlParam("preFilterSize", &pre_filter_size_);
+  }
+  if (yaml_parser.hasParam("P1")) {
+    yaml_parser.getYamlParam("P1", &p1_);
+  }
+  if (yaml_parser.hasParam("P2")) {
+    yaml_parser.getYamlParam("P2", &p2_);
+  }
+  if (yaml_parser.hasParam("disp12MaxDiff")) {
+    yaml_parser.getYamlParam("disp12MaxDiff", &disp_12_max_diff_);
+  }
+  if (yaml_parser.hasParam("useModeHH")) {
+    yaml_parser.getYamlParam("useModeHH", &use_mode_HH_);
+  }
+  if (yaml_parser.hasParam("sgmDownscaleFactor")) {
+    yaml_parser.getYamlParam("sgmDownscaleFactor", &sgm_downscale_factor_);
+  }
+  if(yaml_parser.hasParam("enginePath")) {
+    yaml_parser.getYamlParam("enginePath", &engine_path_);
+  }
+  if(yaml_parser.hasParam("dispHeight")) {
+    yaml_parser.getYamlParam("dispHeight", &disp_height_);
+  }
+  if(yaml_parser.hasParam("dispWidth")) {
+    yaml_parser.getYamlParam("dispWidth", &disp_width_);
+  }
+  
   return true;
 }
 
