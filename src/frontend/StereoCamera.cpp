@@ -311,6 +311,8 @@ void StereoCamera::computeRectificationParameters(
   gtsam::Pose3 camL_Pose_camR =
       (left_cam_params.body_Pose_cam_).between(right_cam_params.body_Pose_cam_);
 
+  LOG(INFO) << camL_Pose_camR.matrix();
+
   // Get extrinsics in open CV format.
   // NOTE: openCV pose convention is the opposite, that's why we have to
   // invert

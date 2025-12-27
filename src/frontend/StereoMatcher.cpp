@@ -21,6 +21,7 @@
 
 #include "xfeat-cpp/stereo_depth.h"
 #include "xfeat-cpp/stereo_depth_libsgm.h"
+#include "xfeat-cpp/stereo_depth_onnx.h"
 #ifdef HAVE_TENSORRT
 #include "xfeat-cpp/stereo_depth_lightstereo.h"
 #endif
@@ -142,6 +143,23 @@ void StereoMatcher::denseStereoReconstruction(
 #endif
         break;
       }
+      case StereoDepthMethod::ONNX_STEREO: {
+        VLOG(1) << "Using ONNX-based deep learning stereo depth";
+        xfeat::OnnxStereoDepth::Params params;
+        params.model_path = dense_stereo_params_.engine_path_;
+        params.input_size = cv::Size(dense_stereo_params_.disp_width_,
+                                     dense_stereo_params_.disp_height_);
+        params.use_cuda = true;
+        params.warmup_iterations = dense_stereo_params_.onnx_warmup_iterations_;
+        params.max_disparity = dense_stereo_params_.num_disparities_;
+        params.focal_length = stereo_camera_->getLeftCamParams().intrinsics_[0];
+        params.baseline = stereo_camera_->getBaseline();
+        params.verbose = VLOG_IS_ON(1);
+        stereo_depth_ = std::make_shared<xfeat::OnnxStereoDepth>(params);
+        LOG(INFO) << "ONNX stereo depth initialized with model: "
+                  << params.model_path;
+        break;
+      }
       default:
         LOG(FATAL) << "Unknown stereo depth method";
     }
@@ -153,16 +171,6 @@ void StereoMatcher::denseStereoReconstruction(
 
   // Use our stereo depth interface
   stereo_depth_->compute(left_bgr, right_bgr, disparity_32f);
-
-  // save the input images every 100 frames for debugging
-  static int frame_id = 0;
-  frame_id++;
-  if (frame_id % 100 == 0) {
-    cv::imwrite("/tmp/left_image.png", left_bgr);
-    cv::imwrite("/tmp/right_image.png", right_bgr);
-    cv::imwrite("/tmp/disparity_image.png", disparity_32f);
-  }
-
   // Get invalid disparity value (standard invalid value for CV_16S)
   int invalid_disp = -1;
 
@@ -170,7 +178,6 @@ void StereoMatcher::denseStereoReconstruction(
   cv::Mat valid_mask = disparity_32f != invalid_disp;
 
   disparity_32f.copyTo(*disparity_img);
-
 
   // Optionally, smooth the disparity image BEFORE marking invalid pixels
   // This prevents median blur from blending invalid values with valid ones
@@ -236,11 +243,23 @@ void StereoMatcher::sparseStereoReconstruction(StereoFrame* stereo_frame) {
                         stereo_frame->getLeftImgRectified().cols,
                         CV_32F);
   auto start_dense = std::chrono::high_resolution_clock::now();
+
   denseStereoReconstruction(stereo_frame->getLeftImgRectified(),
                             stereo_frame->getRightImgRectified(),
                             &disparity_img);
   auto end_dense = std::chrono::high_resolution_clock::now();
   std::chrono::duration<double> dense_duration = end_dense - start_dense;
+
+  // save the input images every 100 frames for debugging
+  static int frame_id = 0;
+  frame_id++;
+  if (frame_id % 100 == 0) {
+    cv::imwrite("/tmp/left_rect.png", stereo_frame->getLeftImgRectified());
+    cv::imwrite("/tmp/right_rect.png", stereo_frame->getRightImgRectified());
+    cv::imwrite("/tmp/left_raw.png", stereo_frame->left_frame_.img_);
+    cv::imwrite("/tmp/right_raw.png", stereo_frame->right_frame_.img_);
+    cv::imwrite("/tmp/disparity_image.png", disparity_img);
+  }
 
   stereo_frame->left_disp_img_ = disparity_img.clone();
 
@@ -257,8 +276,15 @@ void StereoMatcher::sparseStereoReconstruction(StereoFrame* stereo_frame) {
   stereo_frame->left_depth_img_ = cv::Mat::zeros(disparity_img.size(), CV_32F);
   cv::divide(fx_b, disparity_img, stereo_frame->left_depth_img_, 1.0, CV_32F);
 
+  // Filter by depth range: create mask for valid depth values
+  cv::Mat valid_depth_mask = (stereo_frame->left_depth_img_ >=
+                              stereo_matching_params_.min_point_dist_) &
+                             (stereo_frame->left_depth_img_ <=
+                              stereo_matching_params_.max_point_dist_) &
+                             valid_disp_mask;
+
   // Set invalid depths back to 0
-  stereo_frame->left_depth_img_.setTo(0.0f, ~valid_disp_mask);
+  stereo_frame->left_depth_img_.setTo(0.0f, ~valid_depth_mask);
 
   stereo_frame->keypoints_depth_.clear();
   stereo_frame->keypoints_depth_.reserve(
@@ -295,7 +321,10 @@ void StereoMatcher::sparseStereoReconstruction(StereoFrame* stereo_frame) {
     float disparity = disparity_img.at<float>(y, x);
 
     // Check if disparity is valid (negative values indicate invalid matches)
-    if (disparity <= 0.0f || !std::isfinite(disparity)) {
+    if (disparity <= 0.0f || !std::isfinite(disparity) ||
+        disparity >=
+            left_kpt.second.x) {  // disparity cannot be larger than x coord,
+                                  // which could happen when using networks
       stereo_frame->right_keypoints_rectified_.push_back(
           std::make_pair(KeypointStatus::NO_DEPTH, KeypointCV(0.0, 0.0)));
       stereo_frame->keypoints_depth_.push_back(0.0);

@@ -26,7 +26,8 @@ enum class StereoDepthMethod {
   OPENCV_BM,    // OpenCV Block Matching (CPU)
   OPENCV_SGBM,  // OpenCV Semi-Global Block Matching (CPU)
   LIBSGM,       // LibSGM (GPU-accelerated, falls back to CPU)
-  LIGHTSTEREO   // LightStereo deep learning (requires TensorRT)
+  LIGHTSTEREO,  // LightStereo deep learning (requires TensorRT)
+  ONNX_STEREO   // ONNX-based deep learning stereo (FastACVNet, etc.)
 };
 struct DenseStereoParams {
   bool use_sgbm_ = true;
@@ -57,6 +58,8 @@ struct DenseStereoParams {
   std::string engine_path_ = "";  // For LightStereo: path to TensorRT engine
   int disp_height_ = 480;
   int disp_width_ = 640;
+
+  int onnx_warmup_iterations_ = 3;     // Number of warmup iterations
 
   // Parse parameters from YAML file
   bool parseYAML(const std::string& filepath);
@@ -112,6 +115,8 @@ inline const char* stereoDepthMethodToString(StereoDepthMethod method) {
       return "LibSGM";
     case StereoDepthMethod::LIGHTSTEREO:
       return "LightStereo";
+    case StereoDepthMethod::ONNX_STEREO:
+      return "ONNX_Stereo";
     default:
       return "Unknown";
   }
@@ -127,6 +132,8 @@ inline StereoDepthMethod stereoDepthMethodFromString(const std::string& str) {
     return StereoDepthMethod::LIBSGM;
   } else if (str == "LightStereo" || str == "LIGHTSTEREO") {
     return StereoDepthMethod::LIGHTSTEREO;
+  } else if (str == "ONNX_Stereo" || str == "ONNX_STEREO" || str == "onnx_stereo") {
+    return StereoDepthMethod::ONNX_STEREO;
   } else {
     LOG(WARNING) << "Unknown stereo depth method: " << str
                  << ", defaulting to LibSGM";

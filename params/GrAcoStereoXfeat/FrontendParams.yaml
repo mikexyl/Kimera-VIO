@@ -30,8 +30,8 @@ toleranceTemplateMatching: 0.15
 templ_cols: 128 #must be odd
 templ_rows: 21 
 stripe_extra_rows: 0
-minPointDist: 0.5
-maxPointDist: 70
+minPointDist: 3
+maxPointDist: 130
 bidirectionalMatching: 0
 
 # Non-maximum suppression params
@@ -116,7 +116,13 @@ rematch_threshold: 0.5
 
 xfeat_use_of_points: 1
 
-stereoDepthMethod: LightStereo
-enginePath: /workspaces/src/xfeat-cpp/onnx_model/LightStereo-S-KITTI_480x640.engine
-dispWidth: 640
-dispHeight: 480
+# stereoDepthMethod: LightStereo
+# enginePath: /workspaces/src/xfeat-cpp/onnx_model/LightStereo-S-KITTI_480x640.engine
+# dispWidth: 640
+# dispHeight: 480
+
+stereoDepthMethod: ONNX_Stereo
+# enginePath: /workspaces/src/xfeat-cpp/onnx_model/LightStereo-M-KITTI_256x512.engine
+enginePath: /workspaces/src/ONNX-FastACVNet-Depth-Estimation/models/fast_acvnet_plus_generalization_opset11_288x512.onnx
+dispWidth: 512
+dispHeight: 288

@@ -167,7 +167,7 @@ bool DenseStereoParams::parseYAML(const std::string& filepath) {
   if(yaml_parser.hasParam("dispWidth")) {
     yaml_parser.getYamlParam("dispWidth", &disp_width_);
   }
-
+  
   return true;
 }
 

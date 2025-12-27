@@ -31,7 +31,7 @@ templ_cols: 128
 templ_rows: 21
 stripe_extra_rows: 0
 minPointDist: 0.5
-maxPointDist: 30
+maxPointDist: 100
 bidirectionalMatching: 0
 
 # Non-maximum suppression params
@@ -64,7 +64,7 @@ ransac_randomize: 0
 min_intra_keyframe_time: 0.2
 max_intra_keyframe_time: 10.0
 max_disparity_since_lkf: 200 #large value to disable
-minNumberFeatures: 200
+minNumberFeatures: 100
 useStereoTracking: 1
 disparityThreshold: 0.5
 # Type of optical flow predictor to aid feature tracking:
@@ -115,3 +115,9 @@ kf_queue_size: 0
 rematch_threshold: 0.5
 
 xfeat_use_of_points: 1
+
+stereoDepthMethod: ONNX_Stereo
+# enginePath: /workspaces/src/xfeat-cpp/onnx_model/LightStereo-M-KITTI_256x512.engine
+enginePath: /workspaces/src/ONNX-FastACVNet-Depth-Estimation/models/fast_acvnet_plus_generalization_opset11_288x512.onnx
+dispWidth: 512
+dispHeight: 288
