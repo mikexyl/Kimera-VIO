@@ -2,37 +2,44 @@
 
 namespace VIO {
 
-DEFINE_double(max_nss_vlad_distance,
-              0.06,
-              "Maximum NSS distance for VLAD loop closure detection.");
+size_t VLADLoopClosureDetector::new_seq_id_ = 0;
+
+void VLADLoopClosureDetector::computeSequenceGlobalDesc(
+    const FrameId target_frame_id) {
+  auto new_frame = cache_.getFrame(target_frame_id);
+  new_seq_frames_.emplace_back(new_frame);
+  new_frame->seq_id_ = new_seq_id_;
+  new_frame->descriptors_vec_.clear();
+
+  if (new_seq_frames_.size() ==
+      static_cast<size_t>(lcd_params_.jist_seq_length_)) {
+    // We have enough frames for a sequence. Proceed with loop detection.
+    VLOG(2) << "VLADLoopClosureDetector: Processing sequence of size: "
+            << new_seq_frames_.size() << ".";
+
+    auto global_desc = cv::Mat();
+    db_->transform(new_seq_frames_, global_desc);
+
+    for (auto seq_frame : new_seq_frames_) {
+      seq_frame->descriptors_vec_.clear();
+      seq_frame->clearImage();
+      seq_frame->descriptors_vec_.emplace_back(global_desc.clone());
+    }
+
+    new_seq_frames_.clear();
+    new_seq_id_++;
+  }
+}
 
 void VLADLoopClosureDetector::detectLoop(const FrameId& frame_id,
-                                         const Database::GlobalDesc& bow_vec,
                                          LoopResult* result,
                                          FrameId* query_frame,
                                          FrameIdSet* global_candidates) {
-  CHECK_NOTNULL(result);
-  auto query_frame_outside_local_window =
-      this->findFirstFrameIdOutsideLocalWindow(frame_id);
-  if (query_frame_outside_local_window) {
-    this->detectLoopOutsideLocalWindow(*query_frame_outside_local_window,
-                                       bow_vec,
-                                       result,
-                                       query_frame,
-                                       global_candidates);
-  } else {
-    if (query_frame) {
-      *query_frame = 0;
-    }
-    if (global_candidates) {
-      global_candidates->clear();
-    }
-  }
+  throw std::runtime_error("removed");
 }
 
 void VLADLoopClosureDetector::detectLoopOutsideLocalWindow(
     const FrameId& frame_id,
-    const Database::GlobalDesc&,  // not used, leave it here for compatibility
     LoopResult* result,
     FrameId* query_frame,
     FrameIdSet* global_candidates) {
@@ -103,26 +110,6 @@ void VLADLoopClosureDetector::detectLoopOutsideLocalWindow(
     return;
   }
 
-  auto prev_global_vec = db_->get(frame_id - 1);
-  CHECK(!prev_global_vec.empty())
-      << "VLADLoopClosureDetector: Previous global descriptor for frame "
-      << (frame_id - 1) << " is empty.";
-
-  double nss_distance = 0.0;
-  if (lcd_params_.use_nss_) {
-    nss_distance = db_->distance(global_desc, prev_global_vec);
-  } else {
-    LOG_IF(ERROR, !lcd_params_.use_nss_)
-        << "Setting use_nss as false is deprecated.";
-  }
-
-  if (lcd_params_.use_nss_ && nss_distance > FLAGS_max_nss_vlad_distance) {
-    VLOG(1) << "VLADLoopClosureDetector: NSS distance " << nss_distance
-            << " exceeds threshold " << FLAGS_max_nss_vlad_distance
-            << ". No loop closure.";
-    result->status_ = LCDStatus::LOW_NSS_FACTOR;
-    return;
-  }
 
   auto faiss_to_dbow_queryresults =
       [&](Database::Database::QueryResults& query_result,
@@ -130,24 +117,13 @@ void VLADLoopClosureDetector::detectLoopOutsideLocalWindow(
       -> DBoW2::QueryResults {
     DBoW2::QueryResults dbow_query_result;
     for (size_t i = 0; i < query_result.size(); ++i) {
-      static constexpr double kL2DistanceToScoreFactor = 10.0;
-      float score = std::exp(-kL2DistanceToScoreFactor * query_distance[i]);
       DBoW2::Result result;
       result.Id = query_result[i];
-      result.Score = score;
+      result.Score = query_distance[i];
       dbow_query_result.push_back(result);
     }
     return dbow_query_result;
   };
-
-  // Remove high distances from the QueryResults based on nss.
-  for (size_t i = 0; i < query_result.size(); ++i) {
-    if (query_distance[i] > nss_distance / lcd_params_.alpha_) {
-      query_result.erase(query_result.begin() + i);
-      query_distance.erase(query_distance.begin() + i);
-      --i;  // Adjust index after erasure.
-    }
-  }
 
   auto dbow_query_result =
       faiss_to_dbow_queryresults(query_result, query_distance);

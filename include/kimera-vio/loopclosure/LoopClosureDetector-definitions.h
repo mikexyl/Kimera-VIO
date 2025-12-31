@@ -34,8 +34,7 @@ typedef cv::Mat OrbDescriptor;
 typedef std::vector<OrbDescriptor> OrbDescriptorVec;
 
 enum class LoopClosureDetectorType {
-  BoW = 0u,      //! Bag of Words approach
-  NetVLAD = 1u,  //! NetVLAD approach
+  NetVLAD = 2u,  //! NetVLAD approach
 };
 
 enum class LCDStatus : int {
@@ -79,6 +78,8 @@ struct LCDFrame {
 
   static LCDFrame::Ptr load(std::istream& buffer);
 
+  void clearImage() { image_.release(); }
+
   Timestamp timestamp_;
   FrameId id_;
   FrameId id_kf_;
@@ -90,6 +91,8 @@ struct LCDFrame {
   BearingVectors bearing_vectors_;
   Pose3 W_Pose_Blkf_;  // VIO pose of the frame in the world frame
   CameraParams cam_params_;
+  cv::Mat image_;
+  size_t seq_id_{0};
 
  protected:
   virtual void saveBytes(std::ostream& buffer) const;

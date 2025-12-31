@@ -186,108 +186,16 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::spinOnce(
 
   landmark_manager_->updateObsFrames(curr_frame->id_, curr_frame->landmark_ids);
 
-  typename Database::GlobalDesc curr_bow_vec;
-  db_->transform(curr_frame->descriptors_vec_, curr_bow_vec);
+  computeSequenceGlobalDesc(lcd_frame_id);
 
-  LoopResult loop_result;
-  loop_result.status_ = LCDStatus::NO_MATCHES;
-  FrameId query_frame_id;
-  FrameIdSet global_candidates;
-  if (!FLAGS_lcd_no_detection) {
-    detectLoop(lcd_frame_id,
-               curr_bow_vec,
-               &loop_result,
-               &query_frame_id,
-               &global_candidates);
-  }
-
-  db_->add(curr_bow_vec);
-
-  // Update latest bowvec for normalized similarity scoring (NSS).
-  if (static_cast<int>(lcd_frame_id + 1) > lcd_params_.recent_frames_window_) {
-    latest_global_vec_.reset(new typename Database::GlobalDesc(curr_bow_vec));
-  } else {
-    VLOG(3) << "LoopClosureDetector: Not enough frames processed.";
-  }
-
-  // Build and add LC factor if result is a loop closure.
-
-  utils::StatsCollector stat_pgo_timing("PGO Update/Optimization Timing [ms]");
-  auto tic = utils::Timer::tic();
-  std::vector<Timestamp> timestamp_query, timestamp_match;
-  if (loop_result.isLoop()) {
-    CHECK_EQ(loop_result.relative_pose_.size(), loop_result.query_id_.size());
-    CHECK_EQ(loop_result.relative_pose_.size(), loop_result.match_id_.size());
-    for (size_t loop_i = 0; loop_i < loop_result.query_id_.size(); loop_i++) {
-      auto match_id = loop_result.match_id_[loop_i];
-      auto query_id = loop_result.query_id_[loop_i];
-      auto relative_pose = loop_result.relative_pose_[loop_i];
-      timestamp_query.emplace_back(timestamp_map_.at(
-          query_id));  // Get the timestamp of the query frame.
-      timestamp_match.emplace_back(timestamp_map_.at(match_id));
-      VLOG(1) << "LoopClosureDetector: LOOP CLOSURE detected from keyframe "
-              << match_id << " to keyframe " << query_id;
-
-      if (loop_result.status_ == LCDStatus::LOOP_DETECTED_ROT) {
-        // Rotation part of the information matrix of the noise model
-        // emphasized.
-        gtsam::Matrix mat_info = gtsam::Matrix::Identity(6, 6);
-        gtsam::Matrix mat_info_rotation_part =
-            lcd_params_.betweenRotationPrecision_ *
-            gtsam::Matrix::Identity(3, 3);
-        mat_info.block<3, 3>(0, 0) = (mat_info_rotation_part);
-
-        // Zero out the translation part of the noise model to only use the
-        // 2d2d pose for the loop closure factor. mat_info.block<3, 3>(3, 3) =
-        // gtsam::Matrix::Identity(3, 3) * 0.0;
-        mat_info.block<3, 3>(3, 3) = gtsam::Matrix::Identity(3, 3) * 1e-12;
-
-        // Instantiate a noise model from the rotation-only information
-        // matrix.
-        gtsam::SharedNoiseModel noise_model_5pt_rotation_only =
-            gtsam::noiseModel::Diagonal::Information(mat_info);
-
-        // Refresh timer because all previous stuff irrelevant to PGO timing.
-        tic = utils::Timer::tic();
-        addLoopClosureFactorAndOptimize(LoopClosureFactor(
-            match_id, query_id, relative_pose, noise_model_5pt_rotation_only));
-      } else if (loop_result.status_ == LCDStatus::LOOP_DETECTED) {
-        addLoopClosureFactorAndOptimize(LoopClosureFactor(
-            match_id, query_id, relative_pose, shared_noise_model_));
-      }
-    }
-    auto update_duration = utils::Timer::toc(tic).count();
-    stat_pgo_timing.AddSample(update_duration);
-  } else {
-    VLOG(2) << "LoopClosureDetector: No loop closure detected. Reason: "
-            << LoopResult::asString(loop_result.status_);
-  }
-
-  // Timestamps for PGO and for LCD should match now.
-  CHECK_EQ(curr_frame->timestamp_, timestamp_map_.at(curr_frame->id_));
-  CHECK_EQ(timestamp_map_.size(), cache_.size());
-  CHECK_EQ(timestamp_map_.size(), W_Pose_B_kf_vio_.first + 1);
-
-  // Construct output payload.
-  CHECK(pgo_);
   const gtsam::Pose3& w_Pose_map = getWPoseMap();
   const gtsam::Pose3& map_Pose_odom = getMapPoseOdom();
   const gtsam::Values& pgo_states = pgo_->calculateEstimate();
   const gtsam::NonlinearFactorGraph& pgo_nfg = pgo_->getFactorsUnsafe();
 
   LcdOutput::UniquePtr output_payload = nullptr;
-  if (loop_result.isLoop()) {
-    output_payload = std::make_unique<LcdOutput>(loop_result.status_,
-                                                 input.timestamp_,
-                                                 timestamp_query,
-                                                 timestamp_match,
-                                                 loop_result.match_id_,
-                                                 loop_result.query_id_,
-                                                 loop_result.relative_pose_);
-  } else {
-    output_payload =
-        std::make_unique<LcdOutput>(loop_result.status_, input.timestamp_);
-  }
+  output_payload =
+      std::make_unique<LcdOutput>(LCDStatus::NO_MATCHES, input.timestamp_);
 
   CHECK(output_payload) << "Missing LCD output payload.";
 
@@ -301,39 +209,22 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::spinOnce(
   CHECK_EQ(curr_frame->keypoints_3d_.size(),
            curr_frame->bearing_vectors_.size());
 
+  std::map<int, double> bow_vec{};
+  if (curr_frame->descriptors_vec_.size() > 0 and
+      not curr_frame->descriptors_vec_[0].empty()) {
+    bow_vec = globalDescToMap(curr_frame->descriptors_vec_[0]);
+  }
+
   output_payload->setFrameInformation(keypoints_2d,
                                       curr_frame->keypoints_3d_,
                                       curr_frame->bearing_vectors_,
-                                      globalDescToMap(curr_bow_vec),
+                                      bow_vec,
                                       curr_frame->descriptors_mat_);
   output_payload->landmarks_ = landmark_manager_->getLandmarks();
   output_payload->timestamp_map_ = timestamp_map_;
   output_payload->covis_graph_ = landmark_manager_->getCovisGraph();
-  output_payload->query_frame_ = query_frame_id;
-  output_payload->global_candidates_ = global_candidates;
 
   cleanFrame(lcd_frame_id);
-
-  // if (logger_) {
-  //   debug_info_.timestamp_ = output_payload->timestamp_;
-  //   debug_info_.loop_result_ = loop_result;
-  //   debug_info_.pgo_size_ = pgo_->size();
-  //   debug_info_.pgo_lc_count_ = pgo_->getNumLC();
-  //   debug_info_.pgo_lc_inliers_ = pgo_->getNumLCInliers();
-
-  //   debug_info_.mono_input_size_ = tracker_->debug_info_.nrMonoPutatives_;
-  //   debug_info_.mono_inliers_ = tracker_->debug_info_.nrMonoInliers_;
-  //   debug_info_.mono_iter_ = tracker_->debug_info_.monoRansacIters_;
-
-  //   debug_info_.stereo_input_size_ =
-  //   tracker_->debug_info_.nrStereoPutatives_; debug_info_.stereo_inliers_ =
-  //   tracker_->debug_info_.nrStereoInliers_; debug_info_.stereo_iter_ =
-  //   tracker_->debug_info_.stereoRansacIters_;
-
-  //   logger_->logTimestampMap(timestamp_map_);
-  //   logger_->logDebugInfo(debug_info_);
-  //   logger_->logLCDResult(*output_payload);
-  // }
 
   return output_payload;
 }
@@ -596,7 +487,7 @@ FrameId LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::
   // rewriteStereoFrameFeatures(keypoints, &cp_stereo_frame);
 
   // Build and store LCDFrame object.
-  return cache_.addFrame(std::make_shared<StereoLCDFrame>(
+  auto lcd_frame = std::make_shared<StereoLCDFrame>(
       stereo_frame.timestamp_,
       FrameCache::NEW_ID,
       stereo_frame.id_,
@@ -607,7 +498,9 @@ FrameId LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::
       descriptors_mat,
       stereo_frame.left_frame_.versors_,
       stereo_frame.left_keypoints_rectified_,
-      stereo_frame.right_keypoints_rectified_));
+      stereo_frame.right_keypoints_rectified_);
+  lcd_frame->image_ = stereo_frame.left_frame_.img_;
+  return cache_.addFrame(lcd_frame);
 }
 
 /* ------------------------------------------------------------------------

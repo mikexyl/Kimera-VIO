@@ -2,9 +2,11 @@
 
 #include <cuda_runtime.h>
 #include <xfeat-cpp/faiss_database.h>
+#include <xfeat-cpp/jist_onnx.h>
 #include <xfeat-cpp/xfeat_cv.h>
 #include <xfeat-cpp/xfeat_netvlad_onnx.h>
 
+#include "kimera-vio/loopclosure/FrameCache.h"
 #include "kimera-vio/loopclosure/LoopClosureDetector.h"
 
 namespace VIO {
@@ -21,6 +23,7 @@ struct XfeatNVWrapper : xfeat::XfeatNetVLADONNX {
   XfeatNVWrapper(std::unique_ptr<Database> faiss_db, Args&&... args)
       : Base(std::forward<Args>(args)...), db_(std::move(faiss_db)) {}
 
+  // Original transform function for backward compatibility with descriptors_vec
   void transform(const DescVector& desc_vec, GlobalDesc& global_desc) {
     CHECK(desc_vec.size() == 2) << "XfeatNVWrapper: the feature vector must be "
                                    "the vector of [M1, x_prep]";
@@ -39,6 +42,23 @@ struct XfeatNVWrapper : xfeat::XfeatNetVLADONNX {
 
     // time the transform
     global_desc = Base::transform(M1, x_prep);
+  }
+
+  // New transform function that accepts frame cache and target frame id
+  // For XfeatNetVLAD, we just retrieve the cached descriptors for the target
+  // frame
+  void transform(const FrameCache& frame_cache,
+                 const FrameId target_frame_id,
+                 GlobalDesc& global_desc) {
+    auto frame = frame_cache.getFrame(target_frame_id);
+    if (!frame) {
+      throw std::runtime_error("XfeatNVWrapper: Frame " +
+                               std::to_string(target_frame_id) +
+                               " not found in cache");
+    }
+
+    // Use the cached descriptors_vec from the frame
+    transform(frame->descriptors_vec_, global_desc);
   }
 
   void add(const GlobalDesc& global_desc) {
@@ -66,11 +86,91 @@ struct XfeatNVWrapper : xfeat::XfeatNetVLADONNX {
   }
 
   template <typename... Args>
-  auto distance(Args&&... args) {
+  auto sim(Args&&... args) {
     try {
-      return db_->l2_distance(std::forward<Args>(args)...);
+      return db_->cosine_similarity(std::forward<Args>(args)...);
     } catch (const std::exception& e) {
-      LOG(ERROR) << "Failed to compute distance in database: " << e.what();
+      LOG(ERROR) << "Failed to compute similarity in database: " << e.what();
+      throw;
+    }
+  }
+
+  GlobalDesc get(const faiss::idx_t id) const {
+    if (id_to_desc_map_.count(id)) {
+      return id_to_desc_map_.at(id);
+    } else {
+      return GlobalDesc();  // Return an empty cv::Mat if id not found
+    }
+  }
+
+ private:
+  std::unique_ptr<Database> db_;
+  std::map<faiss::idx_t, cv::Mat> id_to_desc_map_;
+};
+
+// JIST ONNX wrapper for sequence-based visual place recognition
+struct JistONNXWrapper : xfeat::JistONNX {
+  using Base = xfeat::JistONNX;
+  using GlobalDesc = cv::Mat;
+  using Desc = cv::Mat;
+  using DescVector = std::vector<cv::Mat>;
+  using DescMat = cv::Mat;
+  using Database = xfeat::FaissDatabase;
+
+  template <typename... Args>
+  JistONNXWrapper(std::unique_ptr<Database> faiss_db, Args&&... args)
+      : Base(std::forward<Args>(args)...), db_(std::move(faiss_db)) {}
+
+  // Transform function now takes all cached frames and computes descriptor for
+  // target frame by using a sequence of seq_length frames ending at
+  // target_frame_id
+  void transform(std::vector<LCDFrame::Ptr> frames, GlobalDesc& global_desc) {
+    const int seq_length = Base::get_seq_length();
+
+    // Collect sequence of frames for inference
+    std::vector<cv::Mat> image_sequence;
+    image_sequence.reserve(seq_length);
+
+    CHECK_EQ(seq_length, frames.size());
+
+    for (const auto& frame : frames) {
+      image_sequence.push_back(frame->image_);
+    }
+
+    // Run JIST inference
+    global_desc = Base::infer(image_sequence);
+  }
+
+  void add(const GlobalDesc& global_desc) {
+    CHECK_NOTNULL(db_);
+    CHECK(not global_desc.empty());
+    faiss::idx_t id = id_to_desc_map_.size();
+    id_to_desc_map_.emplace(id, global_desc.clone());
+    try {
+      db_->add(global_desc);
+    } catch (const std::exception& e) {
+      LOG(ERROR) << "Failed to add to database: " << e.what();
+      throw;
+    }
+  }
+
+  template <typename... Args>
+  void search(Args&&... args) {
+    CHECK_NOTNULL(db_);
+    try {
+      db_->search(std::forward<Args>(args)...);
+    } catch (const std::exception& e) {
+      LOG(ERROR) << "Failed to search in database: " << e.what();
+      throw;
+    }
+  }
+
+  template <typename... Args>
+  auto sim(Args&&... args) {
+    try {
+      return db_->cosine_similarity(std::forward<Args>(args)...);
+    } catch (const std::exception& e) {
+      LOG(ERROR) << "Failed to compute similarity in database: " << e.what();
       throw;
     }
   }
@@ -107,14 +207,14 @@ class DummyFeatureDetector : cv::FeatureDetector {
 };
 
 class VLADLoopClosureDetector
-    : public LoopClosureDetector<XfeatNVWrapper,
+    : public LoopClosureDetector<JistONNXWrapper,
                                  DummyFeatureDetector,
                                  xfeat::LighterGlueCV> {
  public:
   KIMERA_POINTER_TYPEDEFS(VLADLoopClosureDetector);
   KIMERA_DELETE_COPY_CONSTRUCTORS(VLADLoopClosureDetector);
 
-  using Database = XfeatNVWrapper;
+  using Database = JistONNXWrapper;
 
   static constexpr bool kVLADLCDUseGPU = true;
 
@@ -123,7 +223,8 @@ class VLADLoopClosureDetector
       : LoopClosureDetector(std::forward<Args>(args)...) {
     CHECK(!lcd_params_.lcd_lg_model_path_.empty())
         << "VLADLoopClosureDetector: lcd_lg_model_path_ must be set!";
-    CHECK(lcd_params_.lcd_faiss_index_path_.empty());
+    CHECK(!lcd_params_.jist_model_path_.empty())
+        << "VLADLoopClosureDetector: jist_model_path_ must be set!";
 
     // Sparse stereo reconstruction members (only if stereo_camera is provided)
     if (stereo_camera_) {
@@ -173,27 +274,31 @@ class VLADLoopClosureDetector
     LOG(INFO) << "GPU memory usage for loading FAISS index: "
               << (free_before - free_after) / (1024.0 * 1024.0) << " MB";
 
-    db_ = std::make_unique<Database>(std::move(faiss_db),
-                                     env,
-                                     lcd_params_.xfeat_nv_head_model_path_,
-                                     lcd_params_.netvlad_model_path_,
-                                     kVLADLCDUseGPU,
-                                     lcd_params_.network_input_height_ / 16,
-                                     lcd_params_.network_input_width_ / 16);
+    // Initialize JIST ONNX model
+    xfeat::JistONNX::Params jist_params;
+    jist_params.model_path = lcd_params_.jist_model_path_;
+    jist_params.use_gpu = kVLADLCDUseGPU;
+    jist_params.seq_length = lcd_params_.jist_seq_length_;
+    jist_params.img_height = lcd_params_.network_input_height_;
+    jist_params.img_width = lcd_params_.network_input_width_;
+    jist_params.descriptor_dim = lcd_params_.jist_descriptor_dim_;
+    jist_params.normalize_output = true;
+
+    db_ = std::make_unique<Database>(std::move(faiss_db), env, jist_params);
   }
 
   /* ------------------------------------------------------------------------
    */
   virtual ~VLADLoopClosureDetector() override = default;
 
+  void computeSequenceGlobalDesc(const FrameId target_frame_id) override;
+
   void detectLoop(const FrameId& frame_id,
-                  const Database::GlobalDesc& bow_vec,
                   LoopResult* result,
                   FrameId* query_frame = nullptr,
                   FrameIdSet* global_candidates = nullptr) override;
 
   void detectLoopOutsideLocalWindow(const FrameId& frame_id,
-                                    const Database::GlobalDesc& bow_vec,
                                     LoopResult* result,
                                     FrameId* query_frame = nullptr,
                                     FrameIdSet* global_candidates = nullptr);
@@ -329,6 +434,9 @@ class VLADLoopClosureDetector
   void cleanFrame(const LCDFrame::Ptr& frame) override {
     frame->descriptors_vec_.clear();
   }
+
+  std::vector<LCDFrame::Ptr> new_seq_frames_;
+  static size_t new_seq_id_;
 };
 
 }  // namespace VIO

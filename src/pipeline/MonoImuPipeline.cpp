@@ -37,8 +37,7 @@ namespace VIO {
 
 MonoImuPipeline::MonoImuPipeline(const VioParams& params,
                                  Visualizer3D::UniquePtr&& visualizer,
-                                 DisplayBase::UniquePtr&& displayer,
-                                 PreloadedVocab::Ptr&& preloaded_vocab)
+                                 DisplayBase::UniquePtr&& displayer)
     : Pipeline(params), camera_(nullptr) {
   // CHECK_EQ(params.camera_params_.size(), 1u) << "Need one camera for
   // MonoImuPipeline.";
@@ -178,9 +177,6 @@ MonoImuPipeline::MonoImuPipeline(const VioParams& params,
     LoopClosureDetectorType lcd_type;
 
     switch (FLAGS_use_lcd) {
-      case 1:  // ORB+DBoW2
-        lcd_type = LoopClosureDetectorType::BoW;
-        break;
       case 2:  // XFeat+Vlad+LG
         lcd_type = LoopClosureDetectorType::NetVLAD;
         break;
@@ -199,7 +195,6 @@ MonoImuPipeline::MonoImuPipeline(const VioParams& params,
                               std::nullopt,
                               std::nullopt,
                               FLAGS_log_output,
-                              std::move(preloaded_vocab),
                               ort_env_));
 
     //! Register input callbacks

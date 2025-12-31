@@ -180,6 +180,11 @@ bool LoopClosureDetectorParams::parseYAML(const std::string& filepath) {
   yaml_parser.getYamlParam("lcd_min_matched_features",
                            &lcd_min_matched_features_);
   yaml_parser.getYamlParam("max_lmk_reproj_error", &max_lmk_reproj_error);
+
+  // JIST parameters
+  yaml_parser.getYamlParam("jist_model_path", &jist_model_path_);
+  yaml_parser.getYamlParam("jist_seq_length", &jist_seq_length_);
+  yaml_parser.getYamlParam("jist_descriptor_dim", &jist_descriptor_dim_);
   return true;
 }
 
@@ -269,7 +274,10 @@ void LoopClosureDetectorParams::print() const {
                         frame_cache.remove_cache_on_exit);
   // network input spatial dimensions
   PipelineParams::print(out, "network_input_width_", network_input_width_,
-                        "network_input_height_", network_input_height_);
+                        "network_input_height_", network_input_height_,
+                        "jist_model_path_", jist_model_path_,
+                        "jist_seq_length_", jist_seq_length_,
+                        "jist_descriptor_dim_", jist_descriptor_dim_);
   LOG(INFO) << out.str();
 }
 
@@ -320,7 +328,10 @@ bool LoopClosureDetectorParams::equals(const LoopClosureDetectorParams& lp2,
          (frame_cache.remove_cache_on_exit ==
           lp2.frame_cache.remove_cache_on_exit) &&
          (network_input_width_ == lp2.network_input_width_) &&
-         (network_input_height_ == lp2.network_input_height_);
+         (network_input_height_ == lp2.network_input_height_) &&
+         (jist_model_path_ == lp2.jist_model_path_) &&
+         (jist_seq_length_ == lp2.jist_seq_length_) &&
+         (jist_descriptor_dim_ == lp2.jist_descriptor_dim_);
 }
 
 }  // namespace VIO

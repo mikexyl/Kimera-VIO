@@ -31,7 +31,7 @@ templ_cols: 128 #must be odd
 templ_rows: 21 
 stripe_extra_rows: 0
 minPointDist: 3
-maxPointDist: 130
+maxPointDist: 70
 bidirectionalMatching: 0
 
 # Non-maximum suppression params

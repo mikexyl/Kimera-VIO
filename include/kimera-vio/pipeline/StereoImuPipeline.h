@@ -17,7 +17,6 @@
 
 #include "kimera-vio/dataprovider/StereoDataProviderModule.h"
 #include "kimera-vio/frontend/StereoCamera.h"
-#include "kimera-vio/loopclosure/DBoWLoopClosureDetector.h"
 #include "kimera-vio/pipeline/Pipeline.h"
 
 namespace VIO {
@@ -36,8 +35,7 @@ class StereoImuPipeline : public Pipeline {
    */
   StereoImuPipeline(const VioParams& params,
                     Visualizer3D::UniquePtr&& visualizer = nullptr,
-                    DisplayBase::UniquePtr&& displayer = nullptr,
-                    PreloadedVocab::Ptr&& preloaded_vocab = nullptr);
+                    DisplayBase::UniquePtr&& displayer = nullptr);
 
   ~StereoImuPipeline() = default;
 

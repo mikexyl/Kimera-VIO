@@ -15,7 +15,6 @@
 
 #pragma once
 
-#include "kimera-vio/loopclosure/DBoWLoopClosureDetector.h"
 #include "kimera-vio/loopclosure/LoopClosureDetector-definitions.h"
 #include "kimera-vio/loopclosure/VLADLoopClosureDetector.h"
 
@@ -37,20 +36,8 @@ class LcdFactory {
       const std::optional<StereoMatchingParams>& stereo_matching_params,
       const std::optional<RgbdCamera::ConstPtr>& rgbd_camera,
       bool log_output,
-      PreloadedVocab::Ptr&& preloaded_vocab = nullptr,
       std::shared_ptr<Ort::Env> env = nullptr) {
     switch (lcd_type) {
-      case LoopClosureDetectorType::BoW: {
-        return std::make_unique<DBoWLoopClosureDetector>(
-            lcd_params,
-            tracker_cam_params,
-            B_Pose_Cam,
-            stereo_camera,
-            stereo_matching_params,
-            rgbd_camera,
-            log_output,
-            std::move(preloaded_vocab));
-      }
       case LoopClosureDetectorType::NetVLAD: {
         CHECK(env) << "VLADLoopClosureDetector requires Ort::Env to be set!";
         return std::make_unique<VLADLoopClosureDetector>(*env,

@@ -38,8 +38,7 @@ namespace VIO {
 
 StereoImuPipeline::StereoImuPipeline(const VioParams& params,
                                      Visualizer3D::UniquePtr&& visualizer,
-                                     DisplayBase::UniquePtr&& displayer,
-                                     PreloadedVocab::Ptr&& preloaded_vocab)
+                                     DisplayBase::UniquePtr&& displayer)
     : Pipeline(params), stereo_camera_(nullptr) {
   //! Create Stereo Camera
   CHECK_EQ(params.camera_params_.size(), 2u)
@@ -178,9 +177,6 @@ StereoImuPipeline::StereoImuPipeline(const VioParams& params,
     LoopClosureDetectorType lcd_type;
 
     switch (FLAGS_use_lcd) {
-      case 1:  // ORB+DBoW2
-        lcd_type = LoopClosureDetectorType::BoW;
-        break;
       case 2:  // XFeat+Vlad+LG
         lcd_type = LoopClosureDetectorType::NetVLAD;
         break;
@@ -199,7 +195,6 @@ StereoImuPipeline::StereoImuPipeline(const VioParams& params,
                               params.frontend_params_.stereo_matching_params_,
                               std::nullopt,
                               FLAGS_log_output,
-                              std::move(preloaded_vocab),
                               ort_env_));
     //! Register input callbacks
     vio_backend_module_->registerOutputCallback(

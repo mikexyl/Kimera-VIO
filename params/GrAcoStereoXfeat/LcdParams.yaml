@@ -89,6 +89,9 @@ min_lmk_parallax: 20
 lcd_min_matched_features: 30
 max_lmk_reproj_error: 20
 
-network_input_width: 320
-network_input_height: 224
+network_input_width: 512
+network_input_height: 288
 
+jist_model_path: "/workspaces/src/JIST/exported_models/JIST_r18_512_seqgem_simplified.onnx"
+jist_seq_length: 5
+jist_descriptor_dim: 512

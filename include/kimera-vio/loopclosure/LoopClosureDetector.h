@@ -121,6 +121,8 @@ class LoopClosureDetector : public LoopClosureDetectorBase {
     }
   }
 
+  virtual void computeSequenceGlobalDesc(const FrameId target_frame_id) = 0;
+
   virtual void computeDescriptorMatches(const LCDFrame& ref,
                                         const LCDFrame& curr,
                                         KeypointMatches* matches_match_query,
@@ -484,7 +486,6 @@ class LoopClosureDetector : public LoopClosureDetectorBase {
    *                    result of the loop-closure detection stage.
    */
   virtual void detectLoop(const FrameId& frame_id,
-                          const typename Database::GlobalDesc& bow_vec,
                           LoopResult* result,
                           FrameId* query_frame = nullptr,
                           FrameIdSet* global_candidates = nullptr) = 0;

@@ -37,8 +37,7 @@ namespace VIO {
 
 RgbdImuPipeline::RgbdImuPipeline(const VioParams& params,
                                  Visualizer3D::UniquePtr&& visualizer,
-                                 DisplayBase::UniquePtr&& displayer,
-                                 PreloadedVocab::Ptr&& preloaded_vocab)
+                                 DisplayBase::UniquePtr&& displayer)
     : Pipeline(params) {
   CHECK_GE(params.camera_params_.size(), 1u)
       << "Need at least one camera for RgbdImuPipeline.";
@@ -184,15 +183,14 @@ RgbdImuPipeline::RgbdImuPipeline(const VioParams& params,
   if (FLAGS_use_lcd) {
     lcd_module_ = std::make_unique<LcdModule>(
         parallel_run_,
-        LcdFactory::createLcd(LoopClosureDetectorType::BoW,
+        LcdFactory::createLcd(LoopClosureDetectorType::NetVLAD,
                               params.lcd_params_,
                               camera_->getCamParams(),
                               camera_->getBodyPoseCam(),
                               std::nullopt,
                               std::nullopt,
                               camera_,
-                              FLAGS_log_output,
-                              std::move(preloaded_vocab)));
+                              FLAGS_log_output));
     //! Register input callbacks
     vio_backend_module_->registerOutputCallback(
         std::bind(&LcdModule::fillBackendQueue,
