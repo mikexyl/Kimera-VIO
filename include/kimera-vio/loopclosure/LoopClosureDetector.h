@@ -265,7 +265,8 @@ class LoopClosureDetector : public LoopClosureDetectorBase {
    * to the body frame at a minimum. Other fields may also be populated.
    * @return The local ID of the frame after it is added to the databases.
    */
-  FrameId processAndAddStereoFrame(const StereoFrame& stereo_frame);
+  FrameId processAndAddStereoFrame(const StereoFrame& stereo_frame,
+                                   const Pose3& W_Pose_Blkf);
 
   /**
    * @brief Get cache of LCD keyframes.
@@ -305,6 +306,45 @@ class LoopClosureDetector : public LoopClosureDetectorBase {
    *  the PGO.
    */
   const gtsam::NonlinearFactorGraph getPGOnfg() const;
+
+  /* ------------------------------------------------------------------------
+   */
+  /** @brief Creates an output payload for a specified frame ID.
+   * @param[in] lcd_frame_id The frame ID for which to create the output.
+   * @param[in] timestamp The timestamp to use for the output payload.
+   * @param[in] status The LCD status to assign to the output.
+   * @return A unique pointer to the created LcdOutput payload.
+   */
+  LcdOutput::UniquePtr makeOutputPayload(Timestamp msg_timestamp,
+                                         FrameId lcd_frame_id);
+
+  /* ------------------------------------------------------------------------
+   */
+  /** @brief Filter keypoints using a 2D grid, keeping one keypoint per cell.
+   * Removes keypoints without valid landmarks and their descriptors.
+   * @param[in] img_width Width of the image.
+   * @param[in] img_height Height of the image.
+   * @param[in] grid_cols Number of grid columns.
+   * @param[in] grid_rows Number of grid rows.
+   * @param[in,out] keypoints Vector of keypoints to filter.
+   * @param[in,out] landmarks Vector of landmarks corresponding to keypoints.
+   * @param[in,out] descriptors_mat Descriptor matrix to filter.
+   * @param[in,out] descriptors_vec Descriptor vector to filter.
+   * @param[in,out] bearing_vectors Vector of bearing vectors to filter.
+   * @param[in,out] left_kpts_rect Left rectified keypoints to filter.
+   * @param[in,out] right_kpts_rect Right rectified keypoints to filter.
+   */
+  void filterKeypointsWithGrid(
+      int img_width,
+      int img_height,
+      int grid_cols,
+      int grid_rows,
+      std::vector<cv::KeyPoint>* keypoints,
+      Landmarks* landmarks,
+      typename Database::Desc* descriptors_mat,
+      BearingVectors* bearing_vectors,
+      std::vector<StatusKeypointCV>* left_kpts_rect = nullptr,
+      std::vector<StatusKeypointCV>* right_kpts_rect = nullptr) const;
 
   /* ------------------------------------------------------------------------
    */

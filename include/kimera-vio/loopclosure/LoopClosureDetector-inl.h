@@ -163,8 +163,8 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::spinOnce(
           std::dynamic_pointer_cast<StereoFrontendOutput>(
               input.frontend_output_);
       CHECK(stereo_frontend_output);
-      lcd_frame_id =
-          processAndAddStereoFrame(stereo_frontend_output->stereo_frame_lkf_);
+      lcd_frame_id = processAndAddStereoFrame(
+          stereo_frontend_output->stereo_frame_lkf_, input.W_Pose_Blkf_);
       break;
     }
     case FrontendType::kRgbdImu: {
@@ -188,45 +188,369 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::spinOnce(
 
   computeSequenceGlobalDesc(lcd_frame_id);
 
+  cleanFrame(lcd_frame_id);
+
+  if (lcd_frame_id < static_cast<FrameId>(lcd_params_.local_window_size_)) {
+    VLOG(1) << "Not enough frames to detect loop closures yet.";
+    return nullptr;
+  } else {
+    FrameId output_frame_id =
+        lcd_frame_id - static_cast<FrameId>(lcd_params_.local_window_size_);
+    LcdOutput::UniquePtr output_payload =
+        makeOutputPayload(input.timestamp_, output_frame_id);
+    return output_payload;
+  }
+}
+
+template <typename Database, typename FeatureDetector, typename FeatureMatcher>
+LcdOutput::UniquePtr
+LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::
+    makeOutputPayload(Timestamp msg_timestamp, FrameId lcd_frame_id) {
+  const auto curr_frame = cache_.getFrame(lcd_frame_id);
+  if (!curr_frame) {
+    LOG(ERROR) << "Invalid frame ID requested: " << lcd_frame_id;
+    return nullptr;
+  }
+
+  // Copy frame data to allow modifications
+  std::vector<cv::KeyPoint> frame_keypoints = curr_frame->keypoints_;
+  std::vector<LandmarkId> frame_landmark_ids = curr_frame->landmark_ids;
+  typename Database::Desc frame_descriptors_mat =
+      curr_frame->descriptors_mat_.clone();
+  typename Database::DescVector frame_descriptors_vec =
+      curr_frame->descriptors_vec_;
+  BearingVectors frame_bearing_vectors = curr_frame->bearing_vectors_;
+
+  // Check if this is a stereo frame and get rectified keypoints
+  std::vector<StatusKeypointCV> frame_left_kpts_rect;
+  std::vector<StatusKeypointCV> frame_right_kpts_rect;
+  auto stereo_frame = std::dynamic_pointer_cast<StereoLCDFrame>(curr_frame);
+  if (stereo_frame) {
+    frame_left_kpts_rect = stereo_frame->left_keypoints_rectified_;
+    frame_right_kpts_rect = stereo_frame->right_keypoints_rectified_;
+  }
+
+  // Validate landmark_manager before accessing
+  if (!landmark_manager_) {
+    LOG(ERROR) << "Landmark manager is null for frame " << lcd_frame_id;
+    return nullptr;
+  }
+
+  // Copy covisibility neighbors's landmarks that are in the current frame's FOV
+  auto covis_frame_ids_it =
+      landmark_manager_->getCovisGraph().find(lcd_frame_id);
+  if (covis_frame_ids_it != landmark_manager_->getCovisGraph().end()) {
+    auto covis_frame_ids = covis_frame_ids_it->second;
+
+    for (const auto& covis_frame_id : covis_frame_ids) {
+      auto covis_frame = cache_.getFrame(covis_frame_id);
+      if (!covis_frame) continue;
+
+      // Get landmarks from covisibility neighbor
+      for (size_t lmk_i = 0; lmk_i < covis_frame->landmark_ids.size();
+           lmk_i++) {
+        LandmarkId lmk_id = covis_frame->landmark_ids[lmk_i];
+        // Skip if already in current frame
+        if (std::find(frame_landmark_ids.begin(),
+                      frame_landmark_ids.end(),
+                      lmk_id) != frame_landmark_ids.end()) {
+          continue;
+        }
+
+        // Bounds check for descriptor access
+        CHECK_GE(static_cast<size_t>(covis_frame->descriptors_mat_.rows), lmk_i)
+            << "Descriptor index out of bounds";
+
+        // Query landmark position
+        auto T_w_lmk = landmark_manager_->getLandmark(lmk_id);
+        if (!T_w_lmk) continue;
+
+        // Transform landmark to current camera frame
+        Landmark cam_lmk =
+            (curr_frame->W_Pose_Blkf_ * B_Pose_Cam_).inverse() * (*T_w_lmk);
+
+        // Check if landmark is in front of camera and within FOV
+        if (cam_lmk.z() <= 0.1) continue;  // Behind or too close to camera
+        cv::Point2f uv_rect;
+        CHECK_EQ(curr_frame->cam_params_.K_.rows, 3);
+        CHECK_EQ(curr_frame->cam_params_.K_.cols, 3);
+        bool is_in_fov = landmark_manager_->isLandmarkInFov(
+            cam_lmk, curr_frame->cam_params_, &uv_rect);
+
+        if (is_in_fov) {
+          // Add landmark ID
+          frame_landmark_ids.push_back(lmk_id);
+
+          // Create keypoint from rectified UV
+          cv::KeyPoint new_kp;
+          new_kp.pt = uv_rect;
+          new_kp.response = 1.0f;  // Default response for augmented keypoints
+          new_kp.size = 1.0f;
+          frame_keypoints.push_back(new_kp);
+
+          // Copy descriptor from covisibility frame (safe after bounds check)
+          cv::Mat descriptor = covis_frame->descriptors_mat_.row(lmk_i).clone();
+          frame_descriptors_vec.push_back(descriptor);
+          frame_descriptors_mat.push_back(descriptor);
+
+          // Compute bearing vector for the rectified keypoint
+          gtsam::Vector3 bearing = UndistorterRectifier::GetBearingVector(
+              uv_rect, curr_frame->cam_params_);
+          frame_bearing_vectors.push_back(bearing);
+
+          // Add rectified keypoints for stereo frames
+          if (stereo_frame) {
+            StatusKeypointCV status_kp_left(KeypointStatus::VALID, uv_rect);
+            frame_left_kpts_rect.push_back(status_kp_left);
+            // For right keypoint, we'd need the disparity, so use same for now
+            frame_right_kpts_rect.push_back(status_kp_left);
+          }
+        }
+      }
+    }
+
+    LOG(INFO) << "Added "
+              << (frame_landmark_ids.size() - curr_frame->landmark_ids.size())
+              << " landmarks from covisibility neighbors to frame "
+              << lcd_frame_id;
+  }
+
+  // Query landmarks and transform to camera frame
+  Landmarks frame_landmarks;
+  frame_landmarks.reserve(frame_landmark_ids.size());
+
+  for (const auto& lmk_id : frame_landmark_ids) {
+    auto T_w_lmk = landmark_manager_->getLandmark(lmk_id);
+    if (T_w_lmk) {
+      Landmark camMatch_lmk =
+          (curr_frame->W_Pose_Blkf_ * B_Pose_Cam_).inverse() * (*T_w_lmk);
+      frame_landmarks.push_back(camMatch_lmk);
+    } else {
+      frame_landmarks.push_back(Landmark());
+    }
+  }
+
+  // Apply grid filtering to keep one keypoint per cell and remove those without
+  // landmarks
+  std::vector<cv::KeyPoint> filtered_keypoints = frame_keypoints;
+  Landmarks filtered_landmarks = frame_landmarks;
+  typename Database::Desc filtered_descriptors_mat =
+      frame_descriptors_mat.clone();
+  typename Database::DescVector filtered_descriptors_vec =
+      frame_descriptors_vec;
+  BearingVectors filtered_bearing_vectors = frame_bearing_vectors;
+
+  std::vector<StatusKeypointCV>* left_kpts_rect_ptr = nullptr;
+  std::vector<StatusKeypointCV>* right_kpts_rect_ptr = nullptr;
+  std::vector<StatusKeypointCV> filtered_left_kpts_rect = frame_left_kpts_rect;
+  std::vector<StatusKeypointCV> filtered_right_kpts_rect =
+      frame_right_kpts_rect;
+
+  if (stereo_frame) {
+    left_kpts_rect_ptr = &filtered_left_kpts_rect;
+    right_kpts_rect_ptr = &filtered_right_kpts_rect;
+  }
+
+  const int grid_cols = 40;  // Configurable grid size
+  const int grid_rows = 40;
+  filterKeypointsWithGrid(stereo_frame->cam_params_.image_size_.width,
+                          stereo_frame->cam_params_.image_size_.height,
+                          grid_cols,
+                          grid_rows,
+                          &filtered_keypoints,
+                          &filtered_landmarks,
+                          &filtered_descriptors_mat,
+                          &filtered_bearing_vectors,
+                          left_kpts_rect_ptr,
+                          right_kpts_rect_ptr);
+  LOG(INFO) << "grid filtering, before: " << frame_keypoints.size()
+            << ", after: " << filtered_keypoints.size();
+
   const gtsam::Pose3& w_Pose_map = getWPoseMap();
   const gtsam::Pose3& map_Pose_odom = getMapPoseOdom();
   const gtsam::Values& pgo_states = pgo_->calculateEstimate();
   const gtsam::NonlinearFactorGraph& pgo_nfg = pgo_->getFactorsUnsafe();
 
-  LcdOutput::UniquePtr output_payload = nullptr;
-  output_payload =
-      std::make_unique<LcdOutput>(LCDStatus::NO_MATCHES, input.timestamp_);
+  // remove factors in pgo_nfg that are later than lcd_frame_id
+  gtsam::NonlinearFactorGraph nfg_until_frame;
+  gtsam::Values pgo_states_until_frame;
+  for (const auto& factor : pgo_nfg) {
+    auto keys = factor->keys();
+    bool add_factor = true;
+    for (const auto& key : keys) {
+      FrameId frame_id = key;
+      if (frame_id > lcd_frame_id) {
+        add_factor = false;
+        break;
+      }
+    }
+    if (add_factor) {
+      nfg_until_frame.add(factor);
+    }
+  }
+
+  for (const auto& key : pgo_states.keys()) {
+    FrameId frame_id = key;
+    if (frame_id <= lcd_frame_id) {
+      pgo_states_until_frame.insert(key, pgo_states.at<Pose3>(key));
+    }
+  }
+
+  LcdOutput::UniquePtr output_payload =
+      std::make_unique<LcdOutput>(LCDStatus::NO_MATCHES, msg_timestamp);
 
   CHECK(output_payload) << "Missing LCD output payload.";
 
   output_payload->setMapInformation(
-      w_Pose_map, map_Pose_odom, pgo_states, pgo_nfg);
+      w_Pose_map, map_Pose_odom, pgo_states_until_frame, nfg_until_frame);
 
   KeypointsCV keypoints_2d;
-  cv::KeyPoint::convert(curr_frame->keypoints_, keypoints_2d);
+  cv::KeyPoint::convert(filtered_keypoints, keypoints_2d);
 
-  CHECK_EQ(curr_frame->keypoints_.size(), curr_frame->keypoints_3d_.size());
-  CHECK_EQ(curr_frame->keypoints_3d_.size(),
-           curr_frame->bearing_vectors_.size());
+  CHECK_EQ(filtered_keypoints.size(), filtered_landmarks.size());
+  CHECK_EQ(filtered_landmarks.size(), filtered_bearing_vectors.size());
 
   std::map<int, double> bow_vec{};
-  if (curr_frame->descriptors_vec_.size() > 0 and
-      not curr_frame->descriptors_vec_[0].empty()) {
+  if (curr_frame->descriptors_vec_.size()) {
     bow_vec = globalDescToMap(curr_frame->descriptors_vec_[0]);
+  } else {
+    bow_vec = {};
   }
 
   output_payload->setFrameInformation(keypoints_2d,
-                                      curr_frame->keypoints_3d_,
-                                      curr_frame->bearing_vectors_,
+                                      filtered_landmarks,
+                                      filtered_bearing_vectors,
                                       bow_vec,
-                                      curr_frame->descriptors_mat_);
+                                      filtered_descriptors_mat);
   output_payload->landmarks_ = landmark_manager_->getLandmarks();
   output_payload->timestamp_map_ = timestamp_map_;
   output_payload->covis_graph_ = landmark_manager_->getCovisGraph();
-
-  cleanFrame(lcd_frame_id);
+  output_payload->timestamp_kf_ = curr_frame->timestamp_;
 
   return output_payload;
+}
+
+template <typename Database, typename FeatureDetector, typename FeatureMatcher>
+void LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::
+    filterKeypointsWithGrid(
+        int img_width,
+        int img_height,
+        int grid_cols,
+        int grid_rows,
+        std::vector<cv::KeyPoint>* keypoints,
+        Landmarks* landmarks,
+        typename Database::Desc* descriptors_mat,
+        BearingVectors* bearing_vectors,
+        std::vector<StatusKeypointCV>* left_kpts_rect,
+        std::vector<StatusKeypointCV>* right_kpts_rect) const {
+  CHECK_NOTNULL(keypoints);
+  CHECK_NOTNULL(landmarks);
+  CHECK_NOTNULL(descriptors_mat);
+  CHECK_NOTNULL(bearing_vectors);
+
+  if (keypoints->empty()) return;
+
+  CHECK_EQ(keypoints->size(), landmarks->size());
+  CHECK_EQ(keypoints->size(), bearing_vectors->size());
+  if (left_kpts_rect) CHECK_EQ(keypoints->size(), left_kpts_rect->size());
+  if (right_kpts_rect) CHECK_EQ(keypoints->size(), right_kpts_rect->size());
+
+  const float cell_width = static_cast<float>(img_width) / grid_cols;
+  const float cell_height = static_cast<float>(img_height) / grid_rows;
+
+  // Grid to store the best keypoint index for each cell
+  std::vector<std::vector<int>> grid(grid_rows,
+                                     std::vector<int>(grid_cols, -1));
+  std::vector<std::vector<float>> grid_scores(
+      grid_rows, std::vector<float>(grid_cols, -1.0f));
+
+  // Find the best keypoint for each grid cell
+  for (size_t i = 0; i < keypoints->size(); ++i) {
+    const auto& kpt = (*keypoints)[i];
+    const auto& lmk = (*landmarks)[i];
+
+    // Skip keypoints without valid landmarks
+    if (lmk.x() == 0.0 && lmk.y() == 0.0 && lmk.z() == 0.0) {
+      continue;
+    }
+
+    int grid_x = static_cast<int>(kpt.pt.x / cell_width);
+    int grid_y = static_cast<int>(kpt.pt.y / cell_height);
+
+    // Clamp to grid bounds
+    grid_x = std::max(0, std::min(grid_cols - 1, grid_x));
+    grid_y = std::max(0, std::min(grid_rows - 1, grid_y));
+
+    // Keep the keypoint with the highest response in each cell
+    if (grid[grid_y][grid_x] == -1 ||
+        kpt.response > grid_scores[grid_y][grid_x]) {
+      grid[grid_y][grid_x] = i;
+      grid_scores[grid_y][grid_x] = kpt.response;
+    }
+  }
+
+  // Collect indices of keypoints to keep
+  std::vector<int> indices_to_keep;
+  for (int row = 0; row < grid_rows; ++row) {
+    for (int col = 0; col < grid_cols; ++col) {
+      if (grid[row][col] != -1) {
+        indices_to_keep.push_back(grid[row][col]);
+      }
+    }
+  }
+
+  // Sort indices to maintain order
+  std::sort(indices_to_keep.begin(), indices_to_keep.end());
+
+  // Filter all data structures
+  std::vector<cv::KeyPoint> filtered_keypoints;
+  Landmarks filtered_landmarks;
+  BearingVectors filtered_bearing_vectors;
+  typename Database::Desc filtered_descriptors_mat;
+  typename Database::DescVector filtered_descriptors_vec;
+  std::vector<StatusKeypointCV> filtered_left_kpts_rect;
+  std::vector<StatusKeypointCV> filtered_right_kpts_rect;
+
+  filtered_keypoints.reserve(indices_to_keep.size());
+  filtered_landmarks.reserve(indices_to_keep.size());
+  filtered_bearing_vectors.reserve(indices_to_keep.size());
+  if (left_kpts_rect) filtered_left_kpts_rect.reserve(indices_to_keep.size());
+  if (right_kpts_rect) filtered_right_kpts_rect.reserve(indices_to_keep.size());
+
+  for (int idx : indices_to_keep) {
+    filtered_keypoints.push_back((*keypoints)[idx]);
+    filtered_landmarks.push_back((*landmarks)[idx]);
+    filtered_bearing_vectors.push_back((*bearing_vectors)[idx]);
+
+    if (!descriptors_mat->empty()) {
+      filtered_descriptors_mat.push_back(descriptors_mat->row(idx));
+    }
+
+    if (left_kpts_rect) {
+      filtered_left_kpts_rect.push_back((*left_kpts_rect)[idx]);
+    }
+
+    if (right_kpts_rect) {
+      filtered_right_kpts_rect.push_back((*right_kpts_rect)[idx]);
+    }
+  }
+
+  // Replace original data with filtered data
+  *keypoints = std::move(filtered_keypoints);
+  *landmarks = std::move(filtered_landmarks);
+  *bearing_vectors = std::move(filtered_bearing_vectors);
+  *descriptors_mat = std::move(filtered_descriptors_mat);
+
+  if (left_kpts_rect) {
+    *left_kpts_rect = std::move(filtered_left_kpts_rect);
+  }
+
+  if (right_kpts_rect) {
+    *right_kpts_rect = std::move(filtered_right_kpts_rect);
+  }
+
+  VLOG(1) << "Grid filtering: " << indices_to_keep.size()
+          << " keypoints kept from original " << keypoints->size();
 }
 
 template <typename Database, typename FeatureDetector, typename FeatureMatcher>
@@ -473,7 +797,8 @@ FrameId LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::
  */
 template <typename Database, typename FeatureDetector, typename FeatureMatcher>
 FrameId LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::
-    processAndAddStereoFrame(const StereoFrame& stereo_frame) {
+    processAndAddStereoFrame(const StereoFrame& stereo_frame,
+                             const Pose3& W_Pose_Blkf) {
   std::vector<cv::KeyPoint> keypoints;
   typename Database::Desc descriptors_mat;
   typename Database::DescVector descriptors_vec;
@@ -482,24 +807,22 @@ FrameId LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::
   descriptorMatToVec(
       stereo_frame.left_frame_, descriptors_mat, &descriptors_vec);
 
-  // Fill StereoFrame with ORB keypoints and perform stereo matching.
-  // StereoFrame cp_stereo_frame(stereo_frame);
-  // rewriteStereoFrameFeatures(keypoints, &cp_stereo_frame);
-
   // Build and store LCDFrame object.
   auto lcd_frame = std::make_shared<StereoLCDFrame>(
       stereo_frame.timestamp_,
       FrameCache::NEW_ID,
       stereo_frame.id_,
       keypoints,
-      // keypoints_3d_ are in local (camera) frame
-      stereo_frame.keypoints_3d_,
+      Landmarks(),  // Empty, will be populated in makeOutputPayload
       descriptors_vec,
       descriptors_mat,
       stereo_frame.left_frame_.versors_,
       stereo_frame.left_keypoints_rectified_,
       stereo_frame.right_keypoints_rectified_);
+  lcd_frame->landmark_ids = stereo_frame.left_frame_.landmarks_;
+  lcd_frame->W_Pose_Blkf_ = W_Pose_Blkf;
   lcd_frame->image_ = stereo_frame.left_frame_.img_;
+  lcd_frame->cam_params_ = stereo_frame.left_frame_.cam_param_;
   return cache_.addFrame(lcd_frame);
 }
 

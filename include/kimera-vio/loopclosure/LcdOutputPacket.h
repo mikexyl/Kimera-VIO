@@ -76,6 +76,7 @@ struct LcdOutput : PipelinePayload {
   gtsam::Values states_;
   gtsam::NonlinearFactorGraph nfg_;
   // frame information
+  Timestamp timestamp_kf_;
   KeypointsCV keypoints_2d_;
   Landmarks keypoints_3d_;
   BearingVectors versors_;

@@ -238,6 +238,13 @@ StereoImuPipeline::StereoImuPipeline(const VioParams& params,
               ->fillFrontendQueue(converted_output);
         });
 
+    if (lcd_module_) {
+      lcd_module_->registerOutputCallback([&visualizer_module](
+                                              const LcdOutput::Ptr& output) {
+        CHECK_NOTNULL(visualizer_module.get())->fillLoopClosureQueue(output);
+      });
+    }
+
     // if (mesher_module_) {
     //   mesher_module_->registerOutputCallback(
     //       std::bind(&VisualizerModule::fillMesherQueue,

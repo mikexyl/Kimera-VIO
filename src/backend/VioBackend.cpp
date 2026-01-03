@@ -407,7 +407,8 @@ bool VioBackend::addVisualInertialStateAndOptimize(
   }
 
   tracking_statuses_.push_back(kfTrackingStatus_mono);
-  if (tracking_statuses_.size() > tracking_status_window_size_) {
+  if (tracking_statuses_.size() >
+      static_cast<size_t>(tracking_status_window_size_)) {
     tracking_statuses_.pop_front();
   }
 
@@ -1470,7 +1471,7 @@ bool VioBackend::updateSmoother(Smoother::Result* result,
     gtsam::NonlinearFactorGraph nfg;
 
     // Only add priors on first state and the state nearest the failure
-    for (const gtsam::Symbol& key : prior_keys) {
+    for (const gtsam::Symbol key : prior_keys) {
       CHECK(values.exists(key));
       LOG(ERROR) << "Adding prior on key: " << key.chr() << key.index();
       switch (key.chr()) {

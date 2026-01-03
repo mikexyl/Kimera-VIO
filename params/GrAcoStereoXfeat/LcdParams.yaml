@@ -85,9 +85,9 @@ local_window_size: 10
 min_pnp_num_landmarks: 30
 min_lmk_obs_ratio: 0.1 # map point cull, set to 0 to disable
 min_lmk_obs_count: 3 # map point cull, set to 0 to disable
-min_lmk_parallax: 20
+min_lmk_parallax: 50
 lcd_min_matched_features: 30
-max_lmk_reproj_error: 20
+max_lmk_reproj_error: 3
 
 network_input_width: 512
 network_input_height: 288

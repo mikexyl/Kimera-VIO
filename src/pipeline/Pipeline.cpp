@@ -93,7 +93,7 @@ Pipeline::Pipeline(const VioParams& params)
   
   ort_env_ = std::make_shared<Ort::Env>(
       threading_options,
-      ORT_LOGGING_LEVEL_WARNING,
+      ORT_LOGGING_LEVEL_ERROR,
       "Kimera-VIO");
   
   if (FLAGS_deterministic_random_number_generator) {
