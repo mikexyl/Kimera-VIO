@@ -308,11 +308,6 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::
         }
       }
     }
-
-    LOG(INFO) << "Added "
-              << (frame_landmark_ids.size() - curr_frame->landmark_ids.size())
-              << " landmarks from covisibility neighbors to frame "
-              << lcd_frame_id;
   }
 
   // Query landmarks and transform to camera frame
@@ -363,8 +358,6 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::
                           &filtered_bearing_vectors,
                           left_kpts_rect_ptr,
                           right_kpts_rect_ptr);
-  LOG(INFO) << "grid filtering, before: " << frame_keypoints.size()
-            << ", after: " << filtered_keypoints.size();
 
   const gtsam::Pose3& w_Pose_map = getWPoseMap();
   const gtsam::Pose3& map_Pose_odom = getMapPoseOdom();

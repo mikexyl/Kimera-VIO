@@ -53,17 +53,47 @@ void StereoMatcher::denseStereoReconstruction(
   CHECK_EQ(disparity_img->type(), CV_32F);
   CHECK(stereo_camera_);
 
-  // LibSGM only supports grayscale images - convert if needed
-  cv::Mat left_bgr, right_bgr;
-  if (left_img_rectified.channels() == 3) {
-    left_bgr = left_img_rectified;
-    right_bgr = right_img_rectified;
-  } else if (left_img_rectified.channels() == 1) {
-    LOG(FATAL)
-        << "Input images are grayscale but lightstereo requires BGR images.";
+  // Prepare images based on stereo method requirements
+  cv::Mat left_processed, right_processed;
+
+  // Determine what format we need
+  bool needs_grayscale =
+      (dense_stereo_params_.stereo_depth_method_ ==
+           StereoDepthMethod::OPENCV_BM ||
+       dense_stereo_params_.stereo_depth_method_ ==
+           StereoDepthMethod::OPENCV_SGBM ||
+       dense_stereo_params_.stereo_depth_method_ == StereoDepthMethod::LIBSGM);
+  bool needs_bgr = (dense_stereo_params_.stereo_depth_method_ ==
+                        StereoDepthMethod::LIGHTSTEREO ||
+                    dense_stereo_params_.stereo_depth_method_ ==
+                        StereoDepthMethod::ONNX_STEREO);
+
+  if (needs_grayscale) {
+    // Convert to grayscale if needed
+    if (left_img_rectified.channels() == 3) {
+      cv::cvtColor(left_img_rectified, left_processed, cv::COLOR_BGR2GRAY);
+      cv::cvtColor(right_img_rectified, right_processed, cv::COLOR_BGR2GRAY);
+    } else if (left_img_rectified.channels() == 1) {
+      left_processed = left_img_rectified;
+      right_processed = right_img_rectified;
+    } else {
+      LOG(FATAL) << "Input image must have 1 or 3 channels, got "
+                 << left_img_rectified.channels();
+    }
+  } else if (needs_bgr) {
+    // Deep learning methods need BGR
+    if (left_img_rectified.channels() == 3) {
+      left_processed = left_img_rectified;
+      right_processed = right_img_rectified;
+    } else if (left_img_rectified.channels() == 1) {
+      cv::cvtColor(left_img_rectified, left_processed, cv::COLOR_GRAY2BGR);
+      cv::cvtColor(right_img_rectified, right_processed, cv::COLOR_GRAY2BGR);
+    } else {
+      LOG(FATAL) << "Input image must have 1 or 3 channels, got "
+                 << left_img_rectified.channels();
+    }
   } else {
-    LOG(FATAL) << "Input image must have 1 or 3 channels, got "
-               << left_img_rectified.channels();
+    LOG(FATAL) << "Unknown stereo depth method";
   }
 
   // Setup stereo matcher
@@ -107,8 +137,6 @@ void StereoMatcher::denseStereoReconstruction(
         VLOG(1) << "Using LibSGM stereo depth (GPU-accelerated)";
         xfeat::LibSGMStereoDepth::Params params;
         params.num_disparities = dense_stereo_params_.num_disparities_;
-        params.num_disparities =
-            std::max(16, (params.num_disparities / 16) * 16);
         params.P1 = dense_stereo_params_.p1_;
         params.P2 = dense_stereo_params_.p2_;
         params.uniqueness_ratio =
@@ -120,6 +148,8 @@ void StereoMatcher::denseStereoReconstruction(
         params.census_type = 1;  // SYMMETRIC_CENSUS_9x7
         params.use_gpu =
             true;  // Will auto-fallback to CPU if OpenCV lacks CUDA
+        params.target_size = cv::Size(dense_stereo_params_.disp_width_,
+                                      dense_stereo_params_.disp_height_);
         stereo_depth_ = std::make_shared<xfeat::LibSGMStereoDepth>(params);
         VLOG(1) << "LibSGM parameters: P1=" << params.P1 << ", P2=" << params.P2
                 << ", uniqueness=" << params.uniqueness_ratio
@@ -167,10 +197,10 @@ void StereoMatcher::denseStereoReconstruction(
 
   // Reconstruct scene
   // Output will be CV_16S format (disparity scaled by 16 if subpixel enabled)
-  cv::Mat disparity_32f(left_bgr.size(), CV_32F);
+  cv::Mat disparity_32f(left_processed.size(), CV_32F);
 
   // Use our stereo depth interface
-  stereo_depth_->compute(left_bgr, right_bgr, disparity_32f);
+  stereo_depth_->compute(left_processed, right_processed, disparity_32f);
   // Get invalid disparity value (standard invalid value for CV_16S)
   int invalid_disp = -1;
 
@@ -293,11 +323,6 @@ void StereoMatcher::sparseStereoReconstruction(StereoFrame* stereo_frame) {
   stereo_frame->right_keypoints_rectified_.reserve(
       stereo_frame->left_keypoints_rectified_.size());
 
-  size_t n_valid_depths = 0;
-  size_t n_invalid_disparity = 0;
-  size_t n_out_of_range = 0;
-  size_t n_bounds_check_failed = 0;
-
   for (const auto& left_kpt : stereo_frame->left_keypoints_rectified_) {
     if (left_kpt.first != KeypointStatus::VALID) {
       stereo_frame->right_keypoints_rectified_.push_back(
@@ -314,7 +339,6 @@ void StereoMatcher::sparseStereoReconstruction(StereoFrame* stereo_frame) {
       stereo_frame->right_keypoints_rectified_.push_back(
           std::make_pair(KeypointStatus::NO_DEPTH, KeypointCV(0.0, 0.0)));
       stereo_frame->keypoints_depth_.push_back(0.0);
-      n_bounds_check_failed++;
       continue;
     }
 
@@ -328,7 +352,6 @@ void StereoMatcher::sparseStereoReconstruction(StereoFrame* stereo_frame) {
       stereo_frame->right_keypoints_rectified_.push_back(
           std::make_pair(KeypointStatus::NO_DEPTH, KeypointCV(0.0, 0.0)));
       stereo_frame->keypoints_depth_.push_back(0.0);
-      n_invalid_disparity++;
       VLOG(3) << "Invalid disparity " << disparity << " at keypoint (" << x
               << ", " << y << ")";
       continue;
@@ -342,7 +365,6 @@ void StereoMatcher::sparseStereoReconstruction(StereoFrame* stereo_frame) {
       stereo_frame->right_keypoints_rectified_.push_back(
           std::make_pair(KeypointStatus::NO_DEPTH, KeypointCV(0.0, 0.0)));
       stereo_frame->keypoints_depth_.push_back(0.0);
-      n_out_of_range++;
       VLOG(3) << "Depth " << depth << " out of range ["
               << stereo_matching_params_.min_point_dist_ << ", "
               << stereo_matching_params_.max_point_dist_ << "] at keypoint ("
@@ -355,7 +377,6 @@ void StereoMatcher::sparseStereoReconstruction(StereoFrame* stereo_frame) {
     stereo_frame->right_keypoints_rectified_.push_back(
         std::make_pair(KeypointStatus::VALID, right_kpt));
     stereo_frame->keypoints_depth_.push_back(depth);
-    n_valid_depths++;
   }
 
   //! Fill out right frame keypoints
@@ -368,7 +389,6 @@ void StereoMatcher::sparseStereoReconstruction(StereoFrame* stereo_frame) {
   stereo_frame->keypoints_3d_.clear();
   stereo_frame->keypoints_3d_.reserve(
       stereo_frame->right_keypoints_rectified_.size());
-  size_t n_valid_points = 0;
   for (size_t i = 0; i < stereo_frame->right_keypoints_rectified_.size(); i++) {
     if (stereo_frame->right_keypoints_rectified_[i].first ==
         KeypointStatus::VALID) {
@@ -379,7 +399,6 @@ void StereoMatcher::sparseStereoReconstruction(StereoFrame* stereo_frame) {
       // keypoints_depth_ is not the norm of the vector, it is the z component.
       stereo_frame->keypoints_3d_.push_back(
           versor * stereo_frame->keypoints_depth_.at(i) / versor(2));
-      n_valid_points++;
     } else {
       stereo_frame->keypoints_3d_.push_back(Vector3::Zero());
     }

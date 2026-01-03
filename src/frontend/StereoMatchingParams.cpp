@@ -113,6 +113,7 @@ bool DenseStereoParams::parseYAML(const std::string& filepath) {
   if (yaml_parser.hasParam("medianBlurDisparity")) {
     yaml_parser.getYamlParam("medianBlurDisparity", &median_blur_disparity_);
   }
+  CHECK(not median_blur_disparity_)<<"file path:" << filepath;
   if (yaml_parser.hasParam("preFilterCap")) {
     yaml_parser.getYamlParam("preFilterCap", &pre_filter_cap_);
   }
@@ -158,16 +159,19 @@ bool DenseStereoParams::parseYAML(const std::string& filepath) {
   if (yaml_parser.hasParam("sgmDownscaleFactor")) {
     yaml_parser.getYamlParam("sgmDownscaleFactor", &sgm_downscale_factor_);
   }
-  if(yaml_parser.hasParam("enginePath")) {
+  if (yaml_parser.hasParam("enginePath")) {
     yaml_parser.getYamlParam("enginePath", &engine_path_);
   }
-  if(yaml_parser.hasParam("dispHeight")) {
+  if (yaml_parser.hasParam("dispHeight")) {
     yaml_parser.getYamlParam("dispHeight", &disp_height_);
   }
-  if(yaml_parser.hasParam("dispWidth")) {
+  if (yaml_parser.hasParam("dispWidth")) {
     yaml_parser.getYamlParam("dispWidth", &disp_width_);
   }
-  
+  if (yaml_parser.hasParam("onnxWarmupIterations")) {
+    yaml_parser.getYamlParam("onnxWarmupIterations", &onnx_warmup_iterations_);
+  }
+
   return true;
 }
 
