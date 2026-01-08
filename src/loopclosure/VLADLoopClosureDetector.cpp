@@ -23,8 +23,9 @@ void VLADLoopClosureDetector::computeSequenceGlobalDesc(
     for (auto seq_frame : new_seq_frames_) {
       seq_frame->descriptors_vec_.clear();
       seq_frame->clearImage();
-      seq_frame->descriptors_vec_.emplace_back(global_desc.clone());
     }
+
+    new_frame->descriptors_vec_.push_back(global_desc.clone());
 
     new_seq_frames_.clear();
     new_seq_id_++;

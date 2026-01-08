@@ -83,6 +83,7 @@ struct LcdOutput : PipelinePayload {
   std::map<int, double> bow_vec_;
   cv::Mat descriptors_mat_;
   FrameIDTimestampMap timestamp_map_;
+  Pose3 T_base_cam_;
 
   Landmarks landmarks_;
   std::map<FrameId, FrameIdSet> covis_graph_;

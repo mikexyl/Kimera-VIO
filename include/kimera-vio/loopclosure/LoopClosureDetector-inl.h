@@ -188,16 +188,15 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::spinOnce(
 
   computeSequenceGlobalDesc(lcd_frame_id);
 
-  cleanFrame(lcd_frame_id);
-
   if (lcd_frame_id < static_cast<FrameId>(lcd_params_.local_window_size_)) {
-    VLOG(1) << "Not enough frames to detect loop closures yet.";
+    cleanFrame(lcd_frame_id);
     return nullptr;
   } else {
     FrameId output_frame_id =
         lcd_frame_id - static_cast<FrameId>(lcd_params_.local_window_size_);
     LcdOutput::UniquePtr output_payload =
         makeOutputPayload(input.timestamp_, output_frame_id);
+    cleanFrame(output_frame_id);
     return output_payload;
   }
 }
@@ -419,6 +418,7 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::
   output_payload->timestamp_map_ = timestamp_map_;
   output_payload->covis_graph_ = landmark_manager_->getCovisGraph();
   output_payload->timestamp_kf_ = curr_frame->timestamp_;
+  output_payload->T_base_cam_ = B_Pose_Cam_;
 
   return output_payload;
 }

@@ -305,7 +305,7 @@ class VLADLoopClosureDetector
 
   std::optional<FrameId> findFirstFrameIdOutsideLocalWindow(
       const FrameId& frame_id) const {
-    if (frame_id <= static_cast<FrameId>(lcd_params_.local_window_size_)) {
+    if (frame_id < static_cast<FrameId>(lcd_params_.local_window_size_)) {
       return std::nullopt;  // No frames outside the local window.
     } else {
       return frame_id - lcd_params_.local_window_size_;
