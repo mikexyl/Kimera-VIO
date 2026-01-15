@@ -15,7 +15,7 @@ T_BS:
 rate_hz: 100
 
 # inertial sensor parameters
-imu_bias_init_sigma: 1e-5
+imu_bias_init_sigma: 1e-4
 gyroscope_noise_density: 1.0084886221461694e-02
 gyroscope_random_walk: 9.8778648600726277e-05
 accelerometer_noise_density: 1.0557715622632996e-02

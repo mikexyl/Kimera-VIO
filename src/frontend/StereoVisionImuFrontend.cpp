@@ -392,7 +392,7 @@ StatusStereoMeasurementsPtr StereoVisionImuFrontend::processStereoFrame(
                                   {},
                                   frontend_params_.feature_detector_params_,
                                   std::nullopt,
-                                  false);
+                                  true);
 
     double sparse_stereo_time = 0;
     if (frontend_params_.useRANSAC_) {
@@ -482,6 +482,15 @@ StatusStereoMeasurementsPtr StereoVisionImuFrontend::processStereoFrame(
     // Populate statistics.
     stereoFrame_k_->checkStatusRightKeypoints(&tracker_->debug_info_);
 
+    if (feature_tracks) {
+      // TODO(Toni): these feature tracks are not outlier rejected...
+      // TODO(Toni): this image should already be computed and inside the
+      // display_queue
+      // if it is sent to the tracker.
+      *feature_tracks = tracker_->getTrackerImage(stereoFrame_lkf_->left_frame_,
+                                                  stereoFrame_k_->left_frame_);
+    }
+
     // Move on.
     stereoFrame_lkf_ = stereoFrame_k_;
 
@@ -495,15 +504,6 @@ StatusStereoMeasurementsPtr StereoVisionImuFrontend::processStereoFrame(
   } else {
     CHECK_EQ(smart_stereo_measurements.size(), 0u);
     stereoFrame_k_->setIsKeyframe(false);
-  }
-
-  if (feature_tracks) {
-    // TODO(Toni): these feature tracks are not outlier rejected...
-    // TODO(Toni): this image should already be computed and inside the
-    // display_queue
-    // if it is sent to the tracker.
-    *feature_tracks = tracker_->getTrackerImage(stereoFrame_lkf_->left_frame_,
-                                                stereoFrame_k_->left_frame_);
   }
 
   // Update keyframe to reference frame for next iteration.

@@ -172,3 +172,5 @@ enginePath: /workspaces/src/ONNX-FastACVNet-Depth-Estimation/models/fast_acvnet_
 dispWidth: 800
 dispHeight: 550
 onnxWarmupIterations: 3
+
+rectifiedInputs: 0

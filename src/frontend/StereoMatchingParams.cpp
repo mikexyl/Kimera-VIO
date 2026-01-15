@@ -88,6 +88,7 @@ bool StereoMatchingParams::parseYAML(const std::string& filepath) {
   yaml_parser.getYamlParam("maxPointDist", &max_point_dist_);
   yaml_parser.getYamlParam("bidirectionalMatching", &bidirectional_matching_);
   yaml_parser.getYamlParam("subpixelRefinementStereo", &subpixel_refinement_);
+  yaml_parser.getYamlParam("rectifiedInputs", &rectified_inputs);
 
   dense_stereo_params_.parseYAML(filepath);
   return true;
@@ -113,7 +114,6 @@ bool DenseStereoParams::parseYAML(const std::string& filepath) {
   if (yaml_parser.hasParam("medianBlurDisparity")) {
     yaml_parser.getYamlParam("medianBlurDisparity", &median_blur_disparity_);
   }
-  CHECK(not median_blur_disparity_)<<"file path:" << filepath;
   if (yaml_parser.hasParam("preFilterCap")) {
     yaml_parser.getYamlParam("preFilterCap", &pre_filter_cap_);
   }

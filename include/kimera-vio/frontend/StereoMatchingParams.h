@@ -100,6 +100,7 @@ class StereoMatchingParams : public PipelineParams {
   bool subpixel_refinement_ = false;
   // do equalize image before processing options to use RGB-D vs. stereo.
   bool equalize_image_ = false;
+  bool rectified_inputs = false;
 
   DenseStereoParams dense_stereo_params_;
 };

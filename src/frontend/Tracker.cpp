@@ -104,9 +104,10 @@ Tracker::Tracker(const TrackerParams& tracker_params,
     vilib_params.detector_options_.max_level = 3;
     vilib_params.feature_tracker_options_.reset_before_detection = false;
     vilib_params.feature_tracker_options_.min_tracks_to_detect_new_features =
-        tracker_params_.num_features_;
+        tracker_params_.num_features_ * 0.6;
     vilib_params.feature_tracker_options_.use_best_n_features =
         tracker_params_.num_features_;
+    vilib_params.detector_options_.quality_level = 0.001;
     // Propagate optional downsampling parameters for VilibTracker.
     vilib_params.downsample = tracker_params_.vilib_downsample;
     vilib_params.downsample_scale = tracker_params_.vilib_downsample_scale;
@@ -449,7 +450,6 @@ TrackingStatusPose Tracker::geometricOutlierRejection2d2d(
                                  matches_ref_cur,
                                  &disparity)) {
         if (disparity < tracker_params_.disparityThreshold_) {
-          LOG(INFO) << "Low mono disparity.";
           result.first = TrackingStatus::LOW_DISPARITY;
         }
       } else {
@@ -1186,8 +1186,8 @@ cv::Mat Tracker::getTrackerImage(const Frame& ref_frame,
                                  cur_frame.of_landmarks_.at(i));
       if (it != ref_frame.of_landmarks_.end()) {
         cv::Scalar color = blue;
-        cv::circle(img_rgb, px_cur, px_sigma, color, 1);
-        cv::circle(img_rgb, px_cur, 4, blue, -1);
+        cv::circle(img_rgb, px_cur, px_sigma, color, -1);
+        // cv::circle(img_rgb, px_cur, 4, blue, -1);
 
         // draw line to reference frame
         int i = std::distance(ref_frame.of_landmarks_.begin(), it);
@@ -1222,11 +1222,10 @@ cv::Mat Tracker::getTrackerImage(const Frame& ref_frame,
         cv::Scalar color(0, 255, 0);
         color[1] = 255 * std::min(1.0, score);
         color[2] = 255 * (1.0 - std::min(1.0, score));
-        cv::circle(img_rgb, px_cur, px_sigma, color, 1);
-        cv::circle(img_rgb, px_cur, 4, green, -1);
-        int i = std::distance(ref_frame.landmarks_.begin(), it);
-        const cv::Point2f& px_ref = ref_frame.keypoints_.at(i);
-        cv::line(img_rgb, px_ref, px_cur, color, 1);
+        cv::circle(img_rgb, px_cur, px_sigma, color, -1);
+        int ref_i = std::distance(ref_frame.landmarks_.begin(), it);
+        const cv::Point2f& px_ref = ref_frame.keypoints_.at(ref_i);
+        cv::line(img_rgb, px_ref, px_cur, color, 10);
       }
     }
   }
@@ -1525,20 +1524,34 @@ void Tracker::featureTrackingDesc(
 
   double min_score = std::numeric_limits<double>::max();
   double max_score = std::numeric_limits<double>::lowest();
-  size_t n_added_matches = 0;
 
   // copying optical flow tracks of features that are not tracked by matcher
   // already
-  // for (size_t i = 0; i < ref_frame->of_keypoints_.size(); ++i) {
-  //   auto ref_lmk_id = ref_frame->of_landmarks_.at(i);
-  //   auto it = std::find(cur_frame->of_landmarks_.begin(),
-  //                       cur_frame->of_landmarks_.end(),
-  //                       ref_lmk_id);
-  //   if (it != cur_frame->of_landmarks_.end()) {
-  //     auto cur_kp_id = std::distance(cur_frame->of_landmarks_.begin(), it);
-  //     cur_frame->landmarks_.at(cur_kp_id) = ref_frame->landmarks_.at(i);
-  //   }
-  // }
+  if (tracker_params_.copy_optical_flow_tracks_) {
+    for (size_t i = 0; i < ref_frame->of_keypoints_.size(); ++i) {
+      auto ref_lmk_id = ref_frame->of_landmarks_.at(i);
+      if (ref_lmk_id == -1) {
+        continue;
+      }
+      if (ref_frame->landmarks_age_.at(i) >=
+          tracker_params_.max_feature_track_age_) {
+        // If the feature is too old, we do not track it anymore.
+        ref_frame->landmarks_.at(i) = -1;
+        ref_frame->of_landmarks_.at(i) = -1;
+        continue;
+      }
+      auto it = std::find(cur_frame->of_landmarks_.begin(),
+                          cur_frame->of_landmarks_.end(),
+                          ref_lmk_id);
+      if (it != cur_frame->of_landmarks_.end()) {
+        auto cur_kp_id = std::distance(cur_frame->of_landmarks_.begin(), it);
+        cur_frame->landmarks_.at(cur_kp_id) = ref_frame->landmarks_.at(i);
+        ref_frame->landmarks_age_.at(i)++;
+        cur_frame->landmarks_age_.at(cur_kp_id) =
+            ref_frame->landmarks_age_.at(i) + 1;
+      }
+    }
+  }
 
   for (auto match : matches) {
     auto ref_i = match.queryIdx;
@@ -1549,12 +1562,18 @@ void Tracker::featureTrackingDesc(
         lmk_age > tracker_params_.max_feature_track_age_) {
       // If the feature is too old, we do not track it anymore.
       ref_frame->landmarks_.at(ref_i) = -1;
+      ref_frame->of_landmarks_.at(ref_i) = -1;
       continue;
     }
 
     LandmarkId cur_lmk_id = cur_frame->landmarks_.at(cur_i);
     if (ref_lmk_ids.count(cur_lmk_id) and cur_lmk_id != -1) {
       // This landmark is already in the reference frame, skip it.
+      continue;
+    }
+
+    if (ref_frame->landmarks_.at(ref_i) == -1) {
+      // This landmark is not valid in the reference frame, skip it.
       continue;
     }
 
@@ -1565,7 +1584,6 @@ void Tracker::featureTrackingDesc(
     cur_frame->landmarks_age_.at(cur_i) = ref_frame->landmarks_age_.at(ref_i) +
                                           1;  // increment age of feature track
     cur_frame->scores_.at(cur_i) = static_cast<double>(match.distance);
-    n_added_matches++;
     if (cur_frame->scores_.at(cur_i) < min_score) {
       min_score = cur_frame->scores_.at(cur_i);
     }
@@ -1573,25 +1591,6 @@ void Tracker::featureTrackingDesc(
       max_score = cur_frame->scores_.at(cur_i);
     }
   }
-
-  // invalidate all keypoints that were not tracked in the ref frame
-  if (invalidate_landmarks) {
-    for (size_t i = 0; i < ref_frame->landmarks_.size(); ++i) {
-      if (ref_frame->landmarks_.at(i) != -1 &&
-          tracked_lmk_ids.find(ref_frame->landmarks_.at(i)) ==
-              tracked_lmk_ids.end()) {
-        // If the landmark was not tracked, invalidate it.
-        ref_frame->landmarks_.at(i) = -1;
-      }
-    }
-  }
-
-  // assign unmatched keypoints a new landmark id
-  // for (size_t i = 0; i < cur_frame->landmarks_.size(); ++i) {
-  //   if (cur_frame->landmarks_.at(i) == -1) {
-  //     cur_frame->landmarks_.at(i) = FeatureDetector::lmk_id++;
-  //   }
-  // }
 
   // max number of frames in which a feature is seen
   VLOG(5) << "featureTracking: frame " << cur_frame->id_

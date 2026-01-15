@@ -423,9 +423,10 @@ bool VioBackend::addVisualInertialStateAndOptimize(
     n_states_valid += (*it == TrackingStatus::VALID);
   }
 
-  int nr_states_include_invalid = std::max(
-      backend_params_.nr_states_, static_cast<double>(n_until_enough_valid));
-  smoother_->smootherLag() = nr_states_include_invalid;
+  // TODO(mike): check this logic's implementation in modes besides mono
+  // int nr_states_include_invalid = std::max(
+  // backend_params_.nr_states_, static_cast<double>(n_until_enough_valid));
+  // smoother_->smootherLag() = nr_states_include_invalid;
 
   // Add odometry factors if they're available and have non-zero precision
   if (odometry_body_pose && odom_params_ &&
@@ -1373,7 +1374,12 @@ void VioBackend::addConstantVelocityFactor(const FrameId& from_id,
 /* -------------------------------- UPDATE ---------------------------------- */
 void VioBackend::updateStates(const FrameId& cur_id) {
   VLOG(10) << "Starting to calculate estimate.";
-  state_ = smoother_->calculateEstimate();
+  try {
+    state_ = smoother_->calculateEstimate();
+  } catch (...) {
+    LOG(ERROR) << "current id: " << cur_id;
+    throw;
+  }
   VLOG(10) << "Finished to calculate estimate.";
 
   DCHECK(state_.find(gtsam::Symbol(kPoseSymbolChar, cur_id)) != state_.end());

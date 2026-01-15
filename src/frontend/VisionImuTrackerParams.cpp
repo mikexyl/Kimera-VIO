@@ -68,6 +68,8 @@ void TrackerParams::print() const {
                         optimize_2d2d_pose_from_inliers_,
                         "Optimize 3D3D Pose",
                         optimize_3d3d_pose_from_inliers_,
+                        "Copy Optical Flow Tracks",
+                        copy_optical_flow_tracks_,
                         "PnP Algorithm",
                         VIO::to_underlying(pnp_algorithm_),
                         "Min PnP inliers count: ",
@@ -128,6 +130,9 @@ bool TrackerParams::parseYAML(const std::string& filepath) {
   yaml_parser.getYamlParam("optimize_3d3d_pose_from_inliers",
                            &optimize_3d3d_pose_from_inliers_);
 
+  yaml_parser.getYamlParam("copy_optical_flow_tracks",
+                           &copy_optical_flow_tracks_);
+
   int pnp_algorithm;
   yaml_parser.getYamlParam("pnp_algorithm", &pnp_algorithm);
   pnp_algorithm_ = static_cast<Pose3d2dAlgorithm>(pnp_algorithm);
@@ -182,6 +187,7 @@ bool TrackerParams::equals(const TrackerParams& tp2, double tol) const {
          (fabs(ransac_probability_ - tp2.ransac_probability_) <= tol) &&
          (ransac_randomize_ == tp2.ransac_randomize_) &&
          // others:
+         (copy_optical_flow_tracks_ == tp2.copy_optical_flow_tracks_) &&
          (optical_flow_predictor_type_ == tp2.optical_flow_predictor_type_) &&
          (pose_2d2d_algorithm_ == tp2.pose_2d2d_algorithm_) &&
          (pnp_algorithm_ == tp2.pnp_algorithm_) &&

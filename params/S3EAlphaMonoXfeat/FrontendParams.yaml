@@ -106,8 +106,8 @@ track_on_keyframe: 1
 min_lmk_merge_sim: -0.5
 max_lmk_merge_px: 0
 
-vilib_cell_width: 32
-vilib_cell_height: 32
+vilib_cell_width: 64
+vilib_cell_height: 64
 vilib_downsample: 1
 vilib_downsample_scale: 1
 
@@ -115,3 +115,56 @@ kf_queue_size: 0
 rematch_threshold: 0.5
 
 xfeat_use_of_points: 1
+
+copy_optical_flow_tracks: 1
+
+# General stereo parameters (used by all methods)
+minDisparity: 10
+numDisparities: 128  # Must be divisible by 16
+sadWindowSize: 61
+uniquenessRatio: 0.8
+speckleWindowSize: 100
+speckleRange: 2
+disp12MaxDiff: 1
+
+# SGBM-specific parameters (for OpenCV_SGBM and LibSGM)
+# P1: Penalty for small disparity changes
+# Typical formula: 8 * channels * block_size^2
+# For grayscale with sadWindowSize=15: 8 * 1 * 225 = 1800
+P1: 10
+
+# P2: Penalty for large disparity changes  
+# Typical formula: 32 * channels * block_size^2
+# Should be > P1, typically 4x P1
+# For grayscale with sadWindowSize=15: 32 * 1 * 225 = 7200
+P2: 120
+
+# Use Hirschmuller mode (MODE_HH) for OpenCV_SGBM - more accurate but slower
+useModeHH: false
+
+# LibSGM downscale factor (1=no downscale, 2=half resolution)
+sgmDownscaleFactor: 1
+
+# Block Matching parameters (for OpenCV_BM only)
+preFilterCap: 31
+preFilterType: 1
+preFilterSize: 9
+textureThreshold: 10
+
+# Post-processing options
+postFilterDisparity: 0
+medianBlurDisparity: 0
+
+# Deep learning stereo parameters (for LightStereo/ONNX_Stereo)
+# Uncomment and adjust for deep learning methods:
+# stereoDepthMethod: LightStereo
+# enginePath: /workspaces/src/xfeat-cpp/onnx_model/LightStereo-S-KITTI_480x640.engine
+# dispWidth: 640
+# dispHeight: 480
+
+stereoDepthMethod: ONNX_Stereo
+enginePath: /workspaces/src/ONNX-FastACVNet-Depth-Estimation/models/fast_acvnet_plus_generalization_opset11_288x512.onnx
+# enginePath: /workspaces/src/ONNX-FastACVNet-Depth-Estimation/models/fast_acvnet_plus_generalization_opset11_288x512.onnx
+dispWidth: 512
+dispHeight: 288
+onnxWarmupIterations: 3

@@ -201,18 +201,15 @@ void StereoMatcher::denseStereoReconstruction(
 
   // Use our stereo depth interface
   stereo_depth_->compute(left_processed, right_processed, disparity_32f);
-  // Get invalid disparity value (standard invalid value for CV_16S)
-  int invalid_disp = -1;
 
   // Create mask for invalid disparities before conversion
-  cv::Mat valid_mask = disparity_32f != invalid_disp;
+  cv::Mat valid_mask = disparity_32f > 0;
 
   disparity_32f.copyTo(*disparity_img);
 
   // Optionally, smooth the disparity image BEFORE marking invalid pixels
   // This prevents median blur from blending invalid values with valid ones
   if (dense_stereo_params_.median_blur_disparity_) {
-    LOG(FATAL) << "Median blur removed";
     cv::Mat disparity_valid;
     disparity_img->copyTo(disparity_valid, valid_mask);
     cv::medianBlur(disparity_valid, disparity_valid, 5);
@@ -247,22 +244,33 @@ void StereoMatcher::denseStereoReconstruction(
 
 void StereoMatcher::sparseStereoReconstruction(StereoFrame* stereo_frame) {
   CHECK_NOTNULL(stereo_frame);
-  //! Undistort rectify left/right images
-  // CHECK(!stereo_frame->isRectified());
-  // TODO(marcus): LoopClosureDetector rewrites stereoframes that are already
-  //   rectified using this function! That's why the above check doesn't work...
-  if (stereo_frame->isRectified()) {
-    VLOG(1) << "sparseStereoMatching: StereoFrame is already rectified!";
-  }
-  stereo_camera_->undistortRectifyStereoFrame(stereo_frame);
-  CHECK(stereo_frame->isRectified());
 
-  //! Undistort rectify left keypoints
-  CHECK_GT(stereo_frame->left_frame_.keypoints_.size(), 0u)
-      << "Call feature detection on left frame first...";
-  stereo_camera_->undistortRectifyLeftKeypoints(
-      stereo_frame->left_frame_.keypoints_,
-      &stereo_frame->left_keypoints_rectified_);
+  if (stereo_matching_params_.rectified_inputs) {
+    stereo_frame->setIsRectified(true);
+    stereo_frame->setRectifiedImages(stereo_frame->left_frame_.img_,
+                                     stereo_frame->right_frame_.img_);
+    KeypointsCV undistort_left_kps;
+    cv::undistortPoints(
+        stereo_frame->left_frame_.keypoints_,
+        undistort_left_kps,
+        stereo_camera_->getLeftCamParams().K_,
+        stereo_camera_->getLeftCamParams().distortion_coeff_mat_,
+        cv::Mat(),
+        stereo_camera_->getLeftCamParams().K_);
+    for (auto const& kp : undistort_left_kps) {
+      stereo_frame->left_keypoints_rectified_.push_back(
+          std::make_pair(KeypointStatus::VALID, kp));
+    }
+  } else if (not stereo_frame->isRectified()) {
+    stereo_camera_->undistortRectifyStereoFrame(stereo_frame);
+    CHECK(stereo_frame->isRectified());
+    //! Undistort rectify left keypoints
+    CHECK_GT(stereo_frame->left_frame_.keypoints_.size(), 0u)
+        << "Call feature detection on left frame first...";
+    stereo_camera_->undistortRectifyLeftKeypoints(
+        stereo_frame->left_frame_.keypoints_,
+        &stereo_frame->left_keypoints_rectified_);
+  }
 
   CHECK(!stereo_frame->getLeftImgRectified().empty() &&
         !stereo_frame->getRightImgRectified().empty())
@@ -314,7 +322,7 @@ void StereoMatcher::sparseStereoReconstruction(StereoFrame* stereo_frame) {
                              valid_disp_mask;
 
   // Set invalid depths back to 0
-  stereo_frame->left_depth_img_.setTo(0.0f, ~valid_depth_mask);
+  stereo_frame->left_depth_img_.setTo(-1.f, ~valid_depth_mask);
 
   stereo_frame->keypoints_depth_.clear();
   stereo_frame->keypoints_depth_.reserve(
