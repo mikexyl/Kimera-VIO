@@ -103,10 +103,9 @@ class VilibTracker : public FeatureTracker {
       return;
     }
     size_t used_byte = total_byte - free_byte;
-    VLOG(10) << label
-              << " - GPU Memory: Used=" << used_byte / (1024.0 * 1024.0)
-              << " MB, Free=" << free_byte / (1024.0 * 1024.0)
-              << " MB, Total=" << total_byte / (1024.0 * 1024.0) << " MB";
+    VLOG(10) << label << " - GPU Memory: Used=" << used_byte / (1024.0 * 1024.0)
+             << " MB, Free=" << free_byte / (1024.0 * 1024.0)
+             << " MB, Total=" << total_byte / (1024.0 * 1024.0) << " MB";
   }
 
   void track(Frame* ref_frame,
@@ -116,7 +115,8 @@ class VilibTracker : public FeatureTracker {
              std::vector<int>* prevNextIds,
              cv::OutputArray err,
              std::vector<float>* std,
-             std::vector<float>* scores) override {
+             std::vector<float>* scores,
+             const cv::Mat& mask = cv::Mat()) override {
     logGpuMemoryUsage("Before tracking");
 
     // TODO: change for stereo mode accordingly
@@ -177,7 +177,8 @@ class VilibTracker : public FeatureTracker {
     nextPts->resize(vilib_frame->num_features_);
 
     // populate next pts mat
-    std::map<size_t, int> cur_kp_id_to_feature_id, cur_feature_id_to_kp_id;
+    std::map<size_t, int> cur_kp_id_to_feature_id;
+    std::map<int, size_t> cur_feature_id_to_kp_id;
     for (size_t i = 0; i < vilib_frame->num_features_; ++i) {
       nextPts->at(i).x = features(0, i) / params_.downsample_scale;
       nextPts->at(i).y = features(1, i) / params_.downsample_scale;
@@ -185,11 +186,65 @@ class VilibTracker : public FeatureTracker {
       cur_feature_id_to_kp_id[ids[i]] = i;
     }
 
+    // Populate std and scores from vilib results
+    auto levels = vilib_frame->level_vec_;
+    std->resize(vilib_frame->num_features_);
+    for (size_t i = 0; i < vilib_frame->num_features_; ++i) {
+      (*std)[i] = (levels[i] + 1) * 8;
+    }
+    auto feature_scores = vilib_frame->score_vec_;
+    scores->resize(vilib_frame->num_features_, 0.0f);
+    for (size_t i = 0; i < vilib_frame->num_features_; ++i) {
+      (*scores)[i] = feature_scores[i];
+    }
+
+    // Filter keypoints using mask (e.g., sky segmentation)
+    if (!mask.empty()) {
+      std::vector<cv::Point2f> filtered_nextPts;
+      std::map<size_t, int> filtered_cur_kp_id_to_feature_id;
+      std::map<int, size_t> filtered_cur_feature_id_to_kp_id;
+      std::vector<float> filtered_std, filtered_scores;
+
+      size_t filtered_idx = 0;
+      for (size_t i = 0; i < nextPts->size(); ++i) {
+        const auto& pt = nextPts->at(i);
+        bool keep_point = true;
+        // Check if point is within mask bounds and NOT masked (mask value == 0)
+        if (pt.x >= 0 && pt.x < mask.cols && pt.y >= 0 && pt.y < mask.rows) {
+          if (mask.at<uint8_t>(static_cast<int>(pt.y),
+                               static_cast<int>(pt.x)) != 0) {
+            keep_point = false;  // Masked out
+          }
+        }
+
+        if (keep_point) {
+          filtered_nextPts.push_back(pt);
+          int feature_id = cur_kp_id_to_feature_id[i];
+          filtered_cur_kp_id_to_feature_id[filtered_idx] = feature_id;
+          filtered_cur_feature_id_to_kp_id[feature_id] = filtered_idx;
+          filtered_std.push_back((*std)[i]);
+          filtered_scores.push_back((*scores)[i]);
+          filtered_idx++;
+        }
+      }
+
+      // Update with filtered results
+      *nextPts = filtered_nextPts;
+      cur_kp_id_to_feature_id = filtered_cur_kp_id_to_feature_id;
+      cur_feature_id_to_kp_id = filtered_cur_feature_id_to_kp_id;
+      std->assign(filtered_std.begin(), filtered_std.end());
+      scores->assign(filtered_scores.begin(), filtered_scores.end());
+
+      VLOG(1) << "Mask filter removed "
+              << (vilib_frame->num_features_ - filtered_nextPts.size())
+              << " keypoints (" << filtered_nextPts.size() << " remaining)";
+    }
+
     // Always keep it vector-shaped (Nx1). N==0 is OK.
     prevNextIds->clear();
 
     if (num_prev_keypoints > 0 and not prev_kp_id_to_feature_id_.empty()) {
-      prevNextIds->resize(num_prev_keypoints, 1);
+      prevNextIds->resize(num_prev_keypoints, -1);
       // populate the id matching
       for (size_t i = 0; i < num_prev_keypoints; ++i) {
         // this is possible if other detector adds new keypoints
@@ -207,26 +262,15 @@ class VilibTracker : public FeatureTracker {
       }
     }
 
-    auto levels = vilib_frame->level_vec_;
-    std->resize(vilib_frame->num_features_);
-    for (size_t i = 0; i < vilib_frame->num_features_; ++i) {
-      (*std)[i] = (levels[i] + 1) * 8;
-    }
-    auto feature_scores = vilib_frame->score_vec_;
-    scores->resize(vilib_frame->num_features_, 0.0f);
-    for (size_t i = 0; i < vilib_frame->num_features_; ++i) {
-      (*scores)[i] = feature_scores[i];
-    }
-
-    // find min/max of scores
-    auto [min_score, max_score] =
-        std::minmax_element(scores->begin(), scores->end());
-
-    // normalize scores to 0-1
-    float score_range = *max_score - *min_score;
-    if (score_range > 0) {
-      for (size_t i = 0; i < scores->size(); ++i) {
-        (*scores)[i] = ((*scores)[i] - *min_score) / score_range;
+    // Normalize scores to 0-1
+    if (!scores->empty()) {
+      auto [min_score, max_score] =
+          std::minmax_element(scores->begin(), scores->end());
+      float score_range = *max_score - *min_score;
+      if (score_range > 0) {
+        for (size_t i = 0; i < scores->size(); ++i) {
+          (*scores)[i] = ((*scores)[i] - *min_score) / score_range;
+        }
       }
     }
 

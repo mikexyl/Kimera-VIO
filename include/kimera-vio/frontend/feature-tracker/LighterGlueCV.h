@@ -26,7 +26,8 @@ class LighterGlueCV : public FeatureTracker {
              std::vector<int>* prev_next_matches,
              cv::OutputArray err,
              std::vector<float>* stds,
-             std::vector<float>* scores) override {
+             std::vector<float>* scores,
+             const cv::Mat& mask) override {
     // number of previous points should be equal to number of descriptors
     CHECK_EQ(ref_frame->keypoints_.size(), ref_frame->descriptors_.rows)
         << "Number of previous points does not match number of descriptors in "
@@ -105,10 +106,14 @@ class LighterGlueCV : public FeatureTracker {
     CHECK_NOTNULL(matches);
 
     // Add safety checks
-    CHECK(!ref_frame->keypoints_.empty()) << "Reference frame keypoints are empty!";
-    CHECK(!cur_frame->keypoints_.empty()) << "Current frame keypoints are empty!";
-    CHECK(!ref_frame->descriptors_.empty()) << "Reference frame descriptors are empty!";
-    CHECK(!cur_frame->descriptors_.empty()) << "Current frame descriptors are empty!";
+    CHECK(!ref_frame->keypoints_.empty())
+        << "Reference frame keypoints are empty!";
+    CHECK(!cur_frame->keypoints_.empty())
+        << "Current frame keypoints are empty!";
+    CHECK(!ref_frame->descriptors_.empty())
+        << "Reference frame descriptors are empty!";
+    CHECK(!cur_frame->descriptors_.empty())
+        << "Current frame descriptors are empty!";
     CHECK(!ref_frame->scores_.empty()) << "Reference frame scores are empty!";
     CHECK(!cur_frame->scores_.empty()) << "Current frame scores are empty!";
     CHECK(!ref_frame->img_.empty()) << "Reference frame image is empty!";

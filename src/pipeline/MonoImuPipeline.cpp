@@ -242,6 +242,13 @@ MonoImuPipeline::MonoImuPipeline(const VioParams& params,
               ->fillFrontendQueue(converted_output);
         });
 
+    if (lcd_module_) {
+      lcd_module_->registerOutputCallback([&visualizer_module](
+                                              const LcdOutput::Ptr& output) {
+        CHECK_NOTNULL(visualizer_module.get())->fillLoopClosureQueue(output);
+      });
+    }
+
     // if (mesher_module_) {
     //   mesher_module_->registerOutputCallback(
     //       std::bind(&VisualizerModule::fillMesherQueue,
@@ -261,13 +268,6 @@ MonoImuPipeline::MonoImuPipeline(const VioParams& params,
                         params.display_params_->display_type_,
                         params.display_params_,
                         std::bind(&MonoImuPipeline::shutdown, this)));
-
-    if (FLAGS_use_lcd) {
-      CHECK(lcd_module_);
-      // lcd_module_->registerOutputCallback([&](const LcdOutput::Ptr& output) {
-      //   visualizer_module_->fillLoopClosureQueue(output);
-      // });
-    }
   }
 
   launchThreads();

@@ -1,6 +1,7 @@
 #pragma once
 
-#include <KimeraRPGO/RobustSolver.h>
+#include <gtsam/nonlinear/LevenbergMarquardtOptimizer.h>
+#include <gtsam/nonlinear/NonlinearFactor.h>
 
 #include "kimera-vio/frontend/RgbdCamera.h"
 #include "kimera-vio/frontend/RgbdFrame.h"
@@ -196,40 +197,7 @@ class LoopClosureDetector : public LoopClosureDetectorBase {
    * @param[in] cb A callback function.
    */
   inline void registerIsBackendQueueFilledCallback(
-      const IsBackendQueueFilledCallback& cb) override {
-    is_backend_queue_filled_cb_ = cb;
-  }
-
-  /* ------------------------------------------------------------------------
-   */
-  /** @brief Initializes the RobustSolver member with an initial prior factor,
-   *  which can be the first OdometryFactor given by the Backend.
-   * @param[in] factor An OdometryFactor representing the pose between the
-   *  initial state of the vehicle and the first keyframe.
-   */
-  void initializePGO(const OdometryFactor& factor);
-
-  /* ------------------------------------------------------------------------
-   */
-  /** @brief Adds an odometry factor to the PGO and optimizes the trajectory.
-   *  No actual optimization is performed on the RPGO side for odometry.
-   * @param[in] factor An OdometryFactor representing the Backend's guess for
-   *  odometry between two consecutive keyframes.
-   */
-  void addOdometryFactorAndOptimize(const OdometryFactor& factor);
-
-  /* ------------------------------------------------------------------------
-   */
-  /** @brief Adds a loop-closure factor to the PGO and optimizes the
-   * trajectory.
-   * @param[in] factor A LoopClosureFactor representing the relative pose
-   *  between two frames that are not (necessarily) consecutive.
-   */
-  void addLoopClosureFactorAndOptimize(const LoopClosureFactor& factor);
-
-  void updateOdomFactorsFromStates(
-      const gtsam::Values& states,
-      std::optional<OdometryFactor> odom_factor = std::nullopt);
+      const IsBackendQueueFilledCallback& cb) override {}
 
   /* ------------------------------------------------------------------------
    */
@@ -273,39 +241,6 @@ class LoopClosureDetector : public LoopClosureDetectorBase {
    * @return The FrameCache containing keyframe information.
    */
   const FrameCache& getFrameCache() const { return cache_; }
-
-  /* ------------------------------------------------------------------------
-   */
-  /** @brief Returns the pose between the inertial world-reference frame and
-   * the "map" frame, which is the error between the VIO and the PGO
-   * trajectories.
-   * @return The pose of the map frame relative to the world frame.
-   */
-  const gtsam::Pose3 getWPoseMap() const;
-
-  /* ------------------------------------------------------------------------
-   */
-  /** @brief Returns the pose between the optimized world reference frame
-   * (map) and the VIO world reference frame (odom).
-   * @return The pose of the odom frame relative to the map frame.
-   */
-  const gtsam::Pose3 getMapPoseOdom() const;
-
-  /* ------------------------------------------------------------------------
-   */
-  /** @brief Returns the values of the PGO, which is the full trajectory of
-   * the PGO.
-   * @return The gtsam::Values (poses) of the PGO.
-   */
-  const gtsam::Values getPGOTrajectory() const;
-
-  /* ------------------------------------------------------------------------
-   */
-  /** @brief Returns the Nonlinear-Factor-Graph from the PGO.
-   * @return The gtsam::NonlinearFactorGraph of the optimized trajectory from
-   *  the PGO.
-   */
-  const gtsam::NonlinearFactorGraph getPGOnfg() const;
 
   /* ------------------------------------------------------------------------
    */
@@ -550,6 +485,8 @@ class LoopClosureDetector : public LoopClosureDetectorBase {
 
   virtual void cleanFrame(const LCDFrame::Ptr& frame) {}
 
+  void updatePoseGraph(const gtsam::Values& values);
+
  protected:
   enum class LcdState {
     Bootstrap,  //! Lcd is initializing
@@ -558,8 +495,6 @@ class LoopClosureDetector : public LoopClosureDetectorBase {
   LcdState lcd_state_ = LcdState::Bootstrap;
 
   LoopClosureDetectorParams lcd_params_;
-
-  IsBackendQueueFilledCallback is_backend_queue_filled_cb_;
 
   // TODO(Toni): we should be using the FeatureDetector/Description class...
   // ORB extraction and matching members
@@ -582,8 +517,7 @@ class LoopClosureDetector : public LoopClosureDetectorBase {
   gtsam::SharedNoiseModel shared_noise_model_;
 
   // Robust PGO members
-  std::unique_ptr<KimeraRPGO::RobustSolver> pgo_;
-  std::pair<gtsam::Symbol, gtsam::Pose3> W_Pose_B_kf_vio_;
+
   gtsam::Pose3 B_Pose_Cam_;
 
   std::unique_ptr<typename Database::GlobalDesc> latest_global_vec_;
@@ -593,15 +527,14 @@ class LoopClosureDetector : public LoopClosureDetectorBase {
   std::unique_ptr<LcdLandmarkManager> landmark_manager_{nullptr};
 
   // Queue-checking callback
-  int num_lc_unoptimized_;
-
   std::unique_ptr<LcdThirdPartyWrapper> lcd_tp_wrapper_;
+
+  std::map<std::pair<FrameId, FrameId>, gtsam::NonlinearFactor::shared_ptr> pg_;
+  gtsam::Values pg_values_;
 
   // Logging members
   std::unique_ptr<LoopClosureDetectorLogger> logger_;
   LcdDebugInfo debug_info_;
-
-  size_t n_since_last_pgo_{0};
 
   // Parameter members
   const bool log_output_ = false;

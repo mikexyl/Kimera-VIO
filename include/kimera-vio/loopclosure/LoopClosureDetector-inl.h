@@ -1,5 +1,9 @@
 #pragma once
 
+#include <gtsam/inference/Symbol.h>
+#include <gtsam/nonlinear/GaussNewtonOptimizer.h>
+#include <gtsam/nonlinear/NonlinearFactorGraph.h>
+
 #include "kimera-vio/frontend/MonoVisionImuFrontend-definitions.h"
 #include "kimera-vio/frontend/RgbdVisionImuFrontend-definitions.h"
 #include "kimera-vio/loopclosure/LoopClosureDetector.h"
@@ -34,12 +38,9 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::
       rgbd_camera_(rgbd_camera ? rgbd_camera.value() : nullptr),
       db_(nullptr),
       cache_(lcd_params.frame_cache),
-      pgo_(nullptr),
-      W_Pose_B_kf_vio_(),
       B_Pose_Cam_(B_Pose_Cam),
       latest_global_vec_(nullptr),
       tracker_(nullptr),
-      num_lc_unoptimized_(0),
       lcd_tp_wrapper_(nullptr),
       logger_(nullptr),
       log_output_(log_output) {
@@ -57,21 +58,6 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::
       nullptr,
       nullptr,
       kLCDTrackerUseOF);
-
-  // Initialize pgo_:
-  // TODO(marcus): parametrize the verbosity of PGO params
-  KimeraRPGO::RobustSolverParams pgo_params;
-  // TODO(mikexyl): turn this off for debugging
-  //  pgo_params.setNoRejection();
-  pgo_params.setPcmSimple3DParams(lcd_params_.odom_trans_threshold_,
-                                  lcd_params_.odom_rot_threshold_,
-                                  lcd_params_.pcm_trans_threshold_,
-                                  lcd_params_.pcm_rot_threshold_,
-                                  KimeraRPGO::Verbosity::QUIET);
-  if (lcd_params_.gnc_alpha_ > 0 && lcd_params_.gnc_alpha_ < 1) {
-    pgo_params.setGncInlierCostThresholdsAtProbability(lcd_params_.gnc_alpha_);
-  }
-  pgo_ = std::make_unique<KimeraRPGO::RobustSolver>(pgo_params);
 
   // Initialize the thirdparty wrapper:
   lcd_tp_wrapper_ = std::make_unique<LcdThirdPartyWrapper>(lcd_params_);
@@ -101,10 +87,13 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::spinOnce(
                                      input.W_Pose_smoother_);
   landmark_manager_->updateLandmarks(input.landmark_out_window_,
                                      input.W_Pose_smoother_);
-  std::vector<LandmarkId> new_lmk_ids;
+  std::set<LandmarkId> new_lmk_ids;
   for (const auto& [lmk_id, lmk] : input.landmark_out_window_) {
-    new_lmk_ids.push_back(lmk_id);
+    new_lmk_ids.insert(lmk_id);
   }
+  // for (const auto& [lmk_id, lmk] : input.landmark_in_window_) {
+  //   new_lmk_ids.insert(lmk_id);
+  // }
   int culled = landmark_manager_->checkAndCullingLandmarks(
       new_lmk_ids,
       cache_,
@@ -114,30 +103,7 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::spinOnce(
       lcd_params_.min_lmk_obs_cnt_);
   VLOG(1) << "Culled landmarks: " << culled;
 
-  // Update the PGO with the Backend VIO estimate.
-  // TODO(marcus): only add factor if it's a set distance away from previous
-  // TODO(marcus): OdometryPose vs OdometryFactor
   timestamp_map_[input.cur_kf_id_] = input.timestamp_;
-  OdometryFactor odom_factor(
-      input.cur_kf_id_, input.W_Pose_Blkf_, shared_noise_model_);
-
-  switch (lcd_state_) {
-    case LcdState::Bootstrap: {
-      CHECK_EQ(pgo_->calculateEstimate().size(), 0);
-      initializePGO(odom_factor);
-      break;
-    }
-    case LcdState::Nominal: {
-      // TODO(marcus): need a better check than this:
-      CHECK_GT(pgo_->calculateEstimate().size(), 0);
-      // updateOdomFactorsFromStates(input.backend_states_, odom_factor);
-      addOdometryFactorAndOptimize(odom_factor);
-      break;
-    }
-    default: {
-      LOG(FATAL) << "Unrecognized LCD state.";
-    }
-  }
 
   // Process the StereoFrame and check for a loop closure with previous
   // ones.
@@ -188,8 +154,12 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::spinOnce(
 
   computeSequenceGlobalDesc(lcd_frame_id);
 
+  updatePoseGraph(input.backend_states_);
+
   if (lcd_frame_id < static_cast<FrameId>(lcd_params_.local_window_size_)) {
     cleanFrame(lcd_frame_id);
+    LOG(WARNING) << "LCD frame id " << lcd_frame_id << " is less than "
+                 << lcd_params_.local_window_size_ << ". Returning nullptr.";
     return nullptr;
   } else {
     FrameId output_frame_id =
@@ -197,7 +167,39 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::spinOnce(
     LcdOutput::UniquePtr output_payload =
         makeOutputPayload(input.timestamp_, output_frame_id);
     cleanFrame(output_frame_id);
+    if (!output_payload) {
+      LOG(WARNING) << "makeOutputPayload returned nullptr.";
+    }
     return output_payload;
+  }
+}
+
+template <typename Database, typename FeatureDetector, typename FeatureMatcher>
+void LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::
+    updatePoseGraph(const gtsam::Values& values) {
+  // extract odometry measurements from values
+  for (auto const& [key, value] : values) {
+    gtsam::Key pose_key(key);
+    if (gtsam::symbolChr(pose_key) != 'x') {
+      continue;
+    }
+    gtsam::Symbol next_key('x', gtsam::symbolIndex(pose_key) + 1);
+    if (values.exists(pose_key) && values.exists(next_key)) {
+      gtsam::Pose3 pose = values.at<gtsam::Pose3>(pose_key),
+                   next_pose = values.at<gtsam::Pose3>(next_key),
+                   T_pose_next = pose.inverse() * next_pose;
+      gtsam::Key pose_id = gtsam::symbolIndex(pose_key), next_id = pose_id + 1;
+      // build between factor
+      gtsam::BetweenFactor<gtsam::Pose3>::shared_ptr factor(
+          new gtsam::BetweenFactor<gtsam::Pose3>(
+              pose_id, next_id, T_pose_next, shared_noise_model_));
+      pg_[std::make_pair(pose_id, next_id)] = factor;
+    }
+  }
+
+  for (auto const& [key, value] : values) {
+    if (gtsam::symbolChr(key) != 'x') continue;
+    pg_values_.insert_or_assign(gtsam::symbolIndex(key), value);
   }
 }
 
@@ -347,8 +349,8 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::
 
   const int grid_cols = 40;  // Configurable grid size
   const int grid_rows = 40;
-  filterKeypointsWithGrid(stereo_frame->cam_params_.image_size_.width,
-                          stereo_frame->cam_params_.image_size_.height,
+  filterKeypointsWithGrid(curr_frame->cam_params_.image_size_.width,
+                          curr_frame->cam_params_.image_size_.height,
                           grid_cols,
                           grid_rows,
                           &filtered_keypoints,
@@ -358,43 +360,30 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::
                           left_kpts_rect_ptr,
                           right_kpts_rect_ptr);
 
-  const gtsam::Pose3& w_Pose_map = getWPoseMap();
-  const gtsam::Pose3& map_Pose_odom = getMapPoseOdom();
-  const gtsam::Values& pgo_states = pgo_->calculateEstimate();
-  const gtsam::NonlinearFactorGraph& pgo_nfg = pgo_->getFactorsUnsafe();
-
-  // remove factors in pgo_nfg that are later than lcd_frame_id
-  gtsam::NonlinearFactorGraph nfg_until_frame;
-  gtsam::Values pgo_states_until_frame;
-  for (const auto& factor : pgo_nfg) {
-    auto keys = factor->keys();
-    bool add_factor = true;
-    for (const auto& key : keys) {
-      FrameId frame_id = key;
-      if (frame_id > lcd_frame_id) {
-        add_factor = false;
-        break;
-      }
-    }
-    if (add_factor) {
-      nfg_until_frame.add(factor);
-    }
-  }
-
-  for (const auto& key : pgo_states.keys()) {
-    FrameId frame_id = key;
-    if (frame_id <= lcd_frame_id) {
-      pgo_states_until_frame.insert(key, pgo_states.at<Pose3>(key));
-    }
-  }
-
   LcdOutput::UniquePtr output_payload =
       std::make_unique<LcdOutput>(LCDStatus::NO_MATCHES, msg_timestamp);
 
   CHECK(output_payload) << "Missing LCD output payload.";
 
+  gtsam::NonlinearFactorGraph pg;
+  for (auto it = pg_.begin(); it != pg_.end(); it++) {
+    pg.add(it->second);
+  }
+
+  pg.addPrior(gtsam::Key(0),
+              gtsam::Pose3(),
+              gtsam::noiseModel::Isotropic::Sigma(6, 1e-4));
+
+  // optimize the pose graph
+  // TODO(mike): this is only for debug and visualization, we don't need to
+  // optimize it here
+  gtsam::GaussNewtonParams params;
+  params.setVerbosity("SILENT");
+  gtsam::GaussNewtonOptimizer optimizer(pg, pg_values_, params);
+  gtsam::Values pg_values_ = optimizer.optimize();
+
   output_payload->setMapInformation(
-      w_Pose_map, map_Pose_odom, pgo_states_until_frame, nfg_until_frame);
+      gtsam::Pose3(), gtsam::Pose3(), pg_values_, pg);
 
   KeypointsCV keypoints_2d;
   cv::KeyPoint::convert(filtered_keypoints, keypoints_2d);
@@ -547,243 +536,29 @@ void LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::
 }
 
 template <typename Database, typename FeatureDetector, typename FeatureMatcher>
-void LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::
-    initializePGO(const OdometryFactor& factor) {
-  CHECK(lcd_state_ == LcdState::Bootstrap);
-  CHECK_EQ(factor.cur_key_, 0u);
-
-  gtsam::NonlinearFactorGraph init_nfg;
-  gtsam::Values init_val;
-
-  init_val.insert(gtsam::Symbol(factor.cur_key_), factor.W_Pose_Blkf_);
-
-  init_nfg.add(gtsam::PriorFactor<gtsam::Pose3>(
-      gtsam::Symbol(factor.cur_key_), factor.W_Pose_Blkf_, factor.noise_));
-
-  CHECK(pgo_);
-  pgo_->update(init_nfg, init_val);
-
-  // Update tracker for latest VIO estimate
-  // NOTE: done here instead of in spinOnce() to make unit tests easier.
-  W_Pose_B_kf_vio_ = std::make_pair(factor.cur_key_, factor.W_Pose_Blkf_);
-
-  lcd_state_ = LcdState::Nominal;
-}
-
-/* ------------------------------------------------------------------------
- */
-// TODO(marcus): only add nodes if they're x dist away from previous node
-// TODO(marcus): consider making the keys of OdometryFactor minus one each
-// so that the extra check in here isn't needed...
-template <typename Database, typename FeatureDetector, typename FeatureMatcher>
-void LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::
-    addOdometryFactorAndOptimize(const OdometryFactor& factor) {
-  CHECK(lcd_state_ == LcdState::Nominal);
-  CHECK_GT(factor.cur_key_, 0u);
-
-  const gtsam::Pose3& W_Pose_Bkf = factor.W_Pose_Blkf_;
-
-  gtsam::NonlinearFactorGraph nfg;
-  gtsam::Values value;
-
-  const gtsam::Values& optimized_values = pgo_->calculateEstimate();
-  CHECK_EQ(factor.cur_key_, optimized_values.size());
-  const gtsam::Pose3& estimated_last_pose =
-      optimized_values.at<gtsam::Pose3>(factor.cur_key_ - 1);
-
-  // We can get the same relative pose used in the backend after
-  // smoother_->update() by getting the relative pose between the latest two
-  // VIO backend output poses, as these are created by chaining smoother_
-  // relative poses.
-  CHECK_EQ(W_Pose_B_kf_vio_.first, factor.cur_key_ - 1);
-  const gtsam::Pose3& W_Pose_Blkf = W_Pose_B_kf_vio_.second;
-  const gtsam::Pose3& B_lkf_Pose_kf = W_Pose_Blkf.between(W_Pose_Bkf);
-  value.insert(gtsam::Symbol(factor.cur_key_),
-               estimated_last_pose.compose(B_lkf_Pose_kf));
-
-  nfg.add(gtsam::BetweenFactor<gtsam::Pose3>(gtsam::Symbol(factor.cur_key_ - 1),
-                                             gtsam::Symbol(factor.cur_key_),
-                                             B_lkf_Pose_kf,
-                                             factor.noise_));
-
-  CHECK(pgo_);
-  pgo_->update(nfg, value);
-
-  // Update tracker for latest VIO estimate
-  // NOTE: done here instead of in spinOnce() to make unit tests easier.
-  W_Pose_B_kf_vio_ = std::make_pair(factor.cur_key_, W_Pose_Bkf);
-}
-
-template <typename Database, typename FeatureDetector, typename FeatureMatcher>
-void LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::
-    updateOdomFactorsFromStates(const gtsam::Values& states,
-                                std::optional<OdometryFactor> odom_factor) {
-  CHECK(lcd_state_ == LcdState::Nominal);
-
-  // extract all odom factors from states
-  gtsam::NonlinearFactorGraph new_odom_factors;
-  std::map<FrameId, Pose3> poses;
-  for (auto const& key : states.keys()) {
-    gtsam::Symbol symbol(key);
-    if (symbol.chr() == kPoseSymbolChar) {
-      poses[symbol.index()] = states.at<gtsam::Pose3>(key);
-    }
-  }
-
-  // check if the poses are connected
-  // find the smallest and largest key of poses
-  FrameId first_frame, last_frame;
-  if (poses.empty()) {
-    return;
-  } else {
-    first_frame = poses.begin()->first;
-    last_frame = poses.rbegin()->first;
-    for (FrameId id = first_frame; id < last_frame; id++) {
-      CHECK(poses.count(id));
-      CHECK(poses.count(id + 1));
-
-      new_odom_factors.add(gtsam::BetweenFactor<gtsam::Pose3>(
-          id,
-          id + 1,
-          poses.at(id).inverse() * poses.at(id + 1),
-          shared_noise_model_));
-    }
-  }
-
-  auto const& old_factors = pgo_->getFactorsUnsafe();
-  gtsam::FactorIndices to_remove;
-  for (size_t fi = 0; fi < old_factors.size(); fi++) {
-    const auto& factor = old_factors[fi];
-    if (!factor) continue;
-    if (factor->keys().size() != 2) {
-      continue;
-    }
-    gtsam::Key key0(factor->keys().at(0)), key1(factor->keys().at(1));
-    if (poses.count(key0) && poses.count(key1)) {
-      to_remove.push_back(fi);
-    }
-  }
-  pgo_->removeFactorsNoUpdate(to_remove);
-
-  gtsam::Values values;
-  for (const auto& [id, pose] : poses) {
-    values.insert(gtsam::Symbol(id), pose);
-  }
-
-  CHECK(pgo_);
-  if (n_since_last_pgo_++ > 20) {
-    pgo_->forceUpdate(new_odom_factors, values);
-    LOG(INFO) << "Full PGO update!";
-    n_since_last_pgo_ = 0;
-  } else {
-    pgo_->update(new_odom_factors, values, false);
-  }
-
-  if (not odom_factor) {
-    return;
-  }
-
-  const gtsam::Pose3& W_Pose_Bkf = odom_factor->W_Pose_Blkf_;
-
-  // Update tracker for latest VIO estimate
-  // NOTE: done here instead of in spinOnce() to make unit tests easier.
-  W_Pose_B_kf_vio_ = std::make_pair(odom_factor->cur_key_, W_Pose_Bkf);
-}
-
-/* ------------------------------------------------------------------------
- */
-template <typename Database, typename FeatureDetector, typename FeatureMatcher>
-void LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::
-    addLoopClosureFactorAndOptimize(const LoopClosureFactor& factor) {
-  CHECK(lcd_state_ == LcdState::Nominal);
-
-  gtsam::NonlinearFactorGraph nfg;
-
-  nfg.add(gtsam::BetweenFactor<gtsam::Pose3>(gtsam::Symbol(factor.ref_key_),
-                                             gtsam::Symbol(factor.cur_key_),
-                                             factor.ref_Pose_cur_,
-                                             factor.noise_));
-
-  // Only optimize if we don't have other potential loop closures to
-  // process.
-  CHECK(is_backend_queue_filled_cb_);
-  // True if backend input queue is empty or we have cached enough LCs.
-  bool do_optimize =
-      num_lc_unoptimized_ >= lcd_params_.max_lc_cached_before_optimize_ ||
-      !is_backend_queue_filled_cb_();
-
-  VLOG(1) << "PGO: do optimize: " << do_optimize
-          << ", num_lc_unoptimized: " << num_lc_unoptimized_
-          << ", max_lc_cached_before_optimize_: "
-          << lcd_params_.max_lc_cached_before_optimize_;
-
-  if (!do_optimize) {
-    num_lc_unoptimized_++;
-  } else {
-    num_lc_unoptimized_ = 0;
-  }
-
-  CHECK(pgo_);
-  pgo_->update(nfg, gtsam::Values(), do_optimize && !FLAGS_lcd_no_optimize);
-  VLOG(1) << "PGO: input pg size: " << nfg.size()
-          << ", updated pg size: " << pgo_->getFactorsUnsafe().size()
-          << ", num_lc: " << pgo_->getNumLC()
-          << ", num_lc_inliers: " << pgo_->getNumLCInliers();
-}
-
-/* ------------------------------------------------------------------------
- */
-template <typename Database, typename FeatureDetector, typename FeatureMatcher>
 FrameId LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::
     processAndAddMonoFrame(const Frame& frame,
                            const PointsWithIdMap& W_points_with_ids,
                            const gtsam::Pose3& W_Pose_Blkf) {
-  switch (lcd_params_.pose_recovery_type_) {
-    case PoseRecoveryType::k5ptRotOnly: {
-      // Since we are using the 5-pt method only, we don't need any 3d
-      // keypoints for full pose-recovery. We are only doing up to a scaling
-      // factor in translation.
-      std::vector<cv::KeyPoint> keypoints;
-      typename Database::Desc descriptors_mat;
-      typename Database::DescVector descriptors_vec;
-      getNewFeaturesAndDescriptors(frame, &keypoints, &descriptors_mat);
-      descriptorMatToVec(frame, descriptors_mat, &descriptors_vec);
+  std::vector<cv::KeyPoint> keypoints;
+  typename Database::Desc descriptors_mat;
+  typename Database::DescVector descriptors_vec;
+  getNewFeaturesAndDescriptors(frame, &keypoints, &descriptors_mat);
+  descriptorMatToVec(frame, descriptors_mat, &descriptors_vec);
 
-      BearingVectors versors;
-      for (const cv::KeyPoint& keypoint : keypoints) {
-        versors.push_back(UndistorterRectifier::GetBearingVector(
-            keypoint.pt, frame.cam_param_));
-      }
-
-      return cache_.addFrame(std::make_shared<LCDFrame>(
-          frame.timestamp_,
-          FrameCache::NEW_ID,
-          frame.id_,
-          keypoints,
-          Landmarks(),  // no 3d keypoints required for the 5-pt-only method
-          descriptors_vec,
-          descriptors_mat,
-          versors));
-    } break;
-
-    case PoseRecoveryType::kPnP: {
-      // Build and store LCDFrame object.
-      return cache_.addFrame(
-          this->processMonoPnP(frame, W_points_with_ids, W_Pose_Blkf));
-    } break;
-
-    case PoseRecoveryType::k3d3d: {
-      LOG(FATAL) << "Cannot use PoseRecoveryType::k3d3d for Monocular LCD!";
-    } break;
-
-    default: {
-      LOG(FATAL) << "Unrecognized pose recovery type: "
-                 << static_cast<unsigned int>(lcd_params_.pose_recovery_type_)
-                 << ".";
-    } break;
-  }
-
-  throw std::runtime_error("Invalid pose recovery type");
+  auto lcd_frame = std::make_shared<LCDFrame>(frame.timestamp_,
+                                              FrameCache::NEW_ID,
+                                              frame.id_,
+                                              keypoints,
+                                              Landmarks(),
+                                              descriptors_vec,
+                                              descriptors_mat,
+                                              frame.versors_);
+  lcd_frame->landmark_ids = frame.landmarks_;
+  lcd_frame->W_Pose_Blkf_ = W_Pose_Blkf;
+  lcd_frame->image_ = frame.img_;
+  lcd_frame->cam_params_ = frame.cam_param_;
+  return cache_.addFrame(lcd_frame);
 }
 
 /* ------------------------------------------------------------------------
@@ -861,56 +636,15 @@ FrameId LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::
 
 /* ------------------------------------------------------------------------
  */
-template <typename Database, typename FeatureDetector, typename FeatureMatcher>
-const gtsam::Pose3
-LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::getWPoseMap()
-    const {
-  CHECK(pgo_);
-  const gtsam::Symbol& cur_id = W_Pose_B_kf_vio_.first;
-  const gtsam::Pose3& w_Pose_Bkf_estim = W_Pose_B_kf_vio_.second;
-  const gtsam::Pose3& w_Pose_Bkf_optimal =
-      pgo_->calculateEstimate().at<gtsam::Pose3>(cur_id);
-
-  return w_Pose_Bkf_optimal.between(w_Pose_Bkf_estim);
-}
 
 /* ------------------------------------------------------------------------
  */
-template <typename Database, typename FeatureDetector, typename FeatureMatcher>
-const gtsam::Pose3
-LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::getMapPoseOdom()
-    const {
-  if (cache_.size() > 1) {
-    CHECK(pgo_);
-    const gtsam::Pose3& w_Pose_Bkf_estim = W_Pose_B_kf_vio_.second;
-    const gtsam::Pose3& w_Pose_Bkf_optimal =
-        pgo_->calculateEstimate().at<gtsam::Pose3>(W_Pose_B_kf_vio_.first);
-    return w_Pose_Bkf_optimal.compose(w_Pose_Bkf_estim.inverse());
-  }
-
-  return gtsam::Pose3();
-}
 
 /* ------------------------------------------------------------------------
  */
-template <typename Database, typename FeatureDetector, typename FeatureMatcher>
-const gtsam::Values LoopClosureDetector<Database,
-                                        FeatureDetector,
-                                        FeatureMatcher>::getPGOTrajectory()
-    const {
-  CHECK(pgo_);
-  return pgo_->calculateEstimate();
-}
 
 /* ------------------------------------------------------------------------
  */
-template <typename Database, typename FeatureDetector, typename FeatureMatcher>
-const gtsam::NonlinearFactorGraph
-LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::getPGOnfg()
-    const {
-  CHECK(pgo_);
-  return pgo_->getFactorsUnsafe();
-}
 
 /* ------------------------------------------------------------------------
  */

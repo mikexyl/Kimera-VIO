@@ -20,7 +20,8 @@ class OpticalFlowCV : public FeatureTracker {
              std::vector<int>* prev_next_matches,
              cv::OutputArray err,
              std::vector<float>* stds,
-             std::vector<float>* scores) override {
+             std::vector<float>* scores,
+             const cv::Mat& mask = cv::Mat()) override {
     LOG(FATAL) << "OpticalFlowCV::track not implemented";
   }
 

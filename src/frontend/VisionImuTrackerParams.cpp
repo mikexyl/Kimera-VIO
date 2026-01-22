@@ -166,6 +166,10 @@ bool TrackerParams::parseYAML(const std::string& filepath) {
   yaml_parser.getYamlParam("vilib_downsample", &vilib_downsample);
   yaml_parser.getYamlParam("vilib_downsample_scale", &vilib_downsample_scale);
 
+  yaml_parser.getYamlParam("use_sky_segmentation_filter",
+                           &use_sky_segmentation_filter_);
+  yaml_parser.getYamlParam("sky_seg_engine_path", &sky_seg_engine_path_);
+
   return true;
 }
 

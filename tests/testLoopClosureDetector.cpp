@@ -312,14 +312,15 @@ TEST_F(LCDFixture, defaultConstructor) {
 
 TEST_F(LCDFixture, monoConstructor) {
   /* Test default constructor when in mono mode. */
-  DBoWLoopClosureDetector::UniquePtr lcd = std::make_unique<DBoWLoopClosureDetector>(
-      lcd_params_,
-      stereo_camera_->getLeftCamParams(),
-      stereo_camera_->getBodyPoseLeftCamRect(),
-      std::nullopt,
-      std::nullopt,
-      std::nullopt,
-      false);
+  DBoWLoopClosureDetector::UniquePtr lcd =
+      std::make_unique<DBoWLoopClosureDetector>(
+          lcd_params_,
+          stereo_camera_->getLeftCamParams(),
+          stereo_camera_->getBodyPoseLeftCamRect(),
+          std::nullopt,
+          std::nullopt,
+          std::nullopt,
+          false);
   EXPECT_GT(lcd_detector_->getBoWDatabase()->getVocabulary()->size(), 0);
 }
 
@@ -948,137 +949,6 @@ TEST_F(LCDFixture, detectLoop) {
   EXPECT_LT(error.second, tran_tol_stereo);
 }
 
-TEST_F(LCDFixture, addOdometryFactorAndOptimize) {
-  /* Test the addition of odometry factors to the PGO */
-  CHECK(lcd_detector_);
-  lcd_detector_->initializePGO(OdometryFactor(
-      0, gtsam::Pose3(), gtsam::noiseModel::Isotropic::Variance(6, 0.1)));
-
-  OdometryFactor odom_factor(
-      1, world_T_bodyMatch1_, gtsam::noiseModel::Isotropic::Variance(6, 0.1));
-  lcd_detector_->addOdometryFactorAndOptimize(odom_factor);
-
-  gtsam::Values pgo_trajectory = lcd_detector_->getPGOTrajectory();
-  gtsam::NonlinearFactorGraph pgo_nfg = lcd_detector_->getPGOnfg();
-
-  EXPECT_EQ(pgo_trajectory.size(), 2);
-  EXPECT_EQ(pgo_nfg.size(), 2);
-}
-
-TEST_F(LCDFixture, addLoopClosureFactorAndOptimize) {
-  /* Test the addition of odometry and loop closure factors to the PGO */
-  CHECK(lcd_detector_);
-  OdometryFactor odom_factor_1(
-      0, world_T_bodyMatch1_, gtsam::noiseModel::Isotropic::Variance(6, 0.1));
-  lcd_detector_->initializePGO(odom_factor_1);
-
-  OdometryFactor odom_factor_2(
-      1, world_T_bodyQuery1_, gtsam::noiseModel::Isotropic::Variance(6, 0.1));
-  lcd_detector_->addOdometryFactorAndOptimize(odom_factor_2);
-
-  LoopClosureFactor lc_factor_1_2(
-      0,
-      1,
-      bodyMatch1_T_bodyQuery1_gt_,
-      gtsam::noiseModel::Isotropic::Variance(6, 0.1));
-  lcd_detector_->addLoopClosureFactorAndOptimize(lc_factor_1_2);
-
-  gtsam::Values pgo_trajectory = lcd_detector_->getPGOTrajectory();
-  gtsam::NonlinearFactorGraph pgo_nfg = lcd_detector_->getPGOnfg();
-
-  EXPECT_EQ(pgo_trajectory.size(), 2);
-  EXPECT_EQ(pgo_nfg.size(), 3);
-}
-
-TEST_F(LCDFixture, addLoopClosureFactorNoOptimize) {
-  /* Add a lc but don't optimize because backend queue reports more packets */
-  LoopClosureDetectorParams params;
-  params.odom_rot_threshold_ = -1;
-  params.odom_trans_threshold_ = -1;
-  params.pcm_rot_threshold_ = -1;
-  params.pcm_trans_threshold_ = -1;
-  params.gnc_alpha_ = 0;
-  params.max_lc_cached_before_optimize_ = 1000;
-  lcd_detector_ = std::make_unique<DBoWLoopClosureDetector>(
-      params,
-      stereo_camera_->getLeftCamParams(),
-      stereo_camera_->getBodyPoseLeftCamRect(),
-      stereo_camera_,
-      frontend_params_.stereo_matching_params_,
-      std::nullopt,
-      false);
-  lcd_detector_->registerIsBackendQueueFilledCallback(
-      std::bind(&LCDFixture::lcdInputQueueCb, this));
-  CHECK(lcd_detector_);
-
-  lcd_detector_->initializePGO(OdometryFactor(
-      0, gtsam::Pose3(), gtsam::noiseModel::Isotropic::Variance(6, 0.1)));
-
-  size_t num_odom = 10;
-  for (size_t i = 1; i < num_odom; i++) {
-    lcd_detector_->addOdometryFactorAndOptimize(
-        OdometryFactor(i,
-                       gtsam::Pose3(gtsam::Rot3(), gtsam::Point3(2 * i, 0, 0)),
-                       gtsam::noiseModel::Isotropic::Variance(6, 0.1)));
-  }
-
-  // Check that the trajectory is just odometry factors concatenated together.
-  const gtsam::Values pgo_trajectory_odom_only =
-      lcd_detector_->getPGOTrajectory();
-  const gtsam::NonlinearFactorGraph pgo_nfg_odom_only =
-      lcd_detector_->getPGOnfg();
-  EXPECT_EQ(pgo_trajectory_odom_only.size(), num_odom);
-  EXPECT_EQ(pgo_nfg_odom_only.size(), num_odom);
-
-  for (size_t i = 0; i < num_odom; i++) {
-    EXPECT_EQ(pgo_trajectory_odom_only.keys().at(i), i);
-
-    const auto& this_pose = pgo_trajectory_odom_only.at<gtsam::Pose3>(i);
-    EXPECT_TRUE(this_pose.rotation().equals(gtsam::Rot3()));
-    EXPECT_EQ(this_pose.translation().x(), 2 * i);
-    EXPECT_EQ(this_pose.translation().y(), 0);
-    EXPECT_EQ(this_pose.translation().z(), 0);
-  }
-
-  // Tell PGO not to optimize via the backend queue callback
-  is_backend_queue_filled_ = true;
-  // Push a bad loop closure that would throw off the trajectory after
-  // optimization. One per pair of odometry measurements
-  for (size_t i = 1; i < num_odom; i++) {
-    lcd_detector_->addLoopClosureFactorAndOptimize(
-        LoopClosureFactor(i - 1,
-                          i,
-                          gtsam::Pose3(gtsam::Rot3(), gtsam::Point3(10, 0, 0)),
-                          gtsam::noiseModel::Isotropic::Variance(6, 0.1)));
-  }
-
-  // Check that trajectory is the same as before.
-  gtsam::Values pgo_trajectory_first_lc = lcd_detector_->getPGOTrajectory();
-  EXPECT_EQ(pgo_trajectory_first_lc.size(), pgo_trajectory_odom_only.size());
-  for (size_t i = 0; i < pgo_trajectory_odom_only.size(); i++) {
-    // Because PGO hasn't been optimized, new LC factor hasn't been used to
-    // move the trajectory.
-    EXPECT_TRUE(pgo_trajectory_first_lc.at<gtsam::Pose3>(i).equals(
-        pgo_trajectory_odom_only.at<gtsam::Pose3>(i)));
-  }
-
-  // Now tell PGO to perform optimization via backend queue callback.
-  is_backend_queue_filled_ = false;
-  lcd_detector_->addLoopClosureFactorAndOptimize(
-      LoopClosureFactor(0,
-                        1,
-                        gtsam::Pose3(gtsam::Rot3(), gtsam::Point3(10, 0, 0)),
-                        gtsam::noiseModel::Isotropic::Variance(6, 0.1)));
-
-  // Check that trajectory is the different from before.
-  gtsam::Values pgo_trajectory_second_lc = lcd_detector_->getPGOTrajectory();
-  EXPECT_EQ(pgo_trajectory_second_lc.size(), pgo_trajectory_odom_only.size());
-  for (size_t i = 0; i < pgo_trajectory_odom_only.size(); i++) {
-    EXPECT_FALSE(pgo_trajectory_second_lc.at<gtsam::Pose3>(i).equals(
-        pgo_trajectory_odom_only.at<gtsam::Pose3>(i)));
-  }
-}
-
 TEST_F(LCDFixture, spinOnce) {
   /* Test the full pipeline with one loop closure and full PGO optimization */
   CHECK(lcd_detector_);
@@ -1143,8 +1013,8 @@ TEST_F(LCDFixture, spinOnce) {
   EXPECT_EQ(output_0->timestamp_match_, 0);
   EXPECT_EQ(output_0->id_match_, 0);
   EXPECT_EQ(output_0->id_recent_, 0);
-  EXPECT_EQ(output_0->states_.size(), 1);
-  EXPECT_EQ(output_0->nfg_.size(), 1);
+  EXPECT_EQ(output_0->states_.size(), 0);
+  EXPECT_EQ(output_0->nfg_.size(), 0);
 
   EXPECT_EQ(output_1->is_loop_closure_, false);
   EXPECT_EQ(output_1->timestamp_, timestamp_match2_);
@@ -1152,8 +1022,8 @@ TEST_F(LCDFixture, spinOnce) {
   EXPECT_EQ(output_1->timestamp_match_, 0);
   EXPECT_EQ(output_1->id_match_, 0);
   EXPECT_EQ(output_1->id_recent_, 0);
-  EXPECT_EQ(output_1->states_.size(), 2);
-  EXPECT_EQ(output_1->nfg_.size(), 2);
+  EXPECT_EQ(output_1->states_.size(), 0);
+  EXPECT_EQ(output_1->nfg_.size(), 0);
 
   EXPECT_EQ(output_2->is_loop_closure_, true);
   EXPECT_EQ(output_2->timestamp_, timestamp_query1_);
@@ -1161,7 +1031,7 @@ TEST_F(LCDFixture, spinOnce) {
   EXPECT_EQ(output_2->timestamp_match_, timestamp_match1_);
   EXPECT_EQ(output_2->id_match_, 0);
   EXPECT_EQ(output_2->id_recent_, 2);
-  EXPECT_EQ(output_2->states_.size(), 3);
+  EXPECT_EQ(output_2->states_.size(), 0);
 }
 
 TEST_F(LCDFixture, noRefinePosesInMono) {

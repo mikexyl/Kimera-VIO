@@ -105,7 +105,7 @@ class LcdLandmarkManager : public std::unordered_map<LandmarkId, Landmark> {
     return false;
   }
 
-  int checkAndCullingLandmarks(const std::vector<LandmarkId>& lmk_ids,
+  int checkAndCullingLandmarks(const std::set<LandmarkId>& lmk_ids,
                                const FrameCache& frame_cache,
                                double min_obs_ratio,
                                float min_parallax,

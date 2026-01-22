@@ -7,9 +7,12 @@ size_t VLADLoopClosureDetector::new_seq_id_ = 0;
 void VLADLoopClosureDetector::computeSequenceGlobalDesc(
     const FrameId target_frame_id) {
   auto new_frame = cache_.getFrame(target_frame_id);
-  new_seq_frames_.emplace_back(new_frame);
   new_frame->seq_id_ = new_seq_id_;
   new_frame->descriptors_vec_.clear();
+
+  if (target_frame_id % lcd_params_.jist_seq_interval_ == 0) {
+    new_seq_frames_.emplace_back(new_frame);
+  }
 
   if (new_seq_frames_.size() ==
       static_cast<size_t>(lcd_params_.jist_seq_length_)) {
@@ -110,7 +113,6 @@ void VLADLoopClosureDetector::detectLoopOutsideLocalWindow(
     result->status_ = LCDStatus::NO_MATCHES;
     return;
   }
-
 
   auto faiss_to_dbow_queryresults =
       [&](Database::Database::QueryResults& query_result,

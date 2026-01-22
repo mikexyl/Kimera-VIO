@@ -36,6 +36,10 @@
 #include "kimera-vio/utils/Macros.h"
 #include "kimera-vio/visualizer/Display-definitions.h"
 
+#ifdef HAVE_TENSORRT
+#include "xfeat-cpp/segmentation/skyseg_trt.h"
+#endif
+
 namespace VIO {
 
 // TODO(Toni): Fast-forwarding bcs of an issue wiht includes:
@@ -370,6 +374,11 @@ class Tracker {
 
   FeatureTracker::Ptr feature_tracker_ = nullptr;
   FeatureTracker::Ptr optical_flow_tracker_ = nullptr;
+
+#ifdef HAVE_TENSORRT
+  // Sky segmentation filter to remove keypoints in sky regions
+  std::unique_ptr<xfeat::SkySegTRT> sky_seg_filter_;
+#endif
 };
 
 }  // namespace VIO

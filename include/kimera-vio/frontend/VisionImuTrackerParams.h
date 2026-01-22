@@ -114,6 +114,10 @@ struct TrackerParams : public PipelineParams {
   // Scale factor applied to input image when downsampling for Vilib. Must be
   // in (0, 1].
   float vilib_downsample_scale = 0.5f;
+
+  // Sky segmentation filter parameters
+  bool use_sky_segmentation_filter_ = false;
+  std::string sky_seg_engine_path_ = "onnx_model/skyseg.engine";
 };
 
 }  // namespace VIO

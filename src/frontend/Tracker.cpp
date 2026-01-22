@@ -140,6 +140,28 @@ Tracker::Tracker(const TrackerParams& tracker_params,
                  << static_cast<int>(tracker_params_.tracker_type_);
     }
   }
+
+#ifdef HAVE_TENSORRT
+  // Initialize sky segmentation filter
+  if (tracker_params_.use_sky_segmentation_filter_) {
+    xfeat::SkySegTRT::Params sky_params;
+    sky_params.engine_path = tracker_params_.sky_seg_engine_path_;
+    sky_params.input_size = cv::Size(320, 320);
+    sky_params.verbose = false;
+    sky_params.warmup_iterations = 3;
+    sky_params.threshold = 127.0f;
+
+    try {
+      sky_seg_filter_ = std::make_unique<xfeat::SkySegTRT>(sky_params);
+      sky_seg_filter_->warmup(camera_->getCamParams().image_size_);
+      LOG(INFO) << "Sky segmentation filter initialized successfully";
+    } catch (const std::exception& e) {
+      LOG(WARNING) << "Failed to initialize sky segmentation filter: "
+                   << e.what();
+      sky_seg_filter_ = nullptr;
+    }
+  }
+#endif
 }
 
 // TODO(Toni) a pity that this function is not const just because
@@ -196,6 +218,23 @@ void Tracker::featureTracking(
   std::vector<float> error;
   auto time_lukas_kanade_tic = utils::Timer::tic();
   std::vector<float> stds, scores;
+
+  // Generate sky segmentation mask if enabled
+  cv::Mat sky_mask;
+#ifdef HAVE_TENSORRT
+  if (sky_seg_filter_) {
+    auto time_sky_seg_tic = utils::Timer::tic();
+    try {
+      sky_seg_filter_->segment(cur_frame->img_, sky_mask);
+      VLOG(1) << "Sky segmentation time [ms]: "
+              << utils::Timer::toc(time_sky_seg_tic).count();
+    } catch (const std::exception& e) {
+      LOG(WARNING) << "Sky segmentation failed: " << e.what();
+      sky_mask = cv::Mat();  // Clear mask on error
+    }
+  }
+#endif
+
   optical_flow_tracker_->track(ref_frame,
                                cur_frame,
                                px_ref,
@@ -203,9 +242,11 @@ void Tracker::featureTracking(
                                &prev_next_matches,
                                error,
                                &stds,
-                               &scores);
+                               &scores,
+                               sky_mask);
   VLOG(1) << "Optical Flow Timing [ms]: "
           << utils::Timer::toc(time_lukas_kanade_tic).count();
+
   // CHECK_LE(px_ref.size(), tracker_params_.num_features_);
   CHECK_EQ(px_ref.size(), prev_next_matches.size());
 
@@ -245,7 +286,12 @@ void Tracker::featureTracking(
 
     if (next_prev_matches[i] != -1) {
       CHECK_NOTNULL(ref_frame);
-      LandmarkId lmk_id = ref_frame->of_landmarks_.at(next_prev_matches[i]);
+      // next_prev_matches[i] is an index into px_ref, which only contains
+      // valid landmarks. Map it back to the original ref_frame index.
+      size_t ref_px_idx = next_prev_matches[i];
+      CHECK_LT(ref_px_idx, indices_of_valid_landmarks.size());
+      size_t ref_frame_idx = indices_of_valid_landmarks[ref_px_idx];
+      LandmarkId lmk_id = ref_frame->of_landmarks_.at(ref_frame_idx);
       cur_frame->of_landmarks_.push_back(lmk_id);
     } else {
       cur_frame->of_landmarks_.push_back(FeatureDetector::of_lmk_id++);
@@ -1186,8 +1232,8 @@ cv::Mat Tracker::getTrackerImage(const Frame& ref_frame,
                                  cur_frame.of_landmarks_.at(i));
       if (it != ref_frame.of_landmarks_.end()) {
         cv::Scalar color = blue;
-        cv::circle(img_rgb, px_cur, px_sigma, color, -1);
-        // cv::circle(img_rgb, px_cur, 4, blue, -1);
+        // cv::circle(img_rgb, px_cur, px_sigma, color, -1);
+        cv::circle(img_rgb, px_cur, 6, color, -1);
 
         // draw line to reference frame
         int i = std::distance(ref_frame.of_landmarks_.begin(), it);
@@ -1208,7 +1254,7 @@ cv::Mat Tracker::getTrackerImage(const Frame& ref_frame,
       score = cur_frame.scores_.at(i);
     }
     if (cur_frame.landmarks_.at(i) == -1) {  // Untracked landmarks are red.
-      cv::circle(img_rgb, px_cur, 4, red, 2);
+      cv::circle(img_rgb, px_cur, 6, red, 2);
     } else {
       const auto& it = std::find(ref_frame.landmarks_.begin(),
                                  ref_frame.landmarks_.end(),
@@ -1222,10 +1268,10 @@ cv::Mat Tracker::getTrackerImage(const Frame& ref_frame,
         cv::Scalar color(0, 255, 0);
         color[1] = 255 * std::min(1.0, score);
         color[2] = 255 * (1.0 - std::min(1.0, score));
-        cv::circle(img_rgb, px_cur, px_sigma, color, -1);
+        cv::circle(img_rgb, px_cur, 6, color, -1);
         int ref_i = std::distance(ref_frame.landmarks_.begin(), it);
         const cv::Point2f& px_ref = ref_frame.keypoints_.at(ref_i);
-        cv::line(img_rgb, px_ref, px_cur, color, 10);
+        cv::line(img_rgb, px_ref, px_cur, color, 4);
       }
     }
   }

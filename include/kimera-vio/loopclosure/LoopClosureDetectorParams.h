@@ -134,8 +134,9 @@ class LoopClosureDetectorParams : public PipelineParams {
 
   // JIST model parameters
   std::string jist_model_path_{};
-  int jist_seq_length_ = 5;         // Number of frames in JIST sequence
-  int jist_descriptor_dim_ = 512;   // JIST descriptor dimension
+  int jist_seq_length_ = 5;  // Number of frames in JIST sequence
+  int jist_seq_interval_ = 1;
+  int jist_descriptor_dim_ = 512;  // JIST descriptor dimension
 
   int local_window_size_ = 50;  // number of most recent keyframes to skip when
   // detecting loops

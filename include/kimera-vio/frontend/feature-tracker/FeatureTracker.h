@@ -30,7 +30,8 @@ class FeatureTracker {
                      std::vector<int>* status,
                      cv::OutputArray err,
                      std::vector<float>* stds,
-                     std::vector<float>* scores) = 0;
+                     std::vector<float>* scores,
+                     const cv::Mat& mask = cv::Mat()) = 0;
 
   virtual void trackDesc(Frame* ref_frame,
                          Frame* cur_frame,
