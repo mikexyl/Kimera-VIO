@@ -4,7 +4,7 @@ klt_win_size: 24
 klt_max_iter: 30
 klt_max_level: 4
 klt_eps: 0.1
-maxFeatureAge: 200
+maxFeatureAge: 40
 
 # Detector Params
 # 0: FAST
@@ -31,7 +31,7 @@ templ_cols: 128 #must be odd
 templ_rows: 11
 stripe_extra_rows: 0
 minPointDist: 0.2 
-maxPointDist: 20
+maxPointDist: 100
 bidirectionalMatching: 0
 
 # Non-maximum suppression params
@@ -116,7 +116,7 @@ rematch_threshold: 0.5
 
 xfeat_use_of_points: 1
 
-copy_optical_flow_tracks: 0
+copy_optical_flow_tracks: 1
 
 # General stereo parameters (used by all methods)
 minDisparity: 10
@@ -161,3 +161,6 @@ dispHeight: 288
 onnxWarmupIterations: 3
 
 rectifiedInputs: 1
+
+use_sky_segmentation_filter: 1
+sky_seg_engine_path: /workspaces/src/xfeat-cpp/onnx_model/skyseg.engine

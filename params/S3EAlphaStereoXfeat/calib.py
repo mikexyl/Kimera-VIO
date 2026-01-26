@@ -105,12 +105,7 @@ def baseline_from_fx_bf(fx: float, bf: float) -> float:
         raise ValueError("Camera.fx is zero; cannot compute baseline from bf/fx.")
     return bf / fx
 
-def baseline_from_P2(P2: np.ndarray) -> float:
-    # For rectified stereo, P2[0,3] = -fx*Tx, and Tx = baseline (in meters if K is in pixels and T in meters).
-    fx = float(P2[0, 0])
-    if fx == 0:
-        raise ValueError("RIGHT.P[0,0] is zero; cannot compute baseline from P2.")
-    return -float(P2[0, 3]) / fx
+
 
 def make_T_left_right(baseline: float) -> np.ndarray:
     # Transform from RIGHT cam coords to LEFT cam coords (RIGHT -> LEFT)
@@ -150,10 +145,7 @@ def main():
 
     baseline_fx_bf = baseline_from_fx_bf(fx, bf)
 
-    # Optional cross-check from RIGHT.P
-    baseline_P2 = None
-    if "RIGHT.P" in cfg and isinstance(cfg["RIGHT.P"], np.ndarray) and cfg["RIGHT.P"].shape == (3, 4):
-        baseline_P2 = baseline_from_P2(cfg["RIGHT.P"])
+
 
     # Build RIGHT -> LEFT transform (rectified stereo)
     T_left_right = make_T_left_right(baseline_fx_bf)
@@ -166,9 +158,7 @@ def main():
     print(f"Camera.fx = {fx}")
     print(f"Camera.bf = {bf}")
     print(f"baseline (bf/fx) = {baseline_fx_bf:.8f}")
-    if baseline_P2 is not None:
-        print(f"baseline (from RIGHT.P) = {baseline_P2:.8f}")
-        print(f"baseline difference = {abs(baseline_fx_bf - baseline_P2):.8e}")
+
 
     print("\n=== Transform: LEFT -> IMU (T_imu_left) ===")
     print(pretty_T(T_imu_left))

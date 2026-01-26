@@ -256,6 +256,28 @@ class LcdLandmarkManager : public std::unordered_map<LandmarkId, Landmark> {
     return landmarks;
   }
 
+  size_t removeLandmarksUntil(FrameId frame_id) {
+    size_t removed_count = 0;
+    for (auto it = this->begin(); it != this->end();) {
+      auto lmk_id = it->first;
+      if (landmark_obs_frame_ids_.count(lmk_id)) {
+        auto obs_frames = landmark_obs_frame_ids_[lmk_id];
+        auto earliest_obs_frame =
+            *std::min_element(obs_frames.begin(), obs_frames.end());
+        if (earliest_obs_frame < frame_id) {
+          it = this->erase(it);
+          landmark_obs_frame_ids_.erase(lmk_id);
+          removed_count++;
+        } else {
+          ++it;
+        }
+      } else {
+        ++it;
+      }
+    }
+    return removed_count;
+  }
+
   auto const& getCovisGraph() const { return covis_graph_; }
 
   std::map<LandmarkId, bool> landmarks_valid_{};

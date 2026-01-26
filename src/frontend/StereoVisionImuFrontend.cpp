@@ -404,8 +404,17 @@ StatusStereoMeasurementsPtr StereoVisionImuFrontend::processStereoFrame(
                            left_frame_k,
                            &status_pose_mono);
       tracker_status_summary_.kfTrackingStatus_mono_ = status_pose_mono.first;
-      if (status_pose_mono.first == TrackingStatus::VALID) {
-        tracker_status_summary_.lkf_T_k_mono_ = status_pose_mono.second;
+
+      if (status_pose_mono.first != TrackingStatus::LOW_DISPARITY) {
+        tracker_status_summary_.kfTrackingStatus_mono_ =
+            tracker_->detectZeroMotionOF(&stereoFrame_lkf_->left_frame_,
+                                         &stereoFrame_k_->left_frame_);
+
+        // if still valid
+        if (tracker_status_summary_.kfTrackingStatus_mono_ ==
+            TrackingStatus::VALID) {
+          tracker_status_summary_.lkf_T_k_mono_ = status_pose_mono.second;
+        }
       }
       // STEREO geometric outlier rejection
       // get 3D points via stereo

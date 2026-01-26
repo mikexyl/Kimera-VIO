@@ -431,9 +431,7 @@ class VLADLoopClosureDetector
                                const PointsWithIdMap& W_points_with_ids,
                                const gtsam::Pose3& W_Pose_Blkf) override;
 
-  void cleanFrame(const LCDFrame::Ptr& frame) override {
-    frame->descriptors_vec_.clear();
-  }
+  void cleanFrame(const LCDFrame::Ptr& frame) override {}
 
   std::vector<LCDFrame::Ptr> new_seq_frames_;
   static size_t new_seq_id_;

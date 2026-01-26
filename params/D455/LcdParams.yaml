@@ -1,9 +1,9 @@
 %YAML:1.0
 # LoopClosureDetector parameters:
 use_nss: 1
-alpha: 0.2
+alpha: 0.9
 min_temporal_matches: 1
-recent_frames_window: 100
+recent_frames_window: 50
 max_db_results: 50
 min_nss_factor: 0.05
 min_matches_per_island: 1
@@ -11,7 +11,7 @@ max_intraisland_gap: 3
 max_nrFrames_between_islands: 3
 max_nrFrames_between_queries: 2
 
-refine_pose: 1
+refine_pose: 0
 
 lowe_ratio: 0.7
 matcher_type: 3
@@ -26,14 +26,14 @@ score_type_id: 0
 patch_sze: 31
 fast_threshold: 20
 
-betweenRotationPrecision: 10000 # 1/(0.01*0.01)
-betweenTranslationPrecision: 100 # 1/(0.1*0.1)
+betweenRotationPrecision: 0.01 # 1/(0.01*0.01)
+betweenTranslationPrecision: 0.01 # 1/(0.1*0.1)
 
-odom_rot_threshold: 0.01
-odom_trans_threshold: 0.05
-pcm_rot_threshold: -1
-pcm_trans_threshold: -1
-gnc_alpha: 0.9
+odom_rot_threshold: 0.1
+odom_trans_threshold: 0.1
+pcm_rot_threshold: 0.1
+pcm_trans_threshold: 0.1
+gnc_alpha: 0.7
 
 max_lc_cached_before_optimize: 10
 
@@ -60,7 +60,7 @@ ransac_use_2point_2d2d: 0
 # pose_recovery_type options:
 #   0: 3d3d (Arun)
 #   1: PnP (opengv)
-pose_recovery_type: 0
+pose_recovery_type: 1
 ransac_max_iterations: 500
 ransac_probability: 0.995
 ransac_randomize: 0
@@ -72,3 +72,30 @@ optimize_2d3d_pose_from_inliers: 0
 # 2D-2D pose estimation method
 ransac_2d2d_algorithm: 0 # Stewenius
 ransac_2d3d_algorithm: 3 # EPNP
+
+lcd_lg_num_features: 500
+lcd_lg_model_path: /workspaces/src/xfeat-cpp/onnx_model/lg_320x224_dyn.onnx
+# lcd_faiss_index_path: /workspaces/src/xfeat-cpp/onnx_model/faiss_ivfflat.index.bin
+lcd_faiss_index_path: ""
+xfeat_nv_head_model_path: /workspaces/src/xfeat-cpp/onnx_model/xfeat_nv_fc_512.onnx
+netvlad_model_path: /workspaces/src/xfeat-cpp/onnx_model/netvlad_fc_512.onnx
+
+
+local_window_size: 0
+
+min_pnp_num_landmarks: 30
+min_lmk_obs_ratio: 0.1 # map point cull, set to 0 to disable
+min_lmk_obs_count: 3 # map point cull, set to 0 to disable
+min_lmk_parallax: 20
+lcd_min_matched_features: 30
+max_lmk_reproj_error: 3
+
+network_input_width: 512
+network_input_height: 288
+
+jist_model_path: "/workspaces/src/JIST/exported_models/JIST_r18_512_seqgem_simplified.onnx"
+jist_seq_length: 5
+jist_seq_interval: 3
+jist_descriptor_dim: 512
+
+

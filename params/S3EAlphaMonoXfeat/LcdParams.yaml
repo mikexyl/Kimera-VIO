@@ -83,14 +83,15 @@ netvlad_model_path: /workspaces/src/xfeat-cpp/onnx_model/netvlad_fc_512.onnx
 network_input_width: 512
 network_input_height: 288
 
-local_window_size: 10
+local_window_size: 0
 
 min_pnp_num_landmarks: 30
 min_lmk_obs_ratio: 0.1 # map point cull, set to 0 to disable
 min_lmk_obs_count: 3 # map point cull, set to 0 to disable
 min_lmk_parallax: 20
 lcd_min_matched_features: 30
-max_lmk_reproj_error: 20
+max_lmk_reproj_error: 3
 jist_model_path: "/workspaces/src/JIST/exported_models/JIST_r18_512_seqgem_simplified.onnx"
 jist_seq_length: 5
+jist_seq_interval: 2
 jist_descriptor_dim: 512

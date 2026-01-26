@@ -476,7 +476,16 @@ class LoopClosureDetector : public LoopClosureDetectorBase {
   virtual void cleanFrame(const FrameId& frame_id) {
     auto frame = cache_.getFrame(frame_id);
     if (frame) {
-      cleanFrame(frame);
+      // remove all old landmarks outside the covisibility window
+      if (landmark_manager_->getCovisGraph().count(frame_id)) {
+        auto covis_frames = landmark_manager_->getCovisGraph().at(frame_id);
+        auto oldest_covis_frame =
+            *std::min_element(covis_frames.begin(), covis_frames.end());
+        landmark_manager_->removeLandmarksUntil(oldest_covis_frame);
+      } else {
+        landmark_manager_->removeLandmarksUntil(frame_id);
+      }
+      frame.reset();
     } else {
       LOG(WARNING) << "LoopClosureDetector: Attempted to clean frame with ID "
                    << frame_id << " but it does not exist in the cache.";

@@ -4,7 +4,7 @@ klt_win_size: 24
 klt_max_iter: 30
 klt_max_level: 4
 klt_eps: 0.1
-maxFeatureAge: 200
+maxFeatureAge: 40
 
 # Detector Params
 # 0: FAST
@@ -31,7 +31,7 @@ templ_cols: 101 #must be odd
 templ_rows: 11
 stripe_extra_rows: 0
 minPointDist: 0.5
-maxPointDist: 10
+maxPointDist: 30
 bidirectionalMatching: 0
 
 # Non-maximum suppression params
@@ -103,15 +103,15 @@ gpu_bf_min_sim: 0.3 # Minimum similarity for GpuBFMatcher
 search_radius: 30
 
 track_on_keyframe: 1
-min_lmk_merge_sim: -0.5
+min_lmk_merge_sim: 0.5
 max_lmk_merge_px: 0
 
-vilib_cell_width: 64
-vilib_cell_height: 64
+vilib_cell_width: 16
+vilib_cell_height: 16
 vilib_downsample: 1
-vilib_downsample_scale: 1
+vilib_downsample_scale: 0.5
 
-kf_queue_size: 0
+kf_queue_size: 10
 rematch_threshold: 0.5
 
 xfeat_use_of_points: 1
@@ -168,3 +168,8 @@ enginePath: /workspaces/src/ONNX-FastACVNet-Depth-Estimation/models/fast_acvnet_
 dispWidth: 512
 dispHeight: 288
 onnxWarmupIterations: 3
+
+rectifiedInputs: 1
+
+use_sky_segmentation_filter: 1
+sky_seg_engine_path: /workspaces/src/xfeat-cpp/onnx_model/skyseg.engine

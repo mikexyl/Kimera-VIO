@@ -22,7 +22,7 @@ accelerometer_noise_density: 1.0919628856399554e-02  # [m/s^2/sqrt(Hz)] (accel "
 accelerometer_random_walk: 2.1851827629113259e-04  # [m/s^3/sqrt(Hz)] (accel bias diffusion)
 
 # other parameters
-do_imu_rate_time_alignment: 1
+do_imu_rate_time_alignment: 0
 time_alignment_window_size_s: 20.0
 time_alignment_variance_threshold_scaling: 30.0
 imu_integration_sigma: 1e-08
