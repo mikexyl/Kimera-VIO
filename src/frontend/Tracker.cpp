@@ -90,29 +90,65 @@ Tracker::Tracker(const TrackerParams& tracker_params,
   stereo_ransac_.probability_ = tracker_params_.ransac_probability_;
 
   if (use_of_tracker) {
-    VilibTracker::Params vilib_params;
-    vilib_params.width = camera_->getCamParams().image_size_.width;
-    vilib_params.height = camera_->getCamParams().image_size_.height;
-    vilib_params.detector_options_.cell_width =
-        tracker_params_.vilib_cell_width;
-    vilib_params.detector_options_.cell_height =
-        tracker_params_.vilib_cell_height;
-    vilib_params.detector_options_.horizontal_border =
-        tracker_params_.vilib_cell_width / 8;
-    vilib_params.detector_options_.vertical_border =
-        tracker_params_.vilib_cell_height / 8;
-    vilib_params.detector_options_.max_level = 3;
-    vilib_params.feature_tracker_options_.reset_before_detection = false;
-    vilib_params.feature_tracker_options_.min_tracks_to_detect_new_features =
-        tracker_params_.num_features_ * 0.6;
-    vilib_params.feature_tracker_options_.use_best_n_features =
-        tracker_params_.num_features_;
-    vilib_params.detector_options_.quality_level = 0.001;
-    // Propagate optional downsampling parameters for VilibTracker.
-    vilib_params.downsample = tracker_params_.vilib_downsample;
-    vilib_params.downsample_scale = tracker_params_.vilib_downsample_scale;
+    switch (tracker_params_.optical_flow_type_) {
+      case TrackerParams::OpticalFlowType::VILIB: {
+        VilibTracker::Params vilib_params;
+        vilib_params.width = camera_->getCamParams().image_size_.width;
+        vilib_params.height = camera_->getCamParams().image_size_.height;
+        vilib_params.detector_options_.cell_width =
+            tracker_params_.vilib_cell_width;
+        vilib_params.detector_options_.cell_height =
+            tracker_params_.vilib_cell_height;
+        vilib_params.detector_options_.horizontal_border =
+            tracker_params_.vilib_cell_width / 8;
+        vilib_params.detector_options_.vertical_border =
+            tracker_params_.vilib_cell_height / 8;
+        vilib_params.detector_options_.max_level = 3;
+        vilib_params.feature_tracker_options_.reset_before_detection = false;
+        vilib_params.feature_tracker_options_
+            .min_tracks_to_detect_new_features =
+            tracker_params_.num_features_ * 0.6;
+        vilib_params.feature_tracker_options_.use_best_n_features =
+            tracker_params_.num_features_;
+        vilib_params.detector_options_.quality_level = 0.001;
+        // Propagate optional downsampling parameters for VilibTracker.
+        vilib_params.downsample = tracker_params_.optical_flow_downsample;
+        vilib_params.downsample_scale =
+            tracker_params_.optical_flow_downsample_scale;
 
-    optical_flow_tracker_ = std::make_shared<VilibTracker>(vilib_params);
+        optical_flow_tracker_ = std::make_shared<VilibTracker>(vilib_params);
+        LOG(INFO) << "Using VILIB (GPU) optical flow tracker";
+        break;
+      }
+      case TrackerParams::OpticalFlowType::OPENCV: {
+        OpticalFlowCV::Params opencv_params;
+        opencv_params.min_features_threshold =
+            tracker_params_.opencv_of_min_features_threshold;
+        opencv_params.max_features = tracker_params_.num_features_;
+        opencv_params.klt_win_size = tracker_params_.klt_win_size_;
+        opencv_params.klt_max_level = tracker_params_.klt_max_level_;
+        opencv_params.klt_max_iter = tracker_params_.klt_max_iter_;
+        opencv_params.klt_eps = tracker_params_.klt_eps_;
+        opencv_params.quality_level = tracker_params_.opencv_of_quality_level;
+        opencv_params.min_distance = tracker_params_.opencv_of_min_distance;
+        opencv_params.use_fwd_bwd_check =
+            tracker_params_.opencv_of_use_fwd_bwd_check;
+        opencv_params.fwd_bwd_error_threshold =
+            tracker_params_.opencv_of_fwd_bwd_threshold;
+        opencv_params.enable_downsample =
+            tracker_params_.optical_flow_downsample;
+        opencv_params.downsample_scale =
+            tracker_params_.optical_flow_downsample_scale;
+
+        optical_flow_tracker_ = std::make_shared<OpticalFlowCV>(opencv_params);
+        LOG(INFO) << "Using OpenCV (CPU) optical flow tracker";
+        break;
+      }
+      default: {
+        LOG(FATAL) << "Unknown optical flow type: "
+                   << static_cast<int>(tracker_params_.optical_flow_type_);
+      }
+    }
   } else {
     optical_flow_tracker_ = nullptr;
   }

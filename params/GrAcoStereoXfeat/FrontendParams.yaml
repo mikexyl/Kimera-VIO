@@ -4,7 +4,7 @@ klt_win_size: 24
 klt_max_iter: 30
 klt_max_level: 4
 klt_eps: 0.1
-maxFeatureAge: 200
+maxFeatureAge: 40
 
 # Detector Params
 # 0: FAST
@@ -31,7 +31,7 @@ templ_cols: 128 #must be odd
 templ_rows: 21 
 stripe_extra_rows: 0
 minPointDist: 3
-maxPointDist: 100
+maxPointDist: 30
 bidirectionalMatching: 0
 
 # Non-maximum suppression params
@@ -106,21 +106,22 @@ track_on_keyframe: 1
 min_lmk_merge_sim: -0.5
 max_lmk_merge_px: 0
 
-vilib_cell_width: 64
-vilib_cell_height: 64
-vilib_downsample: 1
-vilib_downsample_scale: 0.5
+vilib_cell_width: 32
+vilib_cell_height: 32
+optical_flow_downsample: 1
+optical_flow_downsample_scale: 0.5
 
 kf_queue_size: 0
 rematch_threshold: 0.5
 
 xfeat_use_of_points: 1
 
+copy_optical_flow_tracks: 1
+
 # ============================================================================
 # Dense Stereo Depth Estimation Parameters
 # ============================================================================
 # stereoDepthMethod options: OpenCV_BM, OpenCV_SGBM, LIBSGM, LightStereo, ONNX_Stereo
-stereoDepthMethod: LIBSGM
 
 # General stereo parameters (used by all methods)
 minDisparity: 10
@@ -147,7 +148,7 @@ P2: 120
 useModeHH: false
 
 # LibSGM downscale factor (1=no downscale, 2=half resolution)
-sgmDownscaleFactor: 1
+sgmDownscaleFactor: 2
 
 # Block Matching parameters (for OpenCV_BM only)
 preFilterCap: 31
@@ -166,11 +167,23 @@ medianBlurDisparity: 0
 # dispWidth: 640
 # dispHeight: 480
 
-# stereoDepthMethod: ONNX_Stereo
+stereoDepthMethod: LibSGM
 # enginePath: /workspaces/src/ONNX-FastACVNet-Depth-Estimation/models/fast_acvnet_plus_generalization_opset11_288x512.onnx
 enginePath: /workspaces/src/ONNX-FastACVNet-Depth-Estimation/models/fast_acvnet_plus_generalization_opset11_288x512.onnx
-dispWidth: 800
-dispHeight: 550
+dispWidth: 512
+dispHeight: 288
 onnxWarmupIterations: 3
 
 rectifiedInputs: 0
+
+use_sky_segmentation_filter: 0
+sky_seg_engine_path: /workspaces/src/xfeat-cpp/onnx_model/skyseg.engine
+
+optical_flow_type: 1  # 0 = VILIB (GPU), 1 = OpenCV (CPU)
+
+# Optional OpenCV optical flow tuning:
+opencv_of_min_features_threshold: 300
+opencv_of_quality_level: 0.01
+opencv_of_min_distance: 30.0
+opencv_of_use_fwd_bwd_check: false # this runs too slow
+opencv_of_fwd_bwd_threshold: 1.0

@@ -86,8 +86,10 @@ void TrackerParams::print() const {
   // Vilib params
   out << "vilib_cell_width: " << vilib_cell_width << '\n'
       << "vilib_cell_height: " << vilib_cell_height << '\n'
-      << "vilib_downsample: " << vilib_downsample << '\n'
-      << "vilib_downsample_scale: " << vilib_downsample_scale << '\n';
+      << "optical_flow_downsample: " << optical_flow_downsample << '\n'
+      << "optical_flow_downsample_scale: " << optical_flow_downsample_scale
+      << '\n'
+      << "optical_flow_type: " << static_cast<int>(optical_flow_type_) << '\n';
   LOG(INFO) << out.str();
 }
 
@@ -162,9 +164,25 @@ bool TrackerParams::parseYAML(const std::string& filepath) {
   yaml_parser.getYamlParam("vilib_cell_width", &vilib_cell_width);
   yaml_parser.getYamlParam("vilib_cell_height", &vilib_cell_height);
 
-  // Optional downsampling for Vilib tracker
-  yaml_parser.getYamlParam("vilib_downsample", &vilib_downsample);
-  yaml_parser.getYamlParam("vilib_downsample_scale", &vilib_downsample_scale);
+  // Optional downsampling for Vilib and OpenCV tracker
+  yaml_parser.getYamlParam("optical_flow_downsample", &optical_flow_downsample);
+  yaml_parser.getYamlParam("optical_flow_downsample_scale",
+                           &optical_flow_downsample_scale);
+
+  // Optical flow type selection (0 = VILIB, 1 = OPENCV)
+  int optical_flow_type = 0;
+  yaml_parser.getYamlParam("optical_flow_type", &optical_flow_type);
+  optical_flow_type_ = static_cast<OpticalFlowType>(optical_flow_type);
+
+  // OpenCV optical flow parameters
+  yaml_parser.getYamlParam("opencv_of_min_features_threshold",
+                           &opencv_of_min_features_threshold);
+  yaml_parser.getYamlParam("opencv_of_quality_level", &opencv_of_quality_level);
+  yaml_parser.getYamlParam("opencv_of_min_distance", &opencv_of_min_distance);
+  yaml_parser.getYamlParam("opencv_of_use_fwd_bwd_check",
+                           &opencv_of_use_fwd_bwd_check);
+  yaml_parser.getYamlParam("opencv_of_fwd_bwd_threshold",
+                           &opencv_of_fwd_bwd_threshold);
 
   yaml_parser.getYamlParam("use_sky_segmentation_filter",
                            &use_sky_segmentation_filter_);

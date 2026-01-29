@@ -109,11 +109,27 @@ struct TrackerParams : public PipelineParams {
 
   int vilib_cell_width = 32;
   int vilib_cell_height = 32;
-  // Vilib downsampling: whether to downsample input images before tracking.
-  bool vilib_downsample = false;
-  // Scale factor applied to input image when downsampling for Vilib. Must be
+  // Optical flow (Vilib & OpenCV) downsampling: whether to downsample input
+  // images before tracking.
+  bool optical_flow_downsample = false;
+  // Scale factor applied to input image when downsampling. Must be
   // in (0, 1].
-  float vilib_downsample_scale = 0.5f;
+  float optical_flow_downsample_scale = 0.5f;
+
+  //! Optical flow tracker type selection
+  enum class OpticalFlowType {
+    VILIB = 0,  //! GPU-accelerated VILIB tracker
+    OPENCV,     //! CPU OpenCV Lucas-Kanade tracker
+  } optical_flow_type_ = OpticalFlowType::VILIB;
+
+  //! OpenCV optical flow parameters (only used when optical_flow_type_ ==
+  //! OPENCV)
+  int opencv_of_min_features_threshold =
+      100;                                   //! Detect new features below this
+  double opencv_of_quality_level = 0.01;     //! Quality level for detection
+  double opencv_of_min_distance = 10.0;      //! Min distance between features
+  bool opencv_of_use_fwd_bwd_check = true;   //! Forward-backward consistency
+  double opencv_of_fwd_bwd_threshold = 1.0;  //! Fwd-bwd error threshold in px
 
   // Sky segmentation filter parameters
   bool use_sky_segmentation_filter_ = false;
