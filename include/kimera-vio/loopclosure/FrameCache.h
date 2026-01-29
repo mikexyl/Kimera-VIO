@@ -35,6 +35,12 @@ struct FrameCacheImpl {
   virtual LCDFrame::Ptr getFrame(size_t index) const = 0;
 
   virtual size_t size() const = 0;
+
+  /// Returns the total memory usage of the cache and all stored frames in bytes
+  virtual size_t getMemoryUsage() const = 0;
+
+  /// Removes a frame from the cache by index
+  virtual void removeFrame(size_t index) = 0;
 };
 
 class FrameCache {
@@ -53,6 +59,12 @@ class FrameCache {
 
   size_t size() const { return impl_->size(); }
 
+  /// Returns the total memory usage of the cache and all stored frames in bytes
+  size_t getMemoryUsage() const { return impl_->getMemoryUsage(); }
+
+  /// Removes a frame from the cache by index
+  void removeFrame(size_t index) { impl_->removeFrame(index); }
+
  private:
   std::unique_ptr<FrameCacheImpl> impl_;
 };
@@ -68,6 +80,10 @@ class InMemoryCacheImpl : public FrameCacheImpl {
   virtual LCDFrame::Ptr getFrame(size_t index) const;
 
   virtual size_t size() const;
+
+  virtual size_t getMemoryUsage() const;
+
+  virtual void removeFrame(size_t index);
 
  private:
   std::vector<LCDFrame::Ptr> frames_;
@@ -89,6 +105,10 @@ class LRUCacheImpl : public FrameCacheImpl {
   virtual LCDFrame::Ptr getFrame(size_t index) const;
 
   virtual size_t size() const;
+
+  virtual size_t getMemoryUsage() const;
+
+  virtual void removeFrame(size_t index);
 
  public:
   const FrameCacheConfig config;

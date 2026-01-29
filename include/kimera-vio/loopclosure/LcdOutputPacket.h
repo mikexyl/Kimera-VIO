@@ -89,6 +89,10 @@ struct LcdOutput : PipelinePayload {
   std::map<FrameId, FrameIdSet> covis_graph_;
   FrameId query_frame_;
   FrameIdSet global_candidates_;
+
+  // Frame cache statistics
+  size_t frame_cache_memory_bytes_{0};  ///< Total memory used by frame cache
+  size_t frame_cache_size_{0};          ///< Number of frames stored in cache
 };
 
 }  // namespace VIO

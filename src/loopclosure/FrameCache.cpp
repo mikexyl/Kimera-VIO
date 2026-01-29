@@ -220,7 +220,33 @@ LCDFrame::Ptr InMemoryCacheImpl::getFrame(size_t index) const {
   return frames_.at(index);
 }
 
-size_t InMemoryCacheImpl::size() const { return frames_.size(); }
+size_t InMemoryCacheImpl::size() const {
+  size_t num_frames = 0;
+  std::for_each(
+      frames_.begin(), frames_.end(), [&num_frames](const auto& frame) {
+        if (frame) {
+          num_frames++;
+        }
+      });
+  return num_frames;
+}
+
+size_t InMemoryCacheImpl::getMemoryUsage() const {
+  size_t total = sizeof(*this);
+  total += frames_.capacity() * sizeof(LCDFrame::Ptr);
+  for (const auto& frame : frames_) {
+    if (frame) {
+      total += frame->getMemoryUsage();
+    }
+  }
+  return total;
+}
+
+void InMemoryCacheImpl::removeFrame(size_t index) {
+  if (index < frames_.size()) {
+    frames_[index].reset();
+  }
+}
 
 LRUCacheImpl::LRUCacheImpl(const FrameCacheConfig& conf) : config(conf) {
   std::filesystem::path cache_root(conf.cache_path);
@@ -364,5 +390,66 @@ LCDFrame::Ptr LRUCacheImpl::getFrame(size_t index) const {
 }
 
 size_t LRUCacheImpl::size() const { return total_; }
+
+size_t LRUCacheImpl::getMemoryUsage() const {
+  size_t total = sizeof(*this);
+  // Loaded frames in memory
+  for (const auto& slot : loaded_) {
+    total += slot.capacity() * sizeof(LCDFrame::Ptr);
+    for (const auto& frame : slot) {
+      if (frame) {
+        total += frame->getMemoryUsage();
+      }
+    }
+  }
+  total += loaded_.capacity() * sizeof(std::vector<LCDFrame::Ptr>);
+  // Frames pending archive
+  for (const auto& frame : to_archive_) {
+    if (frame) {
+      total += frame->getMemoryUsage();
+    }
+  }
+  // Last added frame
+  if (last_added_) {
+    total += last_added_->getMemoryUsage();
+  }
+  // Entry map overhead
+  total += entries_.size() * (sizeof(size_t) + sizeof(CacheEntry));
+  return total;
+}
+
+void LRUCacheImpl::removeFrame(size_t index) {
+  if (index >= total_) {
+    return;
+  }
+
+  // Check if it's the last added frame
+  if (last_added_ && last_added_->id_ == index) {
+    last_added_.reset();
+    return;
+  }
+
+  // Check if it's in the to_archive_ list
+  for (auto& frame : to_archive_) {
+    if (frame && frame->id_ == index) {
+      frame.reset();
+      return;
+    }
+  }
+
+  // Check if it's in loaded_ cache
+  const auto batch_idx = index / config.num_frames_per_file;
+  const auto local_idx = index % config.num_frames_per_file;
+  auto iter = entries_.find(batch_idx);
+  if (iter != entries_.end()) {
+    auto& slot = loaded_.at(iter->second.slot);
+    if (local_idx < slot.size() && slot[local_idx]) {
+      slot[local_idx].reset();
+    }
+  }
+  // Note: If the frame is on disk and not in memory, we don't remove it from
+  // disk. This is intentional - the disk cache is LRU based and will be
+  // overwritten eventually.
+}
 
 }  // namespace VIO

@@ -409,6 +409,10 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::
   output_payload->timestamp_kf_ = curr_frame->timestamp_;
   output_payload->T_base_cam_ = B_Pose_Cam_;
 
+  // Frame cache statistics
+  output_payload->frame_cache_memory_bytes_ = cache_.getMemoryUsage();
+  output_payload->frame_cache_size_ = cache_.size();
+
   return output_payload;
 }
 

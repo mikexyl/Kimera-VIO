@@ -80,6 +80,29 @@ struct LCDFrame {
 
   void clearImage() { image_.release(); }
 
+  /// Returns the total memory usage of this frame in bytes
+  virtual size_t getMemoryUsage() const {
+    size_t total = sizeof(*this);
+    // keypoints_
+    total += keypoints_.capacity() * sizeof(cv::KeyPoint);
+    // keypoints_3d_ (Landmarks = std::vector<gtsam::Point3>)
+    total += keypoints_3d_.capacity() * sizeof(Landmark);
+    // landmark_ids
+    total += landmark_ids.capacity() * sizeof(LandmarkId);
+    // descriptors_vec_
+    for (const auto& desc : descriptors_vec_) {
+      total += desc.total() * desc.elemSize();
+    }
+    total += descriptors_vec_.capacity() * sizeof(cv::Mat);
+    // descriptors_mat_
+    total += descriptors_mat_.total() * descriptors_mat_.elemSize();
+    // bearing_vectors_ (BearingVectors = std::vector<gtsam::Vector3>)
+    total += bearing_vectors_.capacity() * sizeof(BearingVector);
+    // image_
+    total += image_.total() * image_.elemSize();
+    return total;
+  }
+
   Timestamp timestamp_;
   FrameId id_;
   FrameId id_kf_;
@@ -128,6 +151,16 @@ struct StereoLCDFrame : LCDFrame {
   virtual ~StereoLCDFrame() = default;
 
   void save(std::ostream& buffer) const override;
+
+  /// Returns the total memory usage of this frame in bytes
+  size_t getMemoryUsage() const override {
+    size_t total = LCDFrame::getMemoryUsage();
+    // left_keypoints_rectified_
+    total += left_keypoints_rectified_.capacity() * sizeof(StatusKeypointCV);
+    // right_keypoints_rectified_
+    total += right_keypoints_rectified_.capacity() * sizeof(StatusKeypointCV);
+    return total;
+  }
 
   StatusKeypointsCV left_keypoints_rectified_;
   StatusKeypointsCV right_keypoints_rectified_;
