@@ -404,14 +404,6 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::
               gtsam::Pose3(),
               gtsam::noiseModel::Isotropic::Sigma(6, 1e-4));
 
-  // optimize the pose graph
-  // TODO(mike): this is only for debug and visualization, we don't need to
-  // optimize it here
-  gtsam::GaussNewtonParams params;
-  params.setVerbosity("SILENT");
-  gtsam::GaussNewtonOptimizer optimizer(pg, pg_values_, params);
-  gtsam::Values pg_values_ = optimizer.optimize();
-
   output_payload->setMapInformation(
       gtsam::Pose3(), gtsam::Pose3(), pg_values_, pg);
 
@@ -668,20 +660,6 @@ FrameId LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::
       cp_stereo_frame->right_keypoints_rectified_));
 }
 
-/* ------------------------------------------------------------------------
- */
-
-/* ------------------------------------------------------------------------
- */
-
-/* ------------------------------------------------------------------------
- */
-
-/* ------------------------------------------------------------------------
- */
-
-/* ------------------------------------------------------------------------
- */
 template <typename Database, typename FeatureDetector, typename FeatureMatcher>
 void LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::
     rewriteStereoFrameFeatures(const std::vector<cv::KeyPoint>& keypoints,

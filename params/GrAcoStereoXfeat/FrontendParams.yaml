@@ -64,7 +64,7 @@ ransac_randomize: 0
 min_intra_keyframe_time: 0.2
 max_intra_keyframe_time: 10.0
 max_disparity_since_lkf: 200 #large value to disable
-minNumberFeatures: 100
+minNumberFeatures: 0
 useStereoTracking: 1
 disparityThreshold: 0.5
 # Type of optical flow predictor to aid feature tracking:
@@ -179,7 +179,7 @@ rectifiedInputs: 0
 use_sky_segmentation_filter: 0
 sky_seg_engine_path: /workspaces/src/xfeat-cpp/onnx_model/skyseg.engine
 
-optical_flow_type: 1  # 0 = VILIB (GPU), 1 = OpenCV (CPU)
+optical_flow_type: 0  # 0 = VILIB (GPU), 1 = OpenCV (CPU)
 
 # Optional OpenCV optical flow tuning:
 opencv_of_min_features_threshold: 300
