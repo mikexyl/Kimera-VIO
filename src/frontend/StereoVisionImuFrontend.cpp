@@ -313,6 +313,7 @@ void StereoVisionImuFrontend::processFirstStereoFrame(
   // Prepare for next iteration.
   stereoFrame_km1_ = stereoFrame_k_;
   stereoFrame_lkf_ = stereoFrame_k_;
+  stereo_frames_.push_back(stereoFrame_k_);
   stereoFrame_k_.reset();
   ++frame_count_;
 
@@ -462,6 +463,39 @@ StatusStereoMeasurementsPtr StereoVisionImuFrontend::processStereoFrame(
           TrackingStatus::DISABLED;
     }
 
+    // find the best (least tracked) keyframe to run matcher
+    if (tracker_status_summary_.kfTrackingStatus_mono_ !=
+        TrackingStatus::LOW_DISPARITY) {
+      StereoFrame::Ptr best_kf_to_rematch = nullptr;
+      if (not stereo_frames_.empty()) {
+        size_t n_total_points = stereoFrame_k_->left_frame_.keypoints_.size();
+        for (auto kf = stereo_frames_.rbegin(); kf != stereo_frames_.rend();
+             ++kf) {
+          KeypointMatches matches_ref_cur;
+          tracker_->findMatchingKeypoints((*kf)->left_frame_,
+                                          stereoFrame_k_->left_frame_,
+                                          &matches_ref_cur);
+          if (matches_ref_cur.size() <
+              n_total_points * frontend_params_.rematch_threshold_) {
+            best_kf_to_rematch = *kf;
+            break;
+          }
+        }
+        if (not best_kf_to_rematch) {
+          best_kf_to_rematch = stereo_frames_.front();
+        }
+      }
+
+      if (best_kf_to_rematch) {
+        tracker_->featureTrackingDesc(&best_kf_to_rematch->left_frame_,
+                                      &stereoFrame_k_->left_frame_,
+                                      {},
+                                      frontend_params_.feature_detector_params_,
+                                      std::nullopt,
+                                      false);
+      }
+    }
+
     if (VLOG_IS_ON(2)) {
       printTrackingStatus(tracker_status_summary_.kfTrackingStatus_mono_,
                           "mono");
@@ -501,6 +535,14 @@ StatusStereoMeasurementsPtr StereoVisionImuFrontend::processStereoFrame(
     }
 
     // Move on.
+    if (tracker_status_summary_.kfTrackingStatus_mono_ ==
+        TrackingStatus::VALID) {
+      stereo_frames_.push_back(stereoFrame_k_);
+    }
+    if (stereo_frames_.size() >
+        static_cast<size_t>(frontend_params_.kf_queue_size_)) {
+      stereo_frames_.pop_front();
+    }
     stereoFrame_lkf_ = stereoFrame_k_;
 
     // Get relevant info for keyframe.

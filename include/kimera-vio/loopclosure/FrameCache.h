@@ -41,6 +41,9 @@ struct FrameCacheImpl {
 
   /// Removes a frame from the cache by index
   virtual void removeFrame(size_t index) = 0;
+
+  /// Returns a vector of frame IDs that currently exist in the cache
+  virtual std::vector<size_t> getFrameIds() const = 0;
 };
 
 class FrameCache {
@@ -65,6 +68,9 @@ class FrameCache {
   /// Removes a frame from the cache by index
   void removeFrame(size_t index) { impl_->removeFrame(index); }
 
+  /// Returns a vector of frame IDs that currently exist in the cache
+  std::vector<size_t> getFrameIds() const { return impl_->getFrameIds(); }
+
  private:
   std::unique_ptr<FrameCacheImpl> impl_;
 };
@@ -84,6 +90,8 @@ class InMemoryCacheImpl : public FrameCacheImpl {
   virtual size_t getMemoryUsage() const;
 
   virtual void removeFrame(size_t index);
+
+  virtual std::vector<size_t> getFrameIds() const;
 
  private:
   std::vector<LCDFrame::Ptr> frames_;
@@ -109,6 +117,8 @@ class LRUCacheImpl : public FrameCacheImpl {
   virtual size_t getMemoryUsage() const;
 
   virtual void removeFrame(size_t index);
+
+  virtual std::vector<size_t> getFrameIds() const;
 
  public:
   const FrameCacheConfig config;

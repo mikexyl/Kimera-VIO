@@ -720,7 +720,7 @@ Tracker::geometricOutlierRejection3d3dGivenRotation(
   // OUTLIER REJECTION AND TRANSLATION COMPUTATION
   //============================================================================
   if (maxCoherentSetSize < 2) {
-    LOG(WARNING) << "1-point RANSAC (voting) could not find a solution.";
+    // LOG(WARNING) << "1-point RANSAC (voting) could not find a solution.";
     return std::make_pair(
         std::make_pair(TrackingStatus::INVALID, gtsam::Pose3()),
         gtsam::Matrix3::Zero());

@@ -147,6 +147,7 @@ class LcdLandmarkManager : public std::unordered_map<LandmarkId, Landmark> {
       bool bad_reproj = false;
       for (FrameId q_frame = first_frame; q_frame <= last_frame; ++q_frame) {
         auto q_frame_ptr = frame_cache.getFrame(q_frame);
+        if (!q_frame_ptr) continue;  // Skip frames that have been cleaned
 
         // if not already observed, project to see if it should observe.
         cv::Point2f uv;
@@ -157,6 +158,7 @@ class LcdLandmarkManager : public std::unordered_map<LandmarkId, Landmark> {
           auto obs_it = obs_frames.find(q_frame);
           if (obs_it != obs_frames.end()) {
             auto obs_frame_ptr = frame_cache.getFrame(*obs_it);
+            if (!obs_frame_ptr) continue;  // Skip if frame has been cleaned
             std::vector<cv::Point2f> kp;
             bool found_kp = false;
             for (size_t lmk_i = 0; lmk_i < obs_frame_ptr->landmark_ids.size();
@@ -276,6 +278,15 @@ class LcdLandmarkManager : public std::unordered_map<LandmarkId, Landmark> {
       }
     }
     return removed_count;
+  }
+
+  FrameId getOldestCovisFrame(FrameId frame_id) const {
+    if (covis_graph_.find(frame_id) == covis_graph_.end()) {
+      return frame_id;
+    } else {
+      return *std::min_element(covis_graph_.at(frame_id).begin(),
+                               covis_graph_.at(frame_id).end());
+    }
   }
 
   auto const& getCovisGraph() const { return covis_graph_; }

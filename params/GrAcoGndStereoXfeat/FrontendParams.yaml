@@ -30,8 +30,8 @@ toleranceTemplateMatching: 0.15
 templ_cols: 101 #must be odd
 templ_rows: 11
 stripe_extra_rows: 0
-minPointDist: 1
-maxPointDist: 15
+minPointDist: 2
+maxPointDist: 20
 bidirectionalMatching: 0
 
 # Non-maximum suppression params
@@ -64,7 +64,7 @@ ransac_randomize: 0
 min_intra_keyframe_time: 0.2
 max_intra_keyframe_time: 1.0
 max_disparity_since_lkf: 200 #large value to disable
-minNumberFeatures: 100
+minNumberFeatures: 0
 useStereoTracking: 1
 disparityThreshold: 0.5
 # Type of optical flow predictor to aid feature tracking:
@@ -105,15 +105,15 @@ search_radius: 30
 track_on_keyframe: 1
 
 min_lmk_merge_sim: 0.7
-max_lmk_merge_px: 3
+max_lmk_merge_px: 0
 
-kf_queue_size: 0
+kf_queue_size: 10
 rematch_threshold: 0.5
 
 vilib_cell_width: 32
 vilib_cell_height: 32
-vilib_downsample: 1
-vilib_downsample_scale: 0.5
+optical_flow_downsample: 1
+optical_flow_downsample_scale: 0.5
 
 xfeat_use_of_points: 1
 
@@ -150,7 +150,7 @@ P2: 120
 useModeHH: false
 
 # LibSGM downscale factor (1=no downscale, 2=half resolution)
-sgmDownscaleFactor: 1
+sgmDownscaleFactor: 2
 
 # Block Matching parameters (for OpenCV_BM only)
 preFilterCap: 31
@@ -177,3 +177,15 @@ dispHeight: 288
 onnxWarmupIterations: 3
 
 rectifiedInputs: 0
+
+use_sky_segmentation_filter: 0
+sky_seg_engine_path: /workspaces/src/xfeat-cpp/onnx_model/skyseg.engine
+
+optical_flow_type: 0  # 0 = VILIB (GPU), 1 = OpenCV (CPU)
+
+# Optional OpenCV optical flow tuning:
+opencv_of_min_features_threshold: 300
+opencv_of_quality_level: 0.01
+opencv_of_min_distance: 20.0
+opencv_of_use_fwd_bwd_check: false # this runs too slow
+opencv_of_fwd_bwd_threshold: 1.0

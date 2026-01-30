@@ -155,6 +155,8 @@ class StereoVisionImuFrontend : public VisionImuFrontend {
   StereoFrame::Ptr stereoFrame_km1_;
   // Last keyframe
   StereoFrame::Ptr stereoFrame_lkf_;
+  // Queue of recent keyframes for rematching
+  std::deque<StereoFrame::Ptr> stereo_frames_{};
 
   // Rotation from last keyframe to reference frame
   // We use this to calculate the rotation btw reference frame and current frame

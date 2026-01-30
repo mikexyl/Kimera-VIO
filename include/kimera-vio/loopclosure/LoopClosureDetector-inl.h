@@ -4,8 +4,11 @@
 #include <gtsam/nonlinear/GaussNewtonOptimizer.h>
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
 
+#include <memory>
+
 #include "kimera-vio/frontend/MonoVisionImuFrontend-definitions.h"
 #include "kimera-vio/frontend/RgbdVisionImuFrontend-definitions.h"
+#include "kimera-vio/frontend/Tracker-definitions.h"
 #include "kimera-vio/loopclosure/LoopClosureDetector.h"
 #include "kimera-vio/utils/Statistics.h"
 #include "kimera-vio/utils/Timer.h"
@@ -152,21 +155,48 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::spinOnce(
 
   landmark_manager_->updateObsFrames(curr_frame->id_, curr_frame->landmark_ids);
 
-  computeSequenceGlobalDesc(lcd_frame_id);
+  bool frame_is_valid{false};
+  CHECK(input.frontend_output_);
+  if (auto stereo_output = std::dynamic_pointer_cast<StereoFrontendOutput>(
+          input.frontend_output_)) {
+    if (not stereo_output->getTrackerStatus()) {
+      frame_is_valid = false;
+    } else {
+      frame_is_valid =
+          stereo_output->getTrackerStatus()->kfTrackingStatus_stereo_ ==
+              TrackingStatus::VALID or
+          stereo_output->getTrackerStatus()->kfTrackingStatus_mono_ ==
+              TrackingStatus::VALID;
+    }
+  } else if (auto mono_output = std::dynamic_pointer_cast<MonoFrontendOutput>(
+                 input.frontend_output_)) {
+    if (not mono_output->getTrackerStatus()) {
+      frame_is_valid = false;
+    } else {
+      frame_is_valid =
+          mono_output->getTrackerStatus()->kfTrackingStatus_mono_ ==
+          TrackingStatus::VALID;
+    }
+  } else {
+    LOG(FATAL) << "Unknown frontend output type.";
+  }
+
+  computeSequenceGlobalDesc(lcd_frame_id, frame_is_valid);
 
   updatePoseGraph(input.backend_states_);
 
   if (lcd_frame_id < static_cast<FrameId>(lcd_params_.local_window_size_)) {
-    cleanFrame(lcd_frame_id);
-    LOG(WARNING) << "LCD frame id " << lcd_frame_id << " is less than "
-                 << lcd_params_.local_window_size_ << ". Returning nullptr.";
+    FrameId clean_frames_until_id =
+        landmark_manager_->getOldestCovisFrame(lcd_frame_id);
+    cleanFrameUntil(clean_frames_until_id);
     return nullptr;
   } else {
     FrameId output_frame_id =
         lcd_frame_id - static_cast<FrameId>(lcd_params_.local_window_size_);
     LcdOutput::UniquePtr output_payload =
         makeOutputPayload(input.timestamp_, output_frame_id);
-    cleanFrame(output_frame_id);
+    FrameId clean_frames_until_id = output_frame_id;
+    cleanFrameUntil(clean_frames_until_id);
     if (!output_payload) {
       LOG(WARNING) << "makeOutputPayload returned nullptr.";
     }

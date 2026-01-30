@@ -122,7 +122,8 @@ class LoopClosureDetector : public LoopClosureDetectorBase {
     }
   }
 
-  virtual void computeSequenceGlobalDesc(const FrameId target_frame_id) = 0;
+  virtual void computeSequenceGlobalDesc(const FrameId target_frame_id,
+                                         bool add_to_sequence) = 0;
 
   virtual void computeDescriptorMatches(const LCDFrame& ref,
                                         const LCDFrame& curr,
@@ -475,7 +476,6 @@ class LoopClosureDetector : public LoopClosureDetectorBase {
 
   virtual void cleanFrame(const FrameId& frame_id) {
     auto frame = cache_.getFrame(frame_id);
-    size_t num_frame_before = cache_.size();
     if (frame) {
       // remove all old landmarks outside the covisibility window
       if (landmark_manager_->getCovisGraph().count(frame_id)) {
@@ -487,10 +487,6 @@ class LoopClosureDetector : public LoopClosureDetectorBase {
         landmark_manager_->removeLandmarksUntil(frame_id);
       }
       cache_.removeFrame(frame_id);
-      size_t num_frame_after = cache_.size();
-      LOG(INFO) << "LoopClosureDetector: Cleaned ID " << frame_id
-                << ", before: " << num_frame_before
-                << ", after: " << num_frame_after;
     } else {
       LOG(WARNING) << "LoopClosureDetector: Attempted to clean frame with ID "
                    << frame_id << " but it does not exist in the cache.";
@@ -498,6 +494,20 @@ class LoopClosureDetector : public LoopClosureDetectorBase {
   }
 
   virtual void cleanFrame(const LCDFrame::Ptr& frame) {}
+
+  /**
+   * @brief Removes all frames with IDs strictly less than the specified
+   * frame_id.
+   * @param[in] frame_id The frame ID threshold. All frames with IDs < frame_id
+   * will be removed.
+   */
+  virtual void cleanFrameUntil(const FrameId& frame_id) {
+    for (const auto& id : cache_.getFrameIds()) {
+      if (id < frame_id) {
+        cache_.removeFrame(id);
+      }
+    }
+  }
 
   void updatePoseGraph(const gtsam::Values& values);
 

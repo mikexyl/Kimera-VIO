@@ -5,12 +5,14 @@ namespace VIO {
 size_t VLADLoopClosureDetector::new_seq_id_ = 0;
 
 void VLADLoopClosureDetector::computeSequenceGlobalDesc(
-    const FrameId target_frame_id) {
+    const FrameId target_frame_id,
+    bool add_to_sequence) {
   auto new_frame = cache_.getFrame(target_frame_id);
   new_frame->seq_id_ = new_seq_id_;
   new_frame->descriptors_vec_.clear();
 
-  if (target_frame_id % lcd_params_.jist_seq_interval_ == 0) {
+  if ((target_frame_id % lcd_params_.jist_seq_interval_ == 0) and
+      add_to_sequence) {
     new_seq_frames_.emplace_back(new_frame);
   }
 

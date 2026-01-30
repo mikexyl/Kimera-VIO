@@ -248,6 +248,16 @@ void InMemoryCacheImpl::removeFrame(size_t index) {
   }
 }
 
+std::vector<size_t> InMemoryCacheImpl::getFrameIds() const {
+  std::vector<size_t> ids;
+  for (size_t i = 0; i < frames_.size(); ++i) {
+    if (frames_[i]) {
+      ids.push_back(i);
+    }
+  }
+  return ids;
+}
+
 LRUCacheImpl::LRUCacheImpl(const FrameCacheConfig& conf) : config(conf) {
   std::filesystem::path cache_root(conf.cache_path);
   const auto cache_path = cache_root / conf.cache_name;
@@ -450,6 +460,29 @@ void LRUCacheImpl::removeFrame(size_t index) {
   // Note: If the frame is on disk and not in memory, we don't remove it from
   // disk. This is intentional - the disk cache is LRU based and will be
   // overwritten eventually.
+}
+
+std::vector<size_t> LRUCacheImpl::getFrameIds() const {
+  std::vector<size_t> ids;
+  // Add last_added_ if exists
+  if (last_added_) {
+    ids.push_back(last_added_->id_);
+  }
+  // Add frames in to_archive_ list
+  for (const auto& frame : to_archive_) {
+    if (frame) {
+      ids.push_back(frame->id_);
+    }
+  }
+  // Add frames in loaded_ cache
+  for (const auto& slot : loaded_) {
+    for (const auto& frame : slot) {
+      if (frame) {
+        ids.push_back(frame->id_);
+      }
+    }
+  }
+  return ids;
 }
 
 }  // namespace VIO
