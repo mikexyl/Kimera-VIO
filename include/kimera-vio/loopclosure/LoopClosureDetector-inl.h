@@ -189,6 +189,10 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::spinOnce(
     FrameId clean_frames_until_id =
         landmark_manager_->getOldestCovisFrame(lcd_frame_id);
     cleanFrameUntil(clean_frames_until_id);
+    LOG(INFO)<< "VLADLCD: LG: Not enough frames for loop detection. Current frame ID: "
+              << lcd_frame_id
+              << ", waiting until we have at least "
+              << lcd_params_.local_window_size_ << " frames.";
     return nullptr;
   } else {
     FrameId output_frame_id =
@@ -434,6 +438,8 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::
   // Frame cache statistics
   output_payload->frame_cache_memory_bytes_ = cache_.getMemoryUsage();
   output_payload->frame_cache_size_ = cache_.size();
+
+  output_payload->seq_frames = seq_frames_;
 
   return output_payload;
 }

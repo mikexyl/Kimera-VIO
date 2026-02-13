@@ -25,10 +25,13 @@ void VLADLoopClosureDetector::computeSequenceGlobalDesc(
     auto global_desc = cv::Mat();
     db_->transform(new_seq_frames_, global_desc);
 
+    std::vector<FrameId> frame_ids;
     for (auto seq_frame : new_seq_frames_) {
       seq_frame->descriptors_vec_.clear();
       seq_frame->clearImage();
+      frame_ids.push_back(seq_frame->id_);
     }
+    seq_frames_.push_back(frame_ids);
 
     new_frame->descriptors_vec_.push_back(global_desc.clone());
 

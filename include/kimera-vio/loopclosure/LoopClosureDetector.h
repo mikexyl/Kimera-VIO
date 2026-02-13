@@ -560,6 +560,8 @@ class LoopClosureDetector : public LoopClosureDetectorBase {
   std::unique_ptr<LoopClosureDetectorLogger> logger_;
   LcdDebugInfo debug_info_;
 
+  std::vector<std::vector<FrameId>> seq_frames_;
+
   // Parameter members
   const bool log_output_ = false;
 };

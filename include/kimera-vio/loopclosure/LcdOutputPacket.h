@@ -93,6 +93,8 @@ struct LcdOutput : PipelinePayload {
   // Frame cache statistics
   size_t frame_cache_memory_bytes_{0};  ///< Total memory used by frame cache
   size_t frame_cache_size_{0};          ///< Number of frames stored in cache
+
+  std::vector<std::vector<FrameId>> seq_frames;  ///< Sequence of frame IDs for each sequence of frames added to the database
 };
 
 }  // namespace VIO
