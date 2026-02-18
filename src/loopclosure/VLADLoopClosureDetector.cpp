@@ -4,6 +4,15 @@ namespace VIO {
 
 size_t VLADLoopClosureDetector::new_seq_id_ = 0;
 
+double VLADLoopClosureDetector::computeSequenceScore(
+    const FrameId anchor_frame_id) {
+  const auto grid_frame = augmentAndFilterFrameFeatures(anchor_frame_id);
+  if (!grid_frame) {
+    return 0.0;
+  }
+  return static_cast<double>(grid_frame->size());
+}
+
 void VLADLoopClosureDetector::computeSequenceGlobalDesc(
     const FrameId target_frame_id,
     bool add_to_sequence) {
@@ -15,6 +24,9 @@ void VLADLoopClosureDetector::computeSequenceGlobalDesc(
       add_to_sequence) {
     new_seq_frames_.emplace_back(new_frame);
   }
+
+  CHECK_EQ(lcd_params_.jist_seq_interval_, 1)
+      << "locked to 1 for now, to debug adaptive sequence";
 
   if (new_seq_frames_.size() ==
       static_cast<size_t>(lcd_params_.jist_seq_length_)) {

@@ -291,6 +291,8 @@ class VLADLoopClosureDetector
    */
   virtual ~VLADLoopClosureDetector() override = default;
 
+  double computeSequenceScore(const FrameId anchor_frame_id) override;
+
   void computeSequenceGlobalDesc(const FrameId target_frame_id,
                                  bool add_to_sequence) override;
 

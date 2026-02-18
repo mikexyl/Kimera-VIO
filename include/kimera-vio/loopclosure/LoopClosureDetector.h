@@ -13,10 +13,13 @@
 #include "kimera-vio/loopclosure/LandmarkManager.h"
 #include "kimera-vio/loopclosure/LcdOutputPacket.h"
 #include "kimera-vio/loopclosure/LcdThirdPartyWrapper.h"
+#include "kimera-vio/loopclosure/LcdGridFrame.h"
 #include "kimera-vio/loopclosure/LoopClosureDetector-definitions.h"
 #include "kimera-vio/loopclosure/LoopClosureDetectorParams.h"
 
 namespace VIO {
+
+// ---------------------------------------------------------------------------
 
 class LoopClosureDetectorBase {
  public:
@@ -124,6 +127,8 @@ class LoopClosureDetector : public LoopClosureDetectorBase {
 
   virtual void computeSequenceGlobalDesc(const FrameId target_frame_id,
                                          bool add_to_sequence) = 0;
+
+  virtual double computeSequenceScore(const FrameId anchor_frame_id) = 0;
 
   virtual void computeDescriptorMatches(const LCDFrame& ref,
                                         const LCDFrame& curr,
@@ -280,7 +285,20 @@ class LoopClosureDetector : public LoopClosureDetectorBase {
       typename Database::Desc* descriptors_mat,
       BearingVectors* bearing_vectors,
       std::vector<StatusKeypointCV>* left_kpts_rect = nullptr,
-      std::vector<StatusKeypointCV>* right_kpts_rect = nullptr) const;
+      std::vector<StatusKeypointCV>* right_kpts_rect = nullptr,
+      std::vector<LandmarkId>* landmark_ids = nullptr) const;
+
+  /* ------------------------------------------------------------------------
+   */
+  /** @brief Augments a frame's features with reprojected landmarks from
+   * covisibility neighbours, then grid-downsamples the result into an
+   * LcdGridFrame so callers can query features per cell.
+   * @param[in] lcd_frame_id Frame ID used to look up covisibility neighbours.
+   * @return LcdGridFrame on success, std::nullopt if the frame or
+   *         landmark_manager_ is unavailable.
+   */
+  std::optional<LcdGridFrame> augmentAndFilterFrameFeatures(
+      FrameId lcd_frame_id);
 
   /* ------------------------------------------------------------------------
    */

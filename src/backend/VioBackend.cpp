@@ -185,7 +185,8 @@ BackendOutput::UniquePtr VioBackend::spinOnce(const BackendInput& input) {
     static const bool kOutputLmkTypeMap =
         backend_output_params_.output_lmk_id_to_lmk_type_map_;
     LmkIdToLmkTypeMap lmk_id_to_lmk_type_map;
-    PointsWithIdMap lmks_out_local_window, lmks_in_local_window;
+    PointsWithIdMap lmks_out_local_window;
+    LmkMapWithStats lmks_in_local_window_with_stats;
     if (kOutputLmkMap) {
       // Generate this map only if requested, since costly.
       // Also, if lmk type requested, fill lmk id to lmk type object.
@@ -194,7 +195,7 @@ BackendOutput::UniquePtr VioBackend::spinOnce(const BackendInput& input) {
           smoother_->getFactors(),
           kOutputLmkTypeMap ? &lmk_id_to_lmk_type_map : nullptr,
           kMinLmkObs);
-      lmks_in_local_window = getMapLmkIdsTo3dPointsInTimeHorizon(
+      lmks_in_local_window_with_stats = getMapLmkIdsTo3dPointsInTimeHorizon(
           smoother_->getFactors(), nullptr, kMinLmkObs);
     }
 
@@ -229,8 +230,10 @@ BackendOutput::UniquePtr VioBackend::spinOnce(const BackendInput& input) {
         debug_info_,
         lmks_out_local_window,
         lmk_id_to_lmk_type_map,
-        lmks_in_local_window,
-        W_P_smoother);
+        lmks_in_local_window_with_stats.points,
+        W_P_smoother,
+        lmks_in_local_window_with_stats.num_observations,
+        lmks_in_local_window_with_stats.residuals);
 
     if (logger_) {
       logger_->logBackendOutput(*output_payload);
@@ -578,11 +581,13 @@ void VioBackend::updateLandmarkInGraph(const LandmarkId& lmk_id,
 /* -------------------------------------------------------------------------- */
 // Get valid 3D points and corresponding lmk id.
 // Warning! it modifies old_smart_factors_!!
-PointsWithIdMap VioBackend::getMapLmkIdsTo3dPointsInTimeHorizon(
+LmkMapWithStats VioBackend::getMapLmkIdsTo3dPointsInTimeHorizon(
     const gtsam::NonlinearFactorGraph& graph,
     LmkIdToLmkTypeMap* lmk_id_to_lmk_type_map,
     const size_t& min_age) {
   PointsWithIdMap points_with_id;
+  LmkIdToNumObsMap lmk_num_observations;
+  LmkIdToResidualMap lmk_smart_factor_residuals;
 
   if (lmk_id_to_lmk_type_map) {
     lmk_id_to_lmk_type_map->clear();
@@ -669,6 +674,10 @@ PointsWithIdMap VioBackend::getMapLmkIdsTo3dPointsInTimeHorizon(
     const auto gsf = dynamic_cast<const SmartStereoFactor*>(graph_factor.get());
     CHECK(gsf) << "Cannot cast factor in graph to a smart stereo factor.";
 
+    // Collect per-landmark stats for all smart factors regardless of validity.
+    lmk_num_observations[lmk_id] = gsf->measured().size();
+    lmk_smart_factor_residuals[lmk_id] = gsf->error(state_);
+
     // Get triangulation result from smart factor.
     const gtsam::TriangulationResult& result = gsf->point();
     if (result.valid()) {
@@ -735,7 +744,7 @@ PointsWithIdMap VioBackend::getMapLmkIdsTo3dPointsInTimeHorizon(
           << "Number of landmarks (not involved in a smart factor) "
           << nr_proj_lmks << ".\n Total number of landmarks: "
           << (nr_valid_smart_lmks + nr_proj_lmks);
-  return points_with_id;
+  return {points_with_id, lmk_num_observations, lmk_smart_factor_residuals};
 }
 
 /* -------------------------------------------------------------------------- */

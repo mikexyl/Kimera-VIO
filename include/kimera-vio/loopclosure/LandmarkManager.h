@@ -20,7 +20,8 @@ class LcdLandmarkManager : public std::unordered_map<LandmarkId, Landmark> {
   virtual ~LcdLandmarkManager() = default;
 
   void updateLandmarks(const PointsWithIdMap& smoother_points_with_ids,
-                       const gtsam::Pose3& W_Pose_smoother = gtsam::Pose3()) {
+                       const gtsam::Pose3& W_Pose_smoother = gtsam::Pose3(),
+                       const LmkMapWithStats* backend_stats = nullptr) {
     for (auto const& point_with_id : smoother_points_with_ids) {
       LandmarkId lmk_id = point_with_id.first;
       Landmark lmk_in_smoother = point_with_id.second;
@@ -31,7 +32,28 @@ class LcdLandmarkManager : public std::unordered_map<LandmarkId, Landmark> {
         // If it exists, update the landmark.
         this->at(lmk_id) = W_Pose_smoother * lmk_in_smoother;
       }
+
+      if (backend_stats) {
+        auto obs_it = backend_stats->num_observations.find(lmk_id);
+        if (obs_it != backend_stats->num_observations.end()) {
+          landmark_backend_num_obs_[lmk_id] = obs_it->second;
+        }
+        auto res_it = backend_stats->residuals.find(lmk_id);
+        if (res_it != backend_stats->residuals.end()) {
+          landmark_backend_residuals_[lmk_id] = res_it->second;
+        }
+      }
     }
+  }
+
+  size_t getNumObs(const LandmarkId& lmk_id) const {
+    auto it = landmark_backend_num_obs_.find(lmk_id);
+    return it != landmark_backend_num_obs_.end() ? it->second : 0u;
+  }
+
+  double getResidual(const LandmarkId& lmk_id) const {
+    auto it = landmark_backend_residuals_.find(lmk_id);
+    return it != landmark_backend_residuals_.end() ? it->second : 0.0;
   }
 
   std::optional<Landmark> getLandmark(const LandmarkId& lmk_id) const {
@@ -195,8 +217,7 @@ class LcdLandmarkManager : public std::unordered_map<LandmarkId, Landmark> {
         if (obs_ratio < min_obs_ratio or
             obs_frames.size() < static_cast<size_t>(min_obs_cnt)) {
           // Cull the landmark
-          this->erase(lmk_id);
-          landmark_obs_frame_ids_.erase(lmk_id);
+          eraseLandmark(lmk_id);
           culled_obs_ratio++;
           VLOG(1) << "Culled landmark " << lmk_id
                   << " obs cnt: " << obs_frames.size()
@@ -207,8 +228,7 @@ class LcdLandmarkManager : public std::unordered_map<LandmarkId, Landmark> {
         }
       } else {
         // Cull the landmark
-        this->erase(lmk_id);
-        landmark_obs_frame_ids_.erase(lmk_id);
+        eraseLandmark(lmk_id);
         culled_obs_ratio++;
         continue;
       }
@@ -231,8 +251,7 @@ class LcdLandmarkManager : public std::unordered_map<LandmarkId, Landmark> {
       if ((max_u_diff < min_parallax and max_v_diff < min_parallax) or
           bad_reproj) {
         // Cull the landmark
-        this->erase(lmk_id);
-        landmark_obs_frame_ids_.erase(lmk_id);
+        eraseLandmark(lmk_id);
         if (bad_reproj) {
           culled_reproj_error++;
         } else {
@@ -269,6 +288,8 @@ class LcdLandmarkManager : public std::unordered_map<LandmarkId, Landmark> {
         if (earliest_obs_frame < frame_id) {
           it = this->erase(it);
           landmark_obs_frame_ids_.erase(lmk_id);
+          landmark_backend_num_obs_.erase(lmk_id);
+          landmark_backend_residuals_.erase(lmk_id);
           removed_count++;
         } else {
           ++it;
@@ -291,8 +312,19 @@ class LcdLandmarkManager : public std::unordered_map<LandmarkId, Landmark> {
 
   auto const& getCovisGraph() const { return covis_graph_; }
 
+ private:
+  void eraseLandmark(const LandmarkId& lmk_id) {
+    this->erase(lmk_id);
+    landmark_obs_frame_ids_.erase(lmk_id);
+    landmark_backend_num_obs_.erase(lmk_id);
+    landmark_backend_residuals_.erase(lmk_id);
+  }
+
+ public:
   std::map<LandmarkId, bool> landmarks_valid_{};
   std::map<LandmarkId, FrameIdSet> landmark_obs_frame_ids_{};  // lcd frame ids
   std::map<FrameId, FrameIdSet> covis_graph_{};
+  LmkIdToNumObsMap landmark_backend_num_obs_{};
+  LmkIdToResidualMap landmark_backend_residuals_{};
 };
 }  // namespace VIO
