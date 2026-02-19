@@ -146,6 +146,10 @@ class LoopClosureDetectorParams : public PipelineParams {
   float min_lmk_parallax_ = 20;
   float max_lmk_reproj_error = 36;
 
+  double min_seq_coverage_score_ = 0.0;   ///< Min coverage score for sequence frames
+  double min_seq_structure_score_ = 0.0;  ///< Min structure score for sequence frames
+  double max_covisibility_score_ = 1.0;   ///< Max covisibility score with previous frame (high covisibility means similar viewpoint, not a loop)
+
   int network_input_width_ = 320;
   int network_input_height_ = 224;
 };

@@ -112,8 +112,8 @@ rematch_threshold: 0.5
 
 vilib_cell_width: 32
 vilib_cell_height: 32
-vilib_downsample: 0
-vilib_downsample_scale: 1
+optical_flow_downsample: 0
+optical_flow_downsample_scale: 1
 
 xfeat_use_of_points: 1
 
@@ -180,3 +180,12 @@ rectifiedInputs: 0
 
 use_sky_segmentation_filter: 0
 sky_seg_engine_path: /workspaces/src/xfeat-cpp/onnx_model/skyseg.engine
+
+optical_flow_type: 0  # 0 = VILIB (GPU), 1 = OpenCV (CPU)
+
+# Optional OpenCV optical flow tuning:
+opencv_of_min_features_threshold: 300
+opencv_of_quality_level: 0.01
+opencv_of_min_distance: 30.0
+opencv_of_use_fwd_bwd_check: false # this runs too slow
+opencv_of_fwd_bwd_threshold: 1.0

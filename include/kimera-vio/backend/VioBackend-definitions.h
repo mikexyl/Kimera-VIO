@@ -72,6 +72,14 @@ using PointsWithId = std::vector<PointWithId>;
 // now the frontend also has such concept.
 using PointsWithIdMap = LandmarksMap;
 using LmkIdToLmkTypeMap = std::unordered_map<LandmarkId, LandmarkType>;
+using LmkIdToNumObsMap = std::unordered_map<LandmarkId, size_t>;
+using LmkIdToResidualMap = std::unordered_map<LandmarkId, double>;
+
+struct LmkMapWithStats {
+  PointsWithIdMap points;
+  LmkIdToNumObsMap num_observations;
+  LmkIdToResidualMap residuals;
+};
 
 struct FeatureObs : std::pair<FrameId, StereoPoint2> {
   FeatureObs(const FrameId& frame_id,
@@ -314,7 +322,9 @@ struct BackendOutput : public PipelinePayload {
                 const PointsWithIdMap& landmarks_with_id_map,
                 const LmkIdToLmkTypeMap& lmk_id_to_lmk_type_map,
                 const PointsWithIdMap& landmarks_in_local_window = {},
-                const gtsam::Pose3& W_Pose_smoother = gtsam::Pose3())
+                const gtsam::Pose3& W_Pose_smoother = gtsam::Pose3(),
+                const LmkIdToNumObsMap& lmk_num_observations = {},
+                const LmkIdToResidualMap& lmk_smart_factor_residuals = {})
       : PipelinePayload(timestamp_kf),
         W_State_Blkf_(timestamp_kf, W_Pose_Blkf, W_Vel_Blkf, imu_bias_lkf),
         state_(state),
@@ -326,7 +336,9 @@ struct BackendOutput : public PipelinePayload {
         landmarks_out_local_window_(landmarks_with_id_map),
         landmarks_in_local_window_(landmarks_in_local_window),
         lmk_id_to_lmk_type_map_(lmk_id_to_lmk_type_map),
-        W_Pose_smoother_(W_Pose_smoother) {}
+        W_Pose_smoother_(W_Pose_smoother),
+        lmk_num_observations_(lmk_num_observations),
+        lmk_smart_factor_residuals_(lmk_smart_factor_residuals) {}
 
   BackendOutput(const VioNavStateTimestamped& vio_navstate_timestamped,
                 const gtsam::Values& state,
@@ -338,7 +350,9 @@ struct BackendOutput : public PipelinePayload {
                 const PointsWithIdMap& landmarks_with_id_map,
                 const LmkIdToLmkTypeMap& lmk_id_to_lmk_type_map,
                 const PointsWithIdMap& landmarks_in_local_window = {},
-                const gtsam::Pose3& W_Pose_smoother = gtsam::Pose3())
+                const gtsam::Pose3& W_Pose_smoother = gtsam::Pose3(),
+                const LmkIdToNumObsMap& lmk_num_observations = {},
+                const LmkIdToResidualMap& lmk_smart_factor_residuals = {})
       : PipelinePayload(vio_navstate_timestamped.timestamp_),
         W_State_Blkf_(vio_navstate_timestamped),
         state_(state),
@@ -350,7 +364,9 @@ struct BackendOutput : public PipelinePayload {
         landmarks_out_local_window_(landmarks_with_id_map),
         landmarks_in_local_window_(landmarks_in_local_window),
         lmk_id_to_lmk_type_map_(lmk_id_to_lmk_type_map),
-        W_Pose_smoother_(W_Pose_smoother) {}
+        W_Pose_smoother_(W_Pose_smoother),
+        lmk_num_observations_(lmk_num_observations),
+        lmk_smart_factor_residuals_(lmk_smart_factor_residuals) {}
 
   const VioNavStateTimestamped W_State_Blkf_;
   const gtsam::Values state_;
@@ -363,6 +379,8 @@ struct BackendOutput : public PipelinePayload {
   const PointsWithIdMap landmarks_in_local_window_;
   const LmkIdToLmkTypeMap lmk_id_to_lmk_type_map_;
   const gtsam::Pose3 W_Pose_smoother_;
+  const LmkIdToNumObsMap lmk_num_observations_;
+  const LmkIdToResidualMap lmk_smart_factor_residuals_;
 };
 
 ////////////////////////////////////////////////////////////////////////////////

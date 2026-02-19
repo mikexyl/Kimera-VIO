@@ -291,6 +291,16 @@ class VLADLoopClosureDetector
    */
   virtual ~VLADLoopClosureDetector() override = default;
 
+  double computeSequenceScore(const FrameId anchor_frame_id) override;
+
+  std::optional<FrameId> getCurrentAnchorFrameId() override {
+    if (new_seq_frames_.empty()) {
+      return std::optional<FrameId>();
+    } else {
+      return std::optional<FrameId>(new_seq_frames_.begin()->get()->id_);
+    }
+  }
+
   void computeSequenceGlobalDesc(const FrameId target_frame_id,
                                  bool add_to_sequence) override;
 

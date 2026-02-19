@@ -95,6 +95,12 @@ struct LcdOutput : PipelinePayload {
   size_t frame_cache_size_{0};          ///< Number of frames stored in cache
 
   std::vector<std::vector<FrameId>> seq_frames;  ///< Sequence of frame IDs for each sequence of frames added to the database
+  std::pair<FrameId, cv::Mat> debug_seq_frame;
+  bool is_seq_frame{false};
+
+  double coverage_score{0.0};   ///< Shannon-entropy coverage score of the feature grid
+  double structure_score{0.0};  ///< Geometric structure score of the feature grid
+  double covisibility_score{0.0};  ///< Covisibility score between the current frame and the previous frame
 };
 
 }  // namespace VIO

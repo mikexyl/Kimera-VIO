@@ -124,7 +124,7 @@ class VioBackend {
 
   // Get valid 3D points and corresponding lmk id.
   // Warning! it modifies old_smart_factors_!!
-  PointsWithIdMap getMapLmkIdsTo3dPointsInTimeHorizon(
+  LmkMapWithStats getMapLmkIdsTo3dPointsInTimeHorizon(
       const gtsam::NonlinearFactorGraph& graph,
       LmkIdToLmkTypeMap* lmk_id_to_lmk_type_map = nullptr,
       const size_t& min_age = 2);
