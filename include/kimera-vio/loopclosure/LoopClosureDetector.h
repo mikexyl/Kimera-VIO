@@ -344,19 +344,6 @@ class LoopClosureDetector : public LoopClosureDetectorBase {
 
   /* ------------------------------------------------------------------------
    */
-  /** @brief Clears all keypoints and features from an input StereoFrame and
-   *  fills it with ORB features.
-   * @param[in] keypoints A vector of KeyPoints representing the ORB keypoints
-   *  identified by an ORB detector.
-   * @param[out] A StereoFrame initially filled with front-end features,
-   *  which is then replaced with ORB features from the keypoints parameter.
-   */
-  // TODO(marcus): utils and reorder (or just static)
-  void rewriteStereoFrameFeatures(const std::vector<cv::KeyPoint>& keypoints,
-                                  StereoFrame* stereo_frame) const;
-
-  /* ------------------------------------------------------------------------
-   */
   bool geometricVerificationCam2d2d(const LCDFrame& ref_frame,
                                     const LCDFrame& cur_frame,
                                     const KeypointMatches& matches_match_query,

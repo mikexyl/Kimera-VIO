@@ -107,7 +107,7 @@ track_on_keyframe: 1
 min_lmk_merge_sim: 0.7
 max_lmk_merge_px: 0
 
-kf_queue_size: 20
+kf_queue_size: 10
 rematch_threshold: 0.5
 
 vilib_cell_width: 32
@@ -181,7 +181,7 @@ rectifiedInputs: 0
 use_sky_segmentation_filter: 1
 sky_seg_engine_path: /workspaces/src/xfeat-cpp/onnx_model/skyseg.engine
 
-optical_flow_type: 1  # 0 = VILIB (GPU), 1 = OpenCV (CPU)
+optical_flow_type: 0  # 0 = VILIB (GPU), 1 = OpenCV (CPU)
 
 # Optional OpenCV optical flow tuning:
 opencv_of_min_features_threshold: 300

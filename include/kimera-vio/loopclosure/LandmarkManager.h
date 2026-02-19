@@ -312,6 +312,36 @@ class LcdLandmarkManager : public std::unordered_map<LandmarkId, Landmark> {
 
   auto const& getCovisGraph() const { return covis_graph_; }
 
+  double computeCovisibilityScore(const FrameId& source_frame,
+                                  const FrameId& target_frame) const {
+    // compute what percentage of landmarks observed in source_frame are also
+    // observed in target_frame
+
+    // Find all landmarks observed in source_frame
+    std::set<LandmarkId> source_landmarks;
+    for (const auto& [lmk_id, frame_ids] : landmark_obs_frame_ids_) {
+      if (frame_ids.find(source_frame) != frame_ids.end()) {
+        source_landmarks.insert(lmk_id);
+      }
+    }
+
+    if (source_landmarks.empty()) {
+      return 0.0;
+    }
+
+    // Count how many of these landmarks are also observed in target_frame
+    size_t shared_count = 0;
+    for (const auto& lmk_id : source_landmarks) {
+      const auto& frame_ids = landmark_obs_frame_ids_.at(lmk_id);
+      if (frame_ids.find(target_frame) != frame_ids.end()) {
+        shared_count++;
+      }
+    }
+
+    return static_cast<double>(shared_count) /
+           static_cast<double>(source_landmarks.size());
+  }
+
  private:
   void eraseLandmark(const LandmarkId& lmk_id) {
     this->erase(lmk_id);

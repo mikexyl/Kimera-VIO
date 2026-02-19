@@ -185,7 +185,21 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::spinOnce(
     LOG(FATAL) << "Unknown frontend output type.";
   }
 
-  computeSequenceGlobalDesc(lcd_frame_id, frame_is_valid);
+  bool frame_too_repetitive_wrt_lkf =
+      landmark_manager_->computeCovisibilityScore(
+          lcd_frame_id - 1, lcd_frame_id) > lcd_params_.max_covisibility_score_;
+  bool frame_too_repetitive_wrt_seq_anchor =
+      getCurrentAnchorFrameId()
+          ? landmark_manager_->computeCovisibilityScore(
+                *getCurrentAnchorFrameId(), lcd_frame_id) >
+                lcd_params_.max_covisibility_score_
+          : false;
+
+  bool add_frame_to_sequence =
+      frame_is_valid and (not frame_too_repetitive_wrt_lkf and
+                          not frame_too_repetitive_wrt_seq_anchor);
+
+  computeSequenceGlobalDesc(lcd_frame_id, add_frame_to_sequence);
 
   updatePoseGraph(input.backend_states_);
 
@@ -434,8 +448,9 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::
   CHECK_EQ(filtered_landmarks.size(), filtered_bearing_vectors.size());
 
   std::map<int, double> bow_vec{};
-  if (curr_frame->descriptors_vec_.size() and S_cover > 0.7 and
-      S_struct > 0.1) {
+  if (curr_frame->descriptors_vec_.size() and
+      S_cover > lcd_params_.min_seq_coverage_score_ and
+      S_struct > lcd_params_.min_seq_structure_score_) {
     bow_vec = globalDescToMap(curr_frame->descriptors_vec_[0]);
   } else {
     bow_vec = {};
@@ -518,6 +533,10 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::
     output_payload->structure_score =
         anchor_grid ? anchor_grid->computeStructureScore() : 0.0;
   }
+
+  output_payload->covisibility_score =
+      landmark_manager_->computeCovisibilityScore(lcd_frame_id - 1,
+                                                  lcd_frame_id);
 
   return output_payload;
 }
@@ -753,63 +772,6 @@ FrameId LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::
       cp_stereo_frame->left_frame_.versors_,
       cp_stereo_frame->left_keypoints_rectified_,
       cp_stereo_frame->right_keypoints_rectified_));
-}
-
-template <typename Database, typename FeatureDetector, typename FeatureMatcher>
-void LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::
-    rewriteStereoFrameFeatures(const std::vector<cv::KeyPoint>& keypoints,
-                               StereoFrame* stereo_frame) const {
-  CHECK_NOTNULL(stereo_frame);
-
-  // Populate frame keypoints with ORB features instead of the normal
-  // VIO features that came with the StereoFrame.
-  Frame* left_frame_mutable = &stereo_frame->left_frame_;
-  Frame* right_frame_mutable = &stereo_frame->right_frame_;
-  CHECK_NOTNULL(left_frame_mutable);
-  CHECK_NOTNULL(right_frame_mutable);
-
-  // Clear all relevant fields.
-  left_frame_mutable->keypoints_.clear();
-  left_frame_mutable->versors_.clear();
-  left_frame_mutable->scores_.clear();
-  right_frame_mutable->keypoints_.clear();
-  right_frame_mutable->versors_.clear();
-  right_frame_mutable->scores_.clear();
-  stereo_frame->keypoints_depth_.clear();
-  stereo_frame->keypoints_3d_.clear();
-  stereo_frame->left_keypoints_rectified_.clear();
-  stereo_frame->right_keypoints_rectified_.clear();
-
-  // Reserve space in all relevant fields
-  left_frame_mutable->keypoints_.reserve(keypoints.size());
-  left_frame_mutable->versors_.reserve(keypoints.size());
-  left_frame_mutable->scores_.reserve(keypoints.size());
-  right_frame_mutable->keypoints_.reserve(keypoints.size());
-  right_frame_mutable->versors_.reserve(keypoints.size());
-  right_frame_mutable->scores_.reserve(keypoints.size());
-  stereo_frame->keypoints_depth_.reserve(keypoints.size());
-  stereo_frame->keypoints_3d_.reserve(keypoints.size());
-  stereo_frame->left_keypoints_rectified_.reserve(keypoints.size());
-  stereo_frame->right_keypoints_rectified_.reserve(keypoints.size());
-
-  // stereo_frame->setIsRectified(false);
-
-  // Add ORB keypoints.
-  for (const cv::KeyPoint& keypoint : keypoints) {
-    left_frame_mutable->keypoints_.push_back(keypoint.pt);
-    left_frame_mutable->versors_.push_back(
-        UndistorterRectifier::GetBearingVector(keypoint.pt,
-                                               left_frame_mutable->cam_param_));
-    left_frame_mutable->scores_.push_back(1.0);
-  }
-
-  if (left_frame_mutable->keypoints_.size() == 0) {
-    return;
-  }
-
-  // Automatically match keypoints in right image with those in left.
-  stereo_matcher_->sparseStereoReconstruction(stereo_frame);
-  stereo_frame->checkStereoFrame();
 }
 
 /* ------------------------------------------------------------------------ */

@@ -186,6 +186,11 @@ bool LoopClosureDetectorParams::parseYAML(const std::string& filepath) {
   yaml_parser.getYamlParam("jist_seq_length", &jist_seq_length_);
   yaml_parser.getYamlParam("jist_seq_interval", &jist_seq_interval_);
   yaml_parser.getYamlParam("jist_descriptor_dim", &jist_descriptor_dim_);
+
+  yaml_parser.getYamlParam("min_seq_coverage_score", &min_seq_coverage_score_);
+  yaml_parser.getYamlParam("min_seq_structure_score",
+                           &min_seq_structure_score_);
+  yaml_parser.getYamlParam("max_covisibility_score", &max_covisibility_score_);
   return true;
 }
 
@@ -284,7 +289,13 @@ void LoopClosureDetectorParams::print() const {
                         "jist_seq_length_",
                         jist_seq_length_,
                         "jist_descriptor_dim_",
-                        jist_descriptor_dim_);
+                        jist_descriptor_dim_,
+                        "min_seq_coverage_score_",
+                        min_seq_coverage_score_,
+                        "min_seq_structure_score_",
+                        min_seq_structure_score_,
+                        "max_covisibility_score_",
+                        max_covisibility_score_);
   LOG(INFO) << out.str();
 }
 
@@ -338,7 +349,11 @@ bool LoopClosureDetectorParams::equals(const LoopClosureDetectorParams& lp2,
          (network_input_height_ == lp2.network_input_height_) &&
          (jist_model_path_ == lp2.jist_model_path_) &&
          (jist_seq_length_ == lp2.jist_seq_length_) &&
-         (jist_descriptor_dim_ == lp2.jist_descriptor_dim_);
+         (jist_descriptor_dim_ == lp2.jist_descriptor_dim_) &&
+         (fabs(min_seq_coverage_score_ - lp2.min_seq_coverage_score_) <= tol) &&
+         (fabs(min_seq_structure_score_ - lp2.min_seq_structure_score_) <=
+          tol) &&
+         (fabs(max_covisibility_score_ - lp2.max_covisibility_score_) <= tol);
 }
 
 }  // namespace VIO
