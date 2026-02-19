@@ -25,8 +25,8 @@ void VLADLoopClosureDetector::computeSequenceGlobalDesc(
     new_seq_frames_.emplace_back(new_frame);
   }
 
-  CHECK_EQ(lcd_params_.jist_seq_interval_, 1)
-      << "locked to 1 for now, to debug adaptive sequence";
+  // CHECK_EQ(lcd_params_.jist_seq_interval_, 1)
+      // << "locked to 1 for now, to debug adaptive sequence";
 
   if (new_seq_frames_.size() ==
       static_cast<size_t>(lcd_params_.jist_seq_length_)) {

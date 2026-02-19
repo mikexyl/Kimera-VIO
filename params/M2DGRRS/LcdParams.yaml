@@ -95,6 +95,6 @@ network_input_height: 288
 
 jist_model_path: "/workspaces/src/JIST/exported_models/JIST_r18_512_seqgem_simplified.onnx"
 jist_seq_length: 5
-jist_seq_interval: 1
+jist_seq_interval: 2
 jist_descriptor_dim: 512
 

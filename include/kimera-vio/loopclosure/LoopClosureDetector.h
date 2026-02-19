@@ -11,9 +11,9 @@
 #include "kimera-vio/frontend/Tracker.h"
 #include "kimera-vio/logging/Logger.h"
 #include "kimera-vio/loopclosure/LandmarkManager.h"
+#include "kimera-vio/loopclosure/LcdGridFrame.h"
 #include "kimera-vio/loopclosure/LcdOutputPacket.h"
 #include "kimera-vio/loopclosure/LcdThirdPartyWrapper.h"
-#include "kimera-vio/loopclosure/LcdGridFrame.h"
 #include "kimera-vio/loopclosure/LoopClosureDetector-definitions.h"
 #include "kimera-vio/loopclosure/LoopClosureDetectorParams.h"
 
@@ -129,6 +129,8 @@ class LoopClosureDetector : public LoopClosureDetectorBase {
                                          bool add_to_sequence) = 0;
 
   virtual double computeSequenceScore(const FrameId anchor_frame_id) = 0;
+
+  virtual std::optional<FrameId> getCurrentAnchorFrameId() = 0;
 
   virtual void computeDescriptorMatches(const LCDFrame& ref,
                                         const LCDFrame& curr,

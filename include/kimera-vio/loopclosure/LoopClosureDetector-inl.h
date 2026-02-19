@@ -203,8 +203,14 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::spinOnce(
         lcd_frame_id - static_cast<FrameId>(lcd_params_.local_window_size_);
     LcdOutput::UniquePtr output_payload =
         makeOutputPayload(input.timestamp_, output_frame_id);
-    FrameId clean_frames_until_id = output_frame_id;
-    cleanFrameUntil(clean_frames_until_id);
+
+    // only clean frame if it contains global descriptors, i.e. once per
+    // sequence
+    if (!output_payload->bow_vec_.empty()) {
+      FrameId clean_frames_until_id =
+          landmark_manager_->getOldestCovisFrame(output_frame_id);
+      cleanFrameUntil(clean_frames_until_id);
+    }
     if (!output_payload) {
       LOG(WARNING) << "makeOutputPayload returned nullptr.";
     }
@@ -428,7 +434,8 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::
   CHECK_EQ(filtered_landmarks.size(), filtered_bearing_vectors.size());
 
   std::map<int, double> bow_vec{};
-  if (curr_frame->descriptors_vec_.size()) {
+  if (curr_frame->descriptors_vec_.size() and S_cover > 0.7 and
+      S_struct > 0.1) {
     bow_vec = globalDescToMap(curr_frame->descriptors_vec_[0]);
   } else {
     bow_vec = {};
@@ -503,8 +510,14 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::
   output_payload->debug_seq_frame =
       std::make_pair(lcd_frame_id, debug_seq_frame);
   output_payload->is_seq_frame = is_seq_frame;
-  output_payload->coverage_score = S_cover;
-  output_payload->structure_score = S_struct;
+
+  if (auto current_anchor_frame_id = getCurrentAnchorFrameId()) {
+    auto anchor_grid = augmentAndFilterFrameFeatures(*current_anchor_frame_id);
+    output_payload->coverage_score =
+        anchor_grid ? anchor_grid->computeCoverageScore() : 0.0;
+    output_payload->structure_score =
+        anchor_grid ? anchor_grid->computeStructureScore() : 0.0;
+  }
 
   return output_payload;
 }
