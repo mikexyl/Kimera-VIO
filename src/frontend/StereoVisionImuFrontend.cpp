@@ -19,6 +19,10 @@
 #include <glog/logging.h>
 #include <gtsam/geometry/Rot3.h>
 
+#include <Eigen/Dense>
+#include <algorithm>
+#include <unordered_set>
+
 #include "kimera-vio/utils/Timer.h"
 #include "kimera-vio/utils/UtilsNumerical.h"
 
@@ -64,6 +68,8 @@ StereoVisionImuFrontend::StereoVisionImuFrontend(
                                        kFrontendTrackerUseOF);
 
   if (VLOG_IS_ON(1)) tracker_->tracker_params_.print();
+
+  edge_selection_params_.b_T_c = stereo_camera_->getBodyPoseLeftCamRect();
 }
 
 StereoVisionImuFrontend::~StereoVisionImuFrontend() {
@@ -323,6 +329,23 @@ void StereoVisionImuFrontend::processFirstStereoFrame(
 }
 
 /* -------------------------------------------------------------------------- */
+// Count the number of landmark IDs that appear in both frames (valid only,
+// i.e. id != -1). Used to weight the covisibility adjacency matrix.
+static size_t countSharedTracks(const Frame& frame_i, const Frame& frame_j) {
+  if (frame_i.landmarks_.empty() || frame_j.landmarks_.empty()) return 0u;
+  std::unordered_set<LandmarkId> ids_i;
+  ids_i.reserve(frame_i.landmarks_.size());
+  for (const LandmarkId id : frame_i.landmarks_) {
+    if (id != -1) ids_i.insert(id);
+  }
+  size_t count = 0u;
+  for (const LandmarkId id : frame_j.landmarks_) {
+    if (id != -1 && ids_i.count(id)) ++count;
+  }
+  return count;
+}
+
+/* -------------------------------------------------------------------------- */
 // Frontend WORKHORSE
 // THIS FUNCTION CAN BE GREATLY OPTIMIZED
 // TODO(marcus): const ref cur_frame mutable members are modified! label is
@@ -356,19 +379,6 @@ StatusStereoMeasurementsPtr StereoVisionImuFrontend::processStereoFrame(
                             frontend_params_.feature_detector_params_,
                             stereo_camera_->getR1(),
                             false);
-
-  // feature tracking failed for all points, move on to the next frame
-  // if (left_frame_k->keypoints_.size() == 0) {
-  //   VLOG(2)
-  //       << "feature tracking failed for all points, moving to next frame \n";
-  //   feature_detector_->featureDetection(left_frame_k,
-  //   stereo_camera_->getR1()); stereoFrame_km1_ = stereoFrame_k_;
-  //   stereoFrame_k_.reset();
-  //   ++frame_count_;
-  //   StereoMeasurements smart_stereo_measurements;
-  //   return std::make_shared<StatusStereoMeasurements>(
-  //       std::make_pair(tracker_status_summary_, smart_stereo_measurements));
-  // }
 
   VLOG(2) << "Finished feature tracking.";
   //////////////////////////////////////////////////////////////////////////////
@@ -464,32 +474,67 @@ StatusStereoMeasurementsPtr StereoVisionImuFrontend::processStereoFrame(
           TrackingStatus::DISABLED;
     }
 
-    // find the best (least tracked) keyframe to run matcher
-    if (tracker_status_summary_.kfTrackingStatus_mono_ !=
-        TrackingStatus::LOW_DISPARITY) {
-      StereoFrame::Ptr best_kf_to_rematch = nullptr;
-      if (not stereo_frames_.empty()) {
-        size_t n_total_points = stereoFrame_k_->left_frame_.keypoints_.size();
-        for (auto kf = stereo_frames_.rbegin(); kf != stereo_frames_.rend();
-             ++kf) {
-          KeypointMatches matches_ref_cur;
-          tracker_->findMatchingKeypoints((*kf)->left_frame_,
-                                          stereoFrame_k_->left_frame_,
-                                          &matches_ref_cur);
-          if (matches_ref_cur.size() <
-              n_total_points * frontend_params_.rematch_threshold_) {
-            best_kf_to_rematch = *kf;
-            break;
+    // Select the golden edge: among all connections FROM the current keyframe
+    // to a historical keyframe in the sliding window, find the one that
+    // maximises the expected pose-graph algebraic connectivity gain
+    // E[Δλ₂] = p_ij · (v₂ᵢ − v₂ⱼ)².
+    if (!stereo_frames_.empty() &&
+        tracker_status_summary_.kfTrackingStatus_mono_ !=
+            TrackingStatus::LOW_DISPARITY) {
+      // Build the SlidingWindow: historical KFs first, current KF last.
+      SlidingWindow window;
+      window.reserve(stereo_frames_.size() + 1);
+      for (size_t idx = 0; idx < stereo_frames_.size(); ++idx) {
+        window.push_back(
+            {stereo_frames_[idx]->left_frame_.id_, kf_poses_[idx]});
+      }
+      const int cur_idx = static_cast<int>(window.size());
+      {
+        const auto nav_state = getLatestNavStateFromBackend();
+        window.push_back({stereoFrame_k_->left_frame_.id_,
+                          nav_state ? nav_state->pose_ : gtsam::Pose3()});
+      }
+
+      // Build the N×N adjacency matrix.
+      // - All pairs:        weight = min(shared_tracks / 200, 1.0)
+      // - Historical↔historical with weight==0: forced to 1.0 so
+      //   selectGoldenEdge skips them, restricting candidates to edges
+      //   that include the current keyframe.
+      static constexpr double kCovisNorm = 200.0;
+      const int N = static_cast<int>(window.size());
+      Eigen::MatrixXd adjacency = Eigen::MatrixXd::Zero(N, N);
+      for (int i = 0; i < N; ++i) {
+        for (int j = i + 1; j < N; ++j) {
+          const Frame& fi = (i == cur_idx) ? stereoFrame_k_->left_frame_
+                                           : stereo_frames_[i]->left_frame_;
+          const Frame& fj = (j == cur_idx) ? stereoFrame_k_->left_frame_
+                                           : stereo_frames_[j]->left_frame_;
+          const double shared = static_cast<double>(countSharedTracks(fi, fj));
+          if (shared > 0.0) {
+            adjacency(i, j) = adjacency(j, i) =
+                std::min(shared / kCovisNorm, 1.0);
+          } else if (i != cur_idx && j != cur_idx) {
+            // No shared tracks between two historical KFs: treat the pair as
+            // already connected so selectGoldenEdge ignores it.
+            adjacency(i, j) = adjacency(j, i) = 1.0;
           }
-        }
-        if (not best_kf_to_rematch) {
-          best_kf_to_rematch = stereo_frames_.front();
+          // Current-frame pair with no shared tracks: stays 0 → candidate.
         }
       }
 
-      if (best_kf_to_rematch) {
-        tracker_->featureTrackingDesc(&best_kf_to_rematch->left_frame_,
-                                      &stereoFrame_k_->left_frame_,
+      // Select the edge with the highest expected Fiedler gain.
+      // By construction the winner always involves cur_idx.
+      const EdgeCandidate best_edge = EdgeSelection::selectGoldenEdge(
+          window, adjacency, edge_selection_params_);
+
+      if (best_edge.isValid()) {
+        CHECK(best_edge.id_i == cur_idx or best_edge.id_j == cur_idx);
+        const int hist_idx =
+            (best_edge.id_i == cur_idx) ? best_edge.id_j : best_edge.id_i;
+        LOG(INFO) << "golden edge between curr " << stereoFrame_k_->id_
+                  << " and past " << stereo_frames_.at(hist_idx)->id_;
+        tracker_->featureTrackingDesc(&stereoFrame_k_->left_frame_,
+                                      &stereo_frames_.at(hist_idx)->left_frame_,
                                       {},
                                       frontend_params_.feature_detector_params_,
                                       std::nullopt,
@@ -539,11 +584,15 @@ StatusStereoMeasurementsPtr StereoVisionImuFrontend::processStereoFrame(
     // Move on.
     if (tracker_status_summary_.kfTrackingStatus_mono_ ==
         TrackingStatus::VALID) {
+      // Record the best available body pose for this keyframe from the backend.
+      const auto nav_state = getLatestNavStateFromBackend();
+      kf_poses_.push_back(nav_state ? nav_state->pose_ : gtsam::Pose3());
       stereo_frames_.push_back(stereoFrame_k_);
     }
     if (stereo_frames_.size() >
         static_cast<size_t>(frontend_params_.kf_queue_size_)) {
       stereo_frames_.pop_front();
+      kf_poses_.pop_front();
     }
     stereoFrame_lkf_ = stereoFrame_k_;
 

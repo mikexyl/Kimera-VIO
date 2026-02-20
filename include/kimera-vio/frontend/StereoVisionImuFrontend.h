@@ -24,6 +24,7 @@
 #include <opencv2/opencv.hpp>
 
 #include "kimera-vio/backend/VioBackend-definitions.h"
+#include "kimera-vio/frontend/edge-selection/EdgeSelection.h"
 #include "kimera-vio/frontend/StereoFrame.h"
 #include "kimera-vio/frontend/StereoImuSyncPacket.h"
 #include "kimera-vio/frontend/StereoMatcher.h"
@@ -155,8 +156,13 @@ class StereoVisionImuFrontend : public VisionImuFrontend {
   StereoFrame::Ptr stereoFrame_km1_;
   // Last keyframe
   StereoFrame::Ptr stereoFrame_lkf_;
-  // Queue of recent keyframes for rematching
+  // Queue of recent keyframes for rematching (nodes of the pose graph)
   std::deque<StereoFrame::Ptr> stereo_frames_{};
+  // Body-in-world pose from the backend at the time each keyframe was stored.
+  // One entry per element of stereo_frames_ (maintained in sync).
+  std::deque<gtsam::Pose3> kf_poses_{};
+  // Parameters for the golden edge selection algorithm.
+  EdgeSelectionParams edge_selection_params_{};
 
   // Rotation from last keyframe to reference frame
   // We use this to calculate the rotation btw reference frame and current frame

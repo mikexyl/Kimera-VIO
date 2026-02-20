@@ -75,6 +75,8 @@ class VioBackend {
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
   typedef std::function<void(const ImuBias& imu_bias)> ImuBiasCallback;
   typedef std::function<void(const LandmarksMap& map)> MapCallback;
+  typedef std::function<void(const VioNavStateTimestamped& nav_state)>
+      NavStateCallback;
 
   /**
    * @brief VioBackend Constructor. Initialization must be done separately.
@@ -118,6 +120,16 @@ class VioBackend {
    * optimizing.
    */
   void registerMapUpdateCallback(const MapCallback& map_update_callback);
+
+  /**
+   * @brief registerNavStateUpdateCallback Register callback to be called
+   * whenever the Backend has a new optimized navigation state estimate.
+   * The Frontend can use this to update its pose prediction and tracking.
+   * @param nav_state_update_callback function that will be called on a new
+   * nav state estimate (pose, velocity, bias).
+   */
+  void registerNavStateUpdateCallback(
+      const NavStateCallback& nav_state_update_callback);
 
   // Get valid 3D points - TODO: this copies the graph.
   void get3DPoints(std::vector<gtsam::Point3>* points_3d) const;
@@ -556,6 +568,10 @@ class VioBackend {
 
   //! Map update callback for the frontend PnP tracker.
   MapCallback map_update_callback_;
+
+  //! Nav state update callback so the Frontend receives the latest pose,
+  //! velocity and bias estimates after each keyframe optimization.
+  NavStateCallback nav_state_update_callback_;
 
   // Debug info.
   DebugVioInfo debug_info_;

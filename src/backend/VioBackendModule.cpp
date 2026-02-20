@@ -49,4 +49,10 @@ void VioBackendModule::registerMapUpdateCallback(
   vio_backend_->registerMapUpdateCallback(map_update_callback);
 }
 
+void VioBackendModule::registerNavStateUpdateCallback(
+    const VioBackend::NavStateCallback& nav_state_update_callback) {
+  CHECK(vio_backend_);
+  vio_backend_->registerNavStateUpdateCallback(nav_state_update_callback);
+}
+
 }  // namespace VIO

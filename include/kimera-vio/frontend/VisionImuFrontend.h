@@ -18,7 +18,10 @@
 
 #include <atomic>
 #include <memory>
+#include <mutex>
+#include <optional>
 
+#include "kimera-vio/common/VioNavState.h"
 #include "kimera-vio/frontend/FrontendInputPacketBase.h"
 #include "kimera-vio/frontend/FrontendOutputPacketBase.h"
 #include "kimera-vio/frontend/OdometryParams.h"
@@ -127,6 +130,28 @@ class VisionImuFrontend {
     imu_time_shift_update_callback_ = callback;
   }
 
+  /* ------------------------------------------------------------------------ */
+  /**
+   * @brief updateNavState Receives the latest optimized navigation state from
+   * the Backend (pose, velocity, IMU bias). Thread-safe.
+   * @param nav_state Latest VioNavStateTimestamped from the Backend.
+   */
+  inline void updateNavState(const VioNavStateTimestamped& nav_state) {
+    std::lock_guard<std::mutex> lock(nav_state_mutex_);
+    last_nav_state_from_backend_ = nav_state;
+  }
+
+  /**
+   * @brief getLatestNavStateFromBackend Returns the most recent navigation
+   * state received from the Backend. Returns nullopt before the first update.
+   * Thread-safe.
+   */
+  inline std::optional<VioNavStateTimestamped> getLatestNavStateFromBackend()
+      const {
+    std::lock_guard<std::mutex> lock(nav_state_mutex_);
+    return last_nav_state_from_backend_;
+  }
+
  protected:
   virtual FrontendOutputPacketBase::UniquePtr bootstrapSpin(
       FrontendInputPacketBase::UniquePtr&& input) = 0;
@@ -216,6 +241,10 @@ class VisionImuFrontend {
   // Time alignment
   ImuTimeShiftCallback imu_time_shift_update_callback_;
   TimeAlignerBase::UniquePtr time_aligner_;
+
+  // Latest navigation state received from the Backend.
+  mutable std::mutex nav_state_mutex_;
+  std::optional<VioNavStateTimestamped> last_nav_state_from_backend_;
 
   // External odometry
   std::optional<OdometryParams> odom_params_;

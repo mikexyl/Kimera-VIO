@@ -78,6 +78,15 @@ class VioBackendModule
   void registerMapUpdateCallback(
       const VioBackend::MapCallback& map_update_callback);
 
+  /**
+   * @brief registerNavStateUpdateCallback Register callback to be called
+   * whenever the Backend has a new optimized navigation state estimate.
+   * @param nav_state_update_callback function called with the latest
+   * VioNavStateTimestamped (pose, velocity, bias) after each keyframe.
+   */
+  void registerNavStateUpdateCallback(
+      const VioBackend::NavStateCallback& nav_state_update_callback);
+
  protected:
   const VioBackend::UniquePtr vio_backend_;
 };

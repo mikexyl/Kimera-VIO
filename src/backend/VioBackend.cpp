@@ -263,6 +263,11 @@ void VioBackend::registerMapUpdateCallback(
   map_update_callback_ = map_update_callback;
 }
 
+void VioBackend::registerNavStateUpdateCallback(
+    const NavStateCallback& nav_state_update_callback) {
+  nav_state_update_callback_ = nav_state_update_callback;
+}
+
 /* -------------------------------------------------------------------------- */
 bool VioBackend::initStateAndSetPriors(
     const VioNavStateTimestamped& vio_nav_state_initial_seed) {
@@ -1430,6 +1435,11 @@ void VioBackend::updateStates(const FrameId& cur_id) {
                                       "Frontend? Do so by using "
                                       "registerImuBiasUpdateCallback function";
   imu_bias_update_callback_(imu_bias_lkf_);
+
+  if (nav_state_update_callback_) {
+    nav_state_update_callback_(VioNavStateTimestamped(
+        timestamp_lkf_, W_Pose_B_lkf_from_state_, W_Vel_B_lkf_, imu_bias_lkf_));
+  }
 }
 
 bool VioBackend::updateSmoother(Smoother::Result* result,
