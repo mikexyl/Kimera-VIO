@@ -393,7 +393,8 @@ StatusStereoMeasurementsPtr StereoVisionImuFrontend::processStereoFrame(
                                   {},
                                   frontend_params_.feature_detector_params_,
                                   std::nullopt,
-                                  true);
+                                  true,
+                                  tracker_->tracker_params_.desc_tracking_mode_);
 
     double sparse_stereo_time = 0;
     if (frontend_params_.useRANSAC_) {
@@ -492,7 +493,8 @@ StatusStereoMeasurementsPtr StereoVisionImuFrontend::processStereoFrame(
                                       {},
                                       frontend_params_.feature_detector_params_,
                                       std::nullopt,
-                                      false);
+                                      false,
+                                      tracker_->tracker_params_.desc_tracking_mode_);
       }
     }
 

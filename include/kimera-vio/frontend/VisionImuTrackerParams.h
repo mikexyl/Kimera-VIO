@@ -71,8 +71,8 @@ struct TrackerParams : public PipelineParams {
   //! Use 3D-3D tracking to remove outliers
   bool optimize_3d3d_pose_from_inliers_ = false;
 
-  //! Copy optical flow tracks that are not tracked by matcher
-  bool copy_optical_flow_tracks_ = false;
+  //! Controls which phases of featureTrackingDesc run (descriptor / OF / both).
+  DescTrackingMode desc_tracking_mode_ = DescTrackingMode::kDescriptorOnly;
 
   //! PnP tracking parameters
   Pose3d2dAlgorithm pnp_algorithm_ = Pose3d2dAlgorithm::EPNP;

@@ -1550,7 +1550,8 @@ void Tracker::featureTrackingDesc(
     const gtsam::Rot3& ref_R_cur,
     const FeatureDetectorParams& feature_detector_params,
     std::optional<cv::Mat> R,
-    bool invalidate_landmarks) {
+    bool invalidate_landmarks,
+    DescTrackingMode mode) {
   CHECK_NOTNULL(ref_frame);
   CHECK_NOTNULL(cur_frame);
   auto tic = utils::Timer::tic();
@@ -1572,44 +1573,35 @@ void Tracker::featureTrackingDesc(
 
   auto H = optical_flow_predictor_->getHomography(ref_R_cur);
 
-  // Initialize to old locations
   LOG_IF(ERROR, px_ref.size() == 0u) << "No keypoints in reference frame!";
 
-  CHECK(not ref_frame->descriptors_.empty());
-  CHECK(not cur_frame->descriptors_.empty());
-
-  std::vector<uchar> status;
-  std::vector<float> error;
-  auto time_lukas_kanade_tic = utils::Timer::tic();
+  // --- Phase 1: descriptor-based matching -----------------------------------
   DMatchVec matches;
-  feature_tracker_->trackDesc(
-      ref_frame, cur_frame, H, tracker_params_.search_radius_, {}, &matches);
-  VLOG(1) << "Optical Flow Timing [ms]: "
-          << utils::Timer::toc(time_lukas_kanade_tic).count();
-  VLOG(2) << "Finished Optical Flow Pyr LK tracking.";
+  std::set<LandmarkId> ref_lmk_ids;
+  if (mode != DescTrackingMode::kOpticalFlowOnly) {
+    CHECK(not ref_frame->descriptors_.empty());
+    CHECK(not cur_frame->descriptors_.empty());
 
-  VLOG(1) << "Feature tracking: "
-          << "ref_frame.id_: " << ref_frame->id_
-          << ", cur_frame.id_: " << cur_frame->id_
-          << ", Nr tracked keypoints: " << matches.size();
+    auto time_desc_tic = utils::Timer::tic();
+    feature_tracker_->trackDesc(
+        ref_frame, cur_frame, H, tracker_params_.search_radius_, {}, &matches);
+    VLOG(1) << "Descriptor tracking timing [ms]: "
+            << utils::Timer::toc(time_desc_tic).count();
+    VLOG(2) << "Finished descriptor tracking.";
+
+    VLOG(1) << "Feature tracking: "
+            << "ref_frame.id_: " << ref_frame->id_
+            << ", cur_frame.id_: " << cur_frame->id_
+            << ", Nr tracked keypoints: " << matches.size();
+
+    ref_lmk_ids = std::set<LandmarkId>(ref_frame->landmarks_.begin(),
+                                       ref_frame->landmarks_.end());
+  }
 
   std::set<LandmarkId> tracked_lmk_ids;
 
-  cv::flann::KDTreeIndexParams kdtree_params(5);
-  cv::Mat ref_kp_mat(ref_frame->keypoints_.size(), 2, CV_32F);
-  for (size_t i = 0; i < ref_frame->keypoints_.size(); ++i) {
-    ref_kp_mat.at<float>(i, 0) = ref_frame->keypoints_[i].x;
-    ref_kp_mat.at<float>(i, 1) = ref_frame->keypoints_[i].y;
-  }
-  std::set<LandmarkId> ref_lmk_ids(ref_frame->landmarks_.begin(),
-                                   ref_frame->landmarks_.end());
-
-  double min_score = std::numeric_limits<double>::max();
-  double max_score = std::numeric_limits<double>::lowest();
-
-  // copying optical flow tracks of features that are not tracked by matcher
-  // already
-  if (tracker_params_.copy_optical_flow_tracks_) {
+  // --- Phase 2: copy optical-flow tracks ------------------------------------
+  if (mode != DescTrackingMode::kDescriptorOnly) {
     for (size_t i = 0; i < ref_frame->of_keypoints_.size(); ++i) {
       auto ref_lmk_id = ref_frame->of_landmarks_.at(i);
       if (ref_lmk_id == -1) {
@@ -1634,6 +1626,10 @@ void Tracker::featureTrackingDesc(
       }
     }
   }
+
+  // --- Phase 3: process descriptor matches ----------------------------------
+  double min_score = std::numeric_limits<double>::max();
+  double max_score = std::numeric_limits<double>::lowest();
 
   for (auto match : matches) {
     auto ref_i = match.queryIdx;

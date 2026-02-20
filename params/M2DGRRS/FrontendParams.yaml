@@ -117,8 +117,6 @@ optical_flow_downsample_scale: 1
 
 xfeat_use_of_points: 1
 
-copy_optical_flow_tracks: 1
-
 # ============================================================================
 # Dense Stereo Depth Estimation Parameters
 # ============================================================================
@@ -189,3 +187,5 @@ opencv_of_quality_level: 0.01
 opencv_of_min_distance: 10.0
 opencv_of_use_fwd_bwd_check: false # this runs too slow
 opencv_of_fwd_bwd_threshold: 1.0
+
+desc_tracking_mode: 2

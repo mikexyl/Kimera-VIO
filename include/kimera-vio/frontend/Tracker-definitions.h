@@ -187,4 +187,19 @@ typedef std::pair<KeypointsCV, KeypointScores> KeypointsWithScores;
 typedef std::pair<size_t, size_t> KeypointMatch;
 typedef std::vector<std::pair<size_t, size_t>> KeypointMatches;
 
+/**
+ * @brief Controls which phases of featureTrackingDesc are executed.
+ *
+ * kOpticalFlowOnly  — Copy optical-flow tracks into the current frame;
+ *                     skip descriptor-based matching entirely.
+ * kDescriptorOnly   — Run descriptor-based matching only; do not copy
+ *                     optical-flow tracks.
+ * kBoth             — Run descriptor matching and then copy OF tracks.
+ */
+enum class DescTrackingMode {
+  kOpticalFlowOnly = 0,
+  kDescriptorOnly  = 1,
+  kBoth            = 2,
+};
+
 } // End of VIO namespace.

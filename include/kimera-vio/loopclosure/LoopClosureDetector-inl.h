@@ -506,16 +506,25 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::
               cv::Scalar(0, 255, 0),
               2);
 
-  output_payload->setFrameInformation(keypoints_2d,
-                                      filtered_landmarks,
-                                      filtered_bearing_vectors,
-                                      bow_vec,
-                                      filtered_descriptors_mat);
-  output_payload->landmarks_ = landmark_manager_->getLandmarks();
-  output_payload->timestamp_map_ = timestamp_map_;
-  output_payload->covis_graph_ = landmark_manager_->getCovisGraph();
-  output_payload->timestamp_kf_ = curr_frame->timestamp_;
-  output_payload->T_base_cam_ = B_Pose_Cam_;
+  // TODO(mikexyl): this logic doesn't cut bandwidth use, because the frames
+  // without global descriptors won't be requested between robots anyways. but
+  // we still keep it here since it can reduce self robot memory use
+  if (not lcd_params_.publish_only_sequence_ or (not bow_vec.empty())) {
+    output_payload->setFrameInformation(keypoints_2d,
+                                        filtered_landmarks,
+                                        filtered_bearing_vectors,
+                                        bow_vec,
+                                        filtered_descriptors_mat);
+    output_payload->landmarks_ = landmark_manager_->getLandmarks();
+    output_payload->timestamp_map_ = timestamp_map_;
+    output_payload->covis_graph_ = landmark_manager_->getCovisGraph();
+    output_payload->timestamp_kf_ = curr_frame->timestamp_;
+    output_payload->T_base_cam_ = B_Pose_Cam_;
+  } else if (lcd_params_.publish_only_sequence_) {
+    output_payload->timestamp_kf_ = curr_frame->timestamp_;
+    output_payload->timestamp_map_ = timestamp_map_;
+    output_payload->T_base_cam_ = B_Pose_Cam_;
+  }
 
   // Frame cache statistics
   output_payload->frame_cache_memory_bytes_ = cache_.getMemoryUsage();

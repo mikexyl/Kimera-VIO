@@ -90,7 +90,8 @@ class Tracker {
                            const gtsam::Rot3& inter_frame_rotation,
                            const FeatureDetectorParams& feature_detector_params,
                            std::optional<cv::Mat> R = std::nullopt,
-                           bool invalidate_landmarks = true);
+                           bool invalidate_landmarks = true,
+                           DescTrackingMode mode = DescTrackingMode::kBoth);
 
   /**
    * @brief updateMap Updates the map of landmarks in the time horizon of

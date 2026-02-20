@@ -152,6 +152,11 @@ class LoopClosureDetectorParams : public PipelineParams {
 
   int network_input_width_ = 320;
   int network_input_height_ = 224;
+
+  //! When the BoW vector is empty (no global descriptor), publish a minimal
+  //! output payload so downstream modules do not stall. Set to false to
+  //! suppress the output entirely for frames without a descriptor.
+  bool publish_only_sequence_ = true;
 };
 
 }  // namespace VIO

@@ -313,7 +313,8 @@ StatusMonoMeasurementsPtr MonoVisionImuFrontend::processFrame(
                                   {},
                                   frontend_params_.feature_detector_params_,
                                   std::nullopt,
-                                  false);
+                                  false,
+                                  tracker_->tracker_params_.desc_tracking_mode_);
 
     CHECK_EQ(mono_frame_k_->keypoints_.size(), mono_frame_k_->scores_.size());
 
@@ -366,7 +367,8 @@ StatusMonoMeasurementsPtr MonoVisionImuFrontend::processFrame(
                                       {},
                                       frontend_params_.feature_detector_params_,
                                       std::nullopt,
-                                      false);
+                                      false,
+                                      tracker_->tracker_params_.desc_tracking_mode_);
       }
     }
 
