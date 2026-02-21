@@ -19,6 +19,7 @@
 #include "kimera-vio/backend/VioBackend-definitions.h"
 #include "kimera-vio/frontend/Camera.h"
 #include "kimera-vio/frontend/Frame.h"
+#include "kimera-vio/frontend/edge-selection/EdgeSelection.h"
 #include "kimera-vio/frontend/MonoImuSyncPacket.h"
 #include "kimera-vio/frontend/MonoVisionImuFrontend-definitions.h"
 #include "kimera-vio/frontend/VisionImuFrontend.h"
@@ -102,6 +103,11 @@ class MonoVisionImuFrontend : public VisionImuFrontend {
   // Last keyframe
   Frame::Ptr mono_frame_lkf_;
   std::deque<Frame::Ptr> mono_frames_{};
+  // Body-in-world pose from the backend at the time each keyframe was stored.
+  // One entry per element of mono_frames_ (maintained in sync).
+  std::deque<gtsam::Pose3> kf_poses_{};
+  // Parameters for the golden edge selection algorithm.
+  EdgeSelectionParams edge_selection_params_{};
 
   gtsam::Rot3 keyframe_R_ref_frame_;
 

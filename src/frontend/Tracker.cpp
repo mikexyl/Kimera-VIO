@@ -1575,6 +1575,13 @@ void Tracker::featureTrackingDesc(
 
   LOG_IF(ERROR, px_ref.size() == 0u) << "No keypoints in reference frame!";
 
+  // skip if reference frame has no keypoints
+  if (ref_frame->descriptors_.empty()) {
+    VLOG(1) << "Skipping feature tracking because one of the frames has no "
+               "descriptors.";
+    return;
+  }
+
   // --- Phase 1: descriptor-based matching -----------------------------------
   DMatchVec matches;
   std::set<LandmarkId> ref_lmk_ids;

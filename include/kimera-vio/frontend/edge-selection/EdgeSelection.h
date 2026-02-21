@@ -18,6 +18,7 @@
 #include <glog/logging.h>
 #include <gtsam/geometry/Pose3.h>
 
+#include <optional>
 #include <vector>
 
 #include "kimera-vio/common/vio_types.h"
@@ -34,14 +35,14 @@ namespace VIO {
  */
 struct EdgeSelectionParams {
   //! Maximum baseline distance [m] between camera centres for a feasible match.
-  double max_depth_range = 10.0;
+  double max_depth_range = 20.0;
 
   //! Minimum cosine of the angle between principal camera Z-axes.
-  //! Default cos(60°) = 0.5 — pairs whose viewing directions diverge by more
-  //! than 60° are considered geometrically infeasible.
+  //! Default cos(120°) = -0.5 — pairs whose viewing directions diverge by more
+  //! than 120° are considered geometrically infeasible.
   //! Setting this to exactly 1.0 restricts matches to perfectly parallel
   //! cameras; the division-by-zero that would result is handled internally.
-  double min_cos_angle = 0.5;
+  double min_cos_angle = -0.5;
 
   //! Camera-in-body extrinsic transform (B_T_C).
   //! In Kimera-VIO the poses stored in KeyframeNode are IMU body poses
@@ -142,16 +143,22 @@ class EdgeSelection {
    *       expected_gain = calculateOverlapProbability(i,j) × (v₂ᵢ − v₂ⱼ)²
    *  4. Return the pair with the highest expected gain.
    *
-   * @param window     Ordered list of keyframes in the sliding window.
-   * @param adjacency  N×N symmetric adjacency matrix of the current pose graph.
-   *                   Entry (i,j) > 0 means an edge already exists.
-   * @param params     Algorithm parameters.
-   * @return           Best EdgeCandidate; isValid() == false if none found.
+   * @param window        Ordered list of keyframes in the sliding window.
+   * @param adjacency     N×N symmetric adjacency matrix of the current pose
+   *                      graph. Entry (i,j) > 0 means an edge already exists.
+   * @param params        Algorithm parameters.
+   * @param required_node If set, only candidate pairs that include this
+   *                      zero-based node index are considered. Useful when the
+   *                      caller wants to anchor one endpoint (e.g. the current
+   *                      keyframe) without manipulating the adjacency matrix.
+   *                      Out-of-range values are ignored with a warning.
+   * @return              Best EdgeCandidate; isValid() == false if none found.
    */
   static EdgeCandidate selectGoldenEdge(
       const SlidingWindow& window,
       const Eigen::MatrixXd& adjacency,
-      const EdgeSelectionParams& params = EdgeSelectionParams{});
+      const EdgeSelectionParams& params = EdgeSelectionParams{},
+      std::optional<int> required_node = std::nullopt);
 
  private:
   /**
@@ -245,13 +252,23 @@ inline Eigen::VectorXd EdgeSelection::computeFiedlerVector(
 inline EdgeCandidate EdgeSelection::selectGoldenEdge(
     const SlidingWindow& window,
     const Eigen::MatrixXd& adjacency,
-    const EdgeSelectionParams& params) {
+    const EdgeSelectionParams& params,
+    std::optional<int> required_node) {
 
   const int N = static_cast<int>(window.size());
   DCHECK_EQ(static_cast<int>(adjacency.rows()), N)
       << "Adjacency matrix row count must match the sliding window size.";
   DCHECK_EQ(static_cast<int>(adjacency.cols()), N)
       << "Adjacency matrix must be square.";
+
+  // Validate required_node if provided.
+  if (required_node.has_value() &&
+      (*required_node < 0 || *required_node >= N)) {
+    LOG(WARNING) << "EdgeSelection::selectGoldenEdge: required_node "
+                 << *required_node << " is out of range [0, " << N
+                 << "); ignoring.";
+    required_node = std::nullopt;
+  }
 
   EdgeCandidate best_edge;
   double max_expected_gain = -1.0;
@@ -275,6 +292,12 @@ inline EdgeCandidate EdgeSelection::selectGoldenEdge(
   // ---- Step 3: Evaluate all non-adjacent candidate pairs --------------------
   for (int i = 0; i < N; ++i) {
     for (int j = i + 1; j < N; ++j) {
+
+      // If a required node is set, skip pairs that don't include it.
+      if (required_node.has_value() &&
+          i != *required_node && j != *required_node) {
+        continue;
+      }
 
       // Skip pairs that already share a pose-graph edge.
       if (adjacency(i, j) > 0.0) {

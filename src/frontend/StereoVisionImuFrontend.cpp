@@ -319,6 +319,7 @@ void StereoVisionImuFrontend::processFirstStereoFrame(
   // Prepare for next iteration.
   stereoFrame_km1_ = stereoFrame_k_;
   stereoFrame_lkf_ = stereoFrame_k_;
+  kf_poses_.push_back(gtsam::Pose3());  // identity pose for bootstrap frame
   stereo_frames_.push_back(stereoFrame_k_);
   stereoFrame_k_.reset();
   ++frame_count_;
@@ -398,13 +399,14 @@ StatusStereoMeasurementsPtr StereoVisionImuFrontend::processStereoFrame(
                                         std::nullopt,
                                         &stereoFrame_km1_->left_frame_);
 
-    tracker_->featureTrackingDesc(&stereoFrame_lkf_->left_frame_,
-                                  &stereoFrame_k_->left_frame_,
-                                  {},
-                                  frontend_params_.feature_detector_params_,
-                                  std::nullopt,
-                                  true,
-                                  tracker_->tracker_params_.desc_tracking_mode_);
+    tracker_->featureTrackingDesc(
+        &stereoFrame_lkf_->left_frame_,
+        &stereoFrame_k_->left_frame_,
+        {},
+        frontend_params_.feature_detector_params_,
+        std::nullopt,
+        true,
+        tracker_->tracker_params_.desc_tracking_mode_);
 
     double sparse_stereo_time = 0;
     if (frontend_params_.useRANSAC_) {
@@ -495,11 +497,7 @@ StatusStereoMeasurementsPtr StereoVisionImuFrontend::processStereoFrame(
                           nav_state ? nav_state->pose_ : gtsam::Pose3()});
       }
 
-      // Build the N×N adjacency matrix.
-      // - All pairs:        weight = min(shared_tracks / 200, 1.0)
-      // - Historical↔historical with weight==0: forced to 1.0 so
-      //   selectGoldenEdge skips them, restricting candidates to edges
-      //   that include the current keyframe.
+      // Build the N×N adjacency matrix from covisibility (shared tracks).
       static constexpr double kCovisNorm = 200.0;
       const int N = static_cast<int>(window.size());
       Eigen::MatrixXd adjacency = Eigen::MatrixXd::Zero(N, N);
@@ -513,19 +511,15 @@ StatusStereoMeasurementsPtr StereoVisionImuFrontend::processStereoFrame(
           if (shared > 0.0) {
             adjacency(i, j) = adjacency(j, i) =
                 std::min(shared / kCovisNorm, 1.0);
-          } else if (i != cur_idx && j != cur_idx) {
-            // No shared tracks between two historical KFs: treat the pair as
-            // already connected so selectGoldenEdge ignores it.
-            adjacency(i, j) = adjacency(j, i) = 1.0;
           }
-          // Current-frame pair with no shared tracks: stays 0 → candidate.
         }
       }
 
       // Select the edge with the highest expected Fiedler gain.
-      // By construction the winner always involves cur_idx.
+      // required_node=cur_idx restricts candidates to pairs that include
+      // the current keyframe, without needing to manipulate the adjacency matrix.
       const EdgeCandidate best_edge = EdgeSelection::selectGoldenEdge(
-          window, adjacency, edge_selection_params_);
+          window, adjacency, edge_selection_params_, cur_idx);
 
       if (best_edge.isValid()) {
         CHECK(best_edge.id_i == cur_idx or best_edge.id_j == cur_idx);
@@ -533,13 +527,13 @@ StatusStereoMeasurementsPtr StereoVisionImuFrontend::processStereoFrame(
             (best_edge.id_i == cur_idx) ? best_edge.id_j : best_edge.id_i;
         LOG(INFO) << "golden edge between curr " << stereoFrame_k_->id_
                   << " and past " << stereo_frames_.at(hist_idx)->id_;
-        tracker_->featureTrackingDesc(&stereoFrame_k_->left_frame_,
-                                      &stereo_frames_.at(hist_idx)->left_frame_,
+        tracker_->featureTrackingDesc(&stereo_frames_.at(hist_idx)->left_frame_,
+                                      &stereoFrame_k_->left_frame_,
                                       {},
                                       frontend_params_.feature_detector_params_,
                                       std::nullopt,
                                       false,
-                                      tracker_->tracker_params_.desc_tracking_mode_);
+                                      DescTrackingMode::kDescriptorOnly);
       }
     }
 

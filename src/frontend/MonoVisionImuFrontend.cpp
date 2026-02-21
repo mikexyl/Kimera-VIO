@@ -15,6 +15,7 @@
 #include "kimera-vio/frontend/MonoVisionImuFrontend.h"
 
 #include <memory>
+#include <unordered_set>
 
 #include "kimera-vio/frontend/MonoVisionImuFrontend-definitions.h"
 #include "kimera-vio/frontend/feature-tracker/VilibTracker.h"
@@ -244,12 +245,31 @@ void MonoVisionImuFrontend::processFirstFrame(const Frame& first_frame) {
 
   VLOG(1) << "first frame has: " << mono_frame_k_->keypoints_.size()
           << " keypoints and " << n_lmk << " landmarks.";
+  // kf_poses_ must stay in sync with mono_frames_ (one entry per frame).
+  // The backend has not produced a nav-state yet at bootstrap time, so store
+  // an identity pose placeholder; it does not affect Fiedler geometry because
+  // the golden edge is skipped while only one historical KF exists.
+  kf_poses_.push_back(gtsam::Pose3());
   mono_frames_.push_back(mono_frame_k_);
   mono_frame_lkf_ = mono_frame_k_;
   mono_frame_k_.reset();
   ++frame_count_;
 
   imu_frontend_->resetIntegrationWithCachedBias();
+}
+
+static size_t countSharedTracks(const Frame& frame_i, const Frame& frame_j) {
+  if (frame_i.landmarks_.empty() || frame_j.landmarks_.empty()) return 0u;
+  std::unordered_set<LandmarkId> ids_i;
+  ids_i.reserve(frame_i.landmarks_.size());
+  for (const LandmarkId id : frame_i.landmarks_) {
+    if (id != -1) ids_i.insert(id);
+  }
+  size_t count = 0u;
+  for (const LandmarkId id : frame_j.landmarks_) {
+    if (id != -1 && ids_i.count(id)) ++count;
+  }
+  return count;
 }
 
 StatusMonoMeasurementsPtr MonoVisionImuFrontend::processFrame(
@@ -308,13 +328,14 @@ StatusMonoMeasurementsPtr MonoVisionImuFrontend::processFrame(
     mono_camera_->undistortKeypoints(mono_frame_k_->keypoints_,
                                      &mono_frame_k_->keypoints_undistorted_);
 
-    tracker_->featureTrackingDesc(mono_frame_lkf_.get(),
-                                  mono_frame_k_.get(),
-                                  {},
-                                  frontend_params_.feature_detector_params_,
-                                  std::nullopt,
-                                  false,
-                                  tracker_->tracker_params_.desc_tracking_mode_);
+    tracker_->featureTrackingDesc(
+        mono_frame_lkf_.get(),
+        mono_frame_k_.get(),
+        {},
+        frontend_params_.feature_detector_params_,
+        std::nullopt,
+        false,
+        tracker_->tracker_params_.desc_tracking_mode_);
 
     CHECK_EQ(mono_frame_k_->keypoints_.size(), mono_frame_k_->scores_.size());
 
@@ -343,32 +364,65 @@ StatusMonoMeasurementsPtr MonoVisionImuFrontend::processFrame(
     // find the best (least tracked) keyframe to run matcher
     if (tracker_status_summary_.kfTrackingStatus_mono_ !=
         TrackingStatus::LOW_DISPARITY) {
-      Frame::Ptr best_kf_to_rematch = nullptr;
-      if (not mono_frames_.empty()) {
-        size_t n_total_points = mono_frame_k_->keypoints_.size();
-        for (auto kf = mono_frames_.rbegin(); kf != mono_frames_.rend(); ++kf) {
-          KeypointMatches matches_ref_cur;
-          tracker_->findMatchingKeypoints(
-              **kf, *mono_frame_k_, &matches_ref_cur);
-          if (matches_ref_cur.size() <
-              n_total_points * frontend_params_.rematch_threshold_) {
-            best_kf_to_rematch = *kf;
-            break;
+      // Select the golden edge: among all connections FROM the current frame
+      // to a historical keyframe in the sliding window, find the one that
+      // maximises the expected pose-graph algebraic connectivity gain
+      // E[Δλ₂] = p_ij · (v₂ᵢ − v₂ⱼ)².
+      if (!mono_frames_.empty()) {
+        // Build the SlidingWindow: historical KFs first, current frame last.
+        SlidingWindow window;
+        window.reserve(mono_frames_.size() + 1);
+        for (size_t idx = 0; idx < mono_frames_.size(); ++idx) {
+          window.push_back({mono_frames_[idx]->id_, kf_poses_[idx]});
+        }
+        const int cur_idx = static_cast<int>(window.size());
+        {
+          const auto nav_state = getLatestNavStateFromBackend();
+          window.push_back({mono_frame_k_->id_,
+                            nav_state ? nav_state->pose_ : gtsam::Pose3()});
+        }
+
+        // Build the N×N adjacency matrix from covisibility (shared tracks).
+        static constexpr double kCovisNorm = 200.0;
+        const int N = static_cast<int>(window.size());
+        Eigen::MatrixXd adjacency = Eigen::MatrixXd::Zero(N, N);
+        for (int i = 0; i < N; ++i) {
+          for (int j = i + 1; j < N; ++j) {
+            const Frame& fi =
+                (i == cur_idx) ? *mono_frame_k_ : *mono_frames_[i];
+            const Frame& fj =
+                (j == cur_idx) ? *mono_frame_k_ : *mono_frames_[j];
+            const double shared =
+                static_cast<double>(countSharedTracks(fi, fj));
+            if (shared > 0.0) {
+              adjacency(i, j) = adjacency(j, i) =
+                  std::min(shared / kCovisNorm, 1.0);
+            }
           }
         }
-        if (not best_kf_to_rematch) {
-          best_kf_to_rematch = mono_frames_.front();
-        }
-      }
 
-      if (best_kf_to_rematch) {
-        tracker_->featureTrackingDesc(best_kf_to_rematch.get(),
-                                      mono_frame_k_.get(),
-                                      {},
-                                      frontend_params_.feature_detector_params_,
-                                      std::nullopt,
-                                      false,
-                                      tracker_->tracker_params_.desc_tracking_mode_);
+        // Select the edge with the highest expected Fiedler gain.
+        // required_node=cur_idx restricts candidates to pairs that include
+        // the current frame, without needing to manipulate the adjacency matrix.
+        const EdgeCandidate best_edge = EdgeSelection::selectGoldenEdge(
+            window, adjacency, edge_selection_params_, cur_idx);
+
+        if (best_edge.isValid()) {
+          CHECK(best_edge.id_i == cur_idx || best_edge.id_j == cur_idx);
+          const int hist_idx =
+              (best_edge.id_i == cur_idx) ? best_edge.id_j : best_edge.id_i;
+          // ref_frame (arg1) must own the descriptors: use the historical KF.
+          // cur_frame (arg2) is the current frame that receives the
+          // associations.
+          tracker_->featureTrackingDesc(
+              mono_frames_.at(hist_idx).get(),
+              mono_frame_k_.get(),
+              {},
+              frontend_params_.feature_detector_params_,
+              std::nullopt,
+              false,
+              DescTrackingMode::kDescriptorOnly);
+        }
       }
     }
 
@@ -400,11 +454,15 @@ StatusMonoMeasurementsPtr MonoVisionImuFrontend::processFrame(
 
     if (tracker_status_summary_.kfTrackingStatus_mono_ ==
         TrackingStatus::VALID) {
+      // Record the best available body pose for this keyframe from the backend.
+      const auto nav_state = getLatestNavStateFromBackend();
+      kf_poses_.push_back(nav_state ? nav_state->pose_ : gtsam::Pose3());
       mono_frames_.push_back(mono_frame_k_);
     }
     if (mono_frames_.size() >
         static_cast<size_t>(frontend_params_.kf_queue_size_)) {
       mono_frames_.pop_front();
+      kf_poses_.pop_front();
     }
     mono_frame_lkf_ = mono_frame_k_;
 
