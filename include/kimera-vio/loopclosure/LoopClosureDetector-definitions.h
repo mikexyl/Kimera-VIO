@@ -332,7 +332,8 @@ struct LcdInput : public PipelinePayload {
            const gtsam::Values& backend_states = gtsam::Values(),
            const PointsWithIdMap& landmark_in_window = PointsWithIdMap(),
            const LmkIdToNumObsMap& lmk_num_observations = {},
-           const LmkIdToResidualMap& lmk_smart_factor_residuals = {})
+           const LmkIdToResidualMap& lmk_smart_factor_residuals = {},
+           const gtsam::Pose3& T_W_B = gtsam::Pose3())
       : PipelinePayload(timestamp),
         frontend_output_(frontend_output),
         cur_kf_id_(cur_kf_id),
@@ -342,7 +343,8 @@ struct LcdInput : public PipelinePayload {
         W_Pose_smoother_(W_Pose_smoother),
         backend_states_(backend_states),
         lmk_num_observations_(lmk_num_observations),
-        lmk_smart_factor_residuals_(lmk_smart_factor_residuals) {
+        lmk_smart_factor_residuals_(lmk_smart_factor_residuals),
+        T_W_B_(T_W_B) {
     CHECK(frontend_output);
     CHECK_EQ(timestamp, frontend_output->timestamp_);
   }
@@ -356,6 +358,7 @@ struct LcdInput : public PipelinePayload {
   const gtsam::Values backend_states_;
   const LmkIdToNumObsMap lmk_num_observations_;
   const LmkIdToResidualMap lmk_smart_factor_residuals_;
+  const gtsam::Pose3 T_W_B_;
 };
 
 }  // namespace VIO

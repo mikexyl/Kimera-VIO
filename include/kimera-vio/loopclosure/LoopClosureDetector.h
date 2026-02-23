@@ -485,14 +485,14 @@ class LoopClosureDetector : public LoopClosureDetectorBase {
     auto frame = cache_.getFrame(frame_id);
     if (frame) {
       // remove all old landmarks outside the covisibility window
-      if (landmark_manager_->getCovisGraph().count(frame_id)) {
-        auto covis_frames = landmark_manager_->getCovisGraph().at(frame_id);
-        auto oldest_covis_frame =
-            *std::min_element(covis_frames.begin(), covis_frames.end());
-        landmark_manager_->removeLandmarksUntil(oldest_covis_frame);
-      } else {
-        landmark_manager_->removeLandmarksUntil(frame_id);
-      }
+      // if (landmark_manager_->getCovisGraph().count(frame_id)) {
+      //   auto covis_frames = landmark_manager_->getCovisGraph().at(frame_id);
+      //   auto oldest_covis_frame =
+      //       *std::min_element(covis_frames.begin(), covis_frames.end());
+      //   landmark_manager_->removeLandmarksUntil(oldest_covis_frame);
+      // } else {
+      //   landmark_manager_->removeLandmarksUntil(frame_id);
+      // }
       cache_.removeFrame(frame_id);
     } else {
       LOG(WARNING) << "LoopClosureDetector: Attempted to clean frame with ID "
@@ -516,7 +516,8 @@ class LoopClosureDetector : public LoopClosureDetectorBase {
     }
   }
 
-  void updatePoseGraph(const gtsam::Values& values);
+  void updatePoseGraph(const gtsam::Values& smoother_states,
+                       const gtsam::Pose3& T_W_B);
 
  protected:
   enum class LcdState {

@@ -87,6 +87,7 @@ VioBackend::VioBackend(const gtsam::Pose3& B_Pose_leftCamRect,
       W_Vel_B_lkf_(gtsam::Vector3::Zero()),
       W_Pose_B_lkf_from_increments_(gtsam::Pose3()),
       W_Pose_B_lkf_from_state_(gtsam::Pose3()),
+      T_W_B_(gtsam::Pose3()),
       imu_bias_prev_kf_(ImuBias()),
       B_Pose_leftCamRect_(B_Pose_leftCamRect),
       stereo_cal_(stereo_calibration),
@@ -233,7 +234,8 @@ BackendOutput::UniquePtr VioBackend::spinOnce(const BackendInput& input) {
         lmks_in_local_window_with_stats.points,
         W_P_smoother,
         lmks_in_local_window_with_stats.num_observations,
-        lmks_in_local_window_with_stats.residuals);
+        lmks_in_local_window_with_stats.residuals,
+        T_W_B_);
 
     if (logger_) {
       logger_->logBackendOutput(*output_payload);
@@ -1306,7 +1308,8 @@ bool VioBackend::optimize(
 void VioBackend::addInitialPriorFactors(const FrameId& frame_id) {
   // Set initial covariance for inertial factors
   // W_Pose_Blkf_ set by motion capture to start with
-  Matrix3 B_Rot_W = W_Pose_B_lkf_from_state_.rotation().matrix().transpose();
+  auto B_Rot_W = W_Pose_B_lkf_from_state_.rotation().matrix().transpose();
+  T_W_B_ = W_Pose_B_lkf_from_state_;
 
   // Set initial pose uncertainty: constrain mainly position and global yaw.
   // roll and pitch is observable, therefore low variance.

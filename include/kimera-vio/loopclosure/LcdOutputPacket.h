@@ -84,6 +84,7 @@ struct LcdOutput : PipelinePayload {
   cv::Mat descriptors_mat_;
   FrameIDTimestampMap timestamp_map_;
   Pose3 T_base_cam_;
+  Pose3 T_world_odom_;
 
   Landmarks landmarks_;
   std::map<FrameId, FrameIdSet> covis_graph_;

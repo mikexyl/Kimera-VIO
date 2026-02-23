@@ -187,3 +187,5 @@ opencv_of_quality_level: 0.01
 opencv_of_min_distance: 30.0
 opencv_of_use_fwd_bwd_check: false # this runs too slow
 opencv_of_fwd_bwd_threshold: 1.0
+
+desc_tracking_mode: 0

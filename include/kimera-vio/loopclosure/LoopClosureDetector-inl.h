@@ -201,7 +201,7 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::spinOnce(
 
   computeSequenceGlobalDesc(lcd_frame_id, add_frame_to_sequence);
 
-  updatePoseGraph(input.backend_states_);
+  updatePoseGraph(input.backend_states_, input.T_W_B_);
 
   if (lcd_frame_id < static_cast<FrameId>(lcd_params_.local_window_size_)) {
     FrameId clean_frames_until_id =
@@ -234,18 +234,21 @@ LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::spinOnce(
 
 template <typename Database, typename FeatureDetector, typename FeatureMatcher>
 void LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::
-    updatePoseGraph(const gtsam::Values& values) {
+    updatePoseGraph(const gtsam::Values& smoother_states,
+                    const gtsam::Pose3& T_W_B) {
   // extract odometry measurements from values
-  for (auto const& [key, value] : values) {
+  for (auto const& [key, value] : smoother_states) {
     gtsam::Key pose_key(key);
     if (gtsam::symbolChr(pose_key) != 'x') {
       continue;
     }
     gtsam::Symbol next_key('x', gtsam::symbolIndex(pose_key) + 1);
-    if (values.exists(pose_key) && values.exists(next_key)) {
-      gtsam::Pose3 pose = values.at<gtsam::Pose3>(pose_key),
-                   next_pose = values.at<gtsam::Pose3>(next_key),
-                   T_pose_next = pose.inverse() * next_pose;
+    if (smoother_states.exists(pose_key) && smoother_states.exists(next_key)) {
+      gtsam::Pose3 pose = smoother_states.at<gtsam::Pose3>(pose_key),
+                   next_pose = smoother_states.at<gtsam::Pose3>(next_key),
+                   T_pose_next =
+                       //  T_W_B * pose.inverse() * next_pose * T_W_B.inverse();
+                   pose.inverse() * next_pose;
       gtsam::Key pose_id = gtsam::symbolIndex(pose_key), next_id = pose_id + 1;
       // build between factor
       gtsam::BetweenFactor<gtsam::Pose3>::shared_ptr factor(
@@ -255,7 +258,7 @@ void LoopClosureDetector<Database, FeatureDetector, FeatureMatcher>::
     }
   }
 
-  for (auto const& [key, value] : values) {
+  for (auto const& [key, value] : smoother_states) {
     if (gtsam::symbolChr(key) != 'x') continue;
     pg_values_.insert_or_assign(gtsam::symbolIndex(key), value);
   }

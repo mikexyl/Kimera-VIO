@@ -517,6 +517,7 @@ class VioBackend {
   Pose3
       W_Pose_B_lkf_from_state_;  //!< Body pose at at k-1 in world coordinates,
                                  //!< straight from VIO smoother_.
+  Pose3 T_W_B_;  //!< Rotation from world to body frame at last keyframe.
 
   ImuBias imu_bias_prev_kf_;  //!< bias estimate at previous keyframe
 

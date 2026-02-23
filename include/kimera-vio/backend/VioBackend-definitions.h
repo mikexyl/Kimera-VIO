@@ -324,7 +324,8 @@ struct BackendOutput : public PipelinePayload {
                 const PointsWithIdMap& landmarks_in_local_window = {},
                 const gtsam::Pose3& W_Pose_smoother = gtsam::Pose3(),
                 const LmkIdToNumObsMap& lmk_num_observations = {},
-                const LmkIdToResidualMap& lmk_smart_factor_residuals = {})
+                const LmkIdToResidualMap& lmk_smart_factor_residuals = {},
+                const Matrix3& B_Rot_W = Matrix3::Identity())
       : PipelinePayload(timestamp_kf),
         W_State_Blkf_(timestamp_kf, W_Pose_Blkf, W_Vel_Blkf, imu_bias_lkf),
         state_(state),
@@ -338,7 +339,8 @@ struct BackendOutput : public PipelinePayload {
         lmk_id_to_lmk_type_map_(lmk_id_to_lmk_type_map),
         W_Pose_smoother_(W_Pose_smoother),
         lmk_num_observations_(lmk_num_observations),
-        lmk_smart_factor_residuals_(lmk_smart_factor_residuals) {}
+        lmk_smart_factor_residuals_(lmk_smart_factor_residuals),
+        T_W_B_(B_Rot_W) {}
 
   BackendOutput(const VioNavStateTimestamped& vio_navstate_timestamped,
                 const gtsam::Values& state,
@@ -352,7 +354,8 @@ struct BackendOutput : public PipelinePayload {
                 const PointsWithIdMap& landmarks_in_local_window = {},
                 const gtsam::Pose3& W_Pose_smoother = gtsam::Pose3(),
                 const LmkIdToNumObsMap& lmk_num_observations = {},
-                const LmkIdToResidualMap& lmk_smart_factor_residuals = {})
+                const LmkIdToResidualMap& lmk_smart_factor_residuals = {},
+                const gtsam::Pose3& T_W_B = gtsam::Pose3())
       : PipelinePayload(vio_navstate_timestamped.timestamp_),
         W_State_Blkf_(vio_navstate_timestamped),
         state_(state),
@@ -366,7 +369,8 @@ struct BackendOutput : public PipelinePayload {
         lmk_id_to_lmk_type_map_(lmk_id_to_lmk_type_map),
         W_Pose_smoother_(W_Pose_smoother),
         lmk_num_observations_(lmk_num_observations),
-        lmk_smart_factor_residuals_(lmk_smart_factor_residuals) {}
+        lmk_smart_factor_residuals_(lmk_smart_factor_residuals),
+        T_W_B_(T_W_B) {}
 
   const VioNavStateTimestamped W_State_Blkf_;
   const gtsam::Values state_;
@@ -381,6 +385,8 @@ struct BackendOutput : public PipelinePayload {
   const gtsam::Pose3 W_Pose_smoother_;
   const LmkIdToNumObsMap lmk_num_observations_;
   const LmkIdToResidualMap lmk_smart_factor_residuals_;
+  const gtsam::Pose3
+      T_W_B_;  //!< Rotation from world to body frame at last keyframe.
 };
 
 ////////////////////////////////////////////////////////////////////////////////

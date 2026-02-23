@@ -67,7 +67,8 @@ LcdModule::InputUniquePtr LcdModule::getInputPacket() {
       backend_payload->state_,
       backend_payload->landmarks_in_local_window_,
       backend_payload->lmk_num_observations_,
-      backend_payload->lmk_smart_factor_residuals_);
+      backend_payload->lmk_smart_factor_residuals_,
+      backend_payload->T_W_B_);
 }
 
 }  // namespace VIO
