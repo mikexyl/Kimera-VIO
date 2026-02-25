@@ -2,111 +2,13 @@
 
 #include <cuda_runtime.h>
 #include <xfeat-cpp/faiss_database.h>
-#include <xfeat-cpp/jist_onnx.h>
+#include <xfeat-cpp/place_recognition/jist_onnx.h>
 #include <xfeat-cpp/xfeat_cv.h>
-#include <xfeat-cpp/xfeat_netvlad_onnx.h>
 
 #include "kimera-vio/loopclosure/FrameCache.h"
 #include "kimera-vio/loopclosure/LoopClosureDetector.h"
 
 namespace VIO {
-
-struct XfeatNVWrapper : xfeat::XfeatNetVLADONNX {
-  using Base = xfeat::XfeatNetVLADONNX;
-  using GlobalDesc = cv::Mat;
-  using Desc = cv::Mat;
-  using DescVector = std::vector<cv::Mat>;
-  using DescMat = cv::Mat;
-  using Database = xfeat::FaissDatabase;
-
-  template <typename... Args>
-  XfeatNVWrapper(std::unique_ptr<Database> faiss_db, Args&&... args)
-      : Base(std::forward<Args>(args)...), db_(std::move(faiss_db)) {}
-
-  // Original transform function for backward compatibility with descriptors_vec
-  void transform(const DescVector& desc_vec, GlobalDesc& global_desc) {
-    CHECK(desc_vec.size() == 2) << "XfeatNVWrapper: the feature vector must be "
-                                   "the vector of [M1, x_prep]";
-
-    auto M1 = desc_vec[0];
-    auto x_prep = desc_vec[1];
-
-    if (M1.empty()) throw std::runtime_error("XfeatNVWrapper: M1 is empty");
-    if (x_prep.empty())
-      throw std::runtime_error("XfeatNVWrapper: x_prep is empty");
-
-    if (M1.type() != CV_32F || x_prep.type() != CV_32F) {
-      throw std::runtime_error(
-          "XfeatNVWrapper: M1 and x_prep must be of type CV_32F");
-    }
-
-    // time the transform
-    global_desc = Base::transform(M1, x_prep);
-  }
-
-  // New transform function that accepts frame cache and target frame id
-  // For XfeatNetVLAD, we just retrieve the cached descriptors for the target
-  // frame
-  void transform(const FrameCache& frame_cache,
-                 const FrameId target_frame_id,
-                 GlobalDesc& global_desc) {
-    auto frame = frame_cache.getFrame(target_frame_id);
-    if (!frame) {
-      throw std::runtime_error("XfeatNVWrapper: Frame " +
-                               std::to_string(target_frame_id) +
-                               " not found in cache");
-    }
-
-    // Use the cached descriptors_vec from the frame
-    transform(frame->descriptors_vec_, global_desc);
-  }
-
-  void add(const GlobalDesc& global_desc) {
-    CHECK_NOTNULL(db_);
-    CHECK(not global_desc.empty());
-    faiss::idx_t id = id_to_desc_map_.size();
-    id_to_desc_map_.emplace(id, global_desc.clone());
-    try {
-      db_->add(global_desc);
-    } catch (const std::exception& e) {
-      LOG(ERROR) << "Failed to add to database: " << e.what();
-      throw;
-    }
-  }
-
-  template <typename... Args>
-  void search(Args&&... args) {
-    CHECK_NOTNULL(db_);
-    try {
-      db_->search(std::forward<Args>(args)...);
-    } catch (const std::exception& e) {
-      LOG(ERROR) << "Failed to search in database: " << e.what();
-      throw;
-    }
-  }
-
-  template <typename... Args>
-  auto sim(Args&&... args) {
-    try {
-      return db_->cosine_similarity(std::forward<Args>(args)...);
-    } catch (const std::exception& e) {
-      LOG(ERROR) << "Failed to compute similarity in database: " << e.what();
-      throw;
-    }
-  }
-
-  GlobalDesc get(const faiss::idx_t id) const {
-    if (id_to_desc_map_.count(id)) {
-      return id_to_desc_map_.at(id);
-    } else {
-      return GlobalDesc();  // Return an empty cv::Mat if id not found
-    }
-  }
-
- private:
-  std::unique_ptr<Database> db_;
-  std::map<faiss::idx_t, cv::Mat> id_to_desc_map_;
-};
 
 // JIST ONNX wrapper for sequence-based visual place recognition
 struct JistONNXWrapper : xfeat::JistONNX {
