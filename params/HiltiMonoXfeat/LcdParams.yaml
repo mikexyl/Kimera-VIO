@@ -90,6 +90,4 @@ min_lmk_parallax: 10
 lcd_min_matched_features: 50
 max_lmk_reproj_error: 40
 
-network_input_width: 320
-network_input_height: 224
 

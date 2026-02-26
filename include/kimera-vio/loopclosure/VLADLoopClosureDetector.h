@@ -3,44 +3,40 @@
 #include <cuda_runtime.h>
 #include <xfeat-cpp/faiss_database.h>
 #include <xfeat-cpp/place_recognition/jist_onnx.h>
+#include <xfeat-cpp/place_recognition/mixvpr_onnx.h>
+#include <xfeat-cpp/place_recognition/patchnetvlad_onnx.h>
+#include <xfeat-cpp/place_recognition/place_recognizer.h>
 #include <xfeat-cpp/xfeat_cv.h>
 
 #include "kimera-vio/loopclosure/FrameCache.h"
 #include "kimera-vio/loopclosure/LoopClosureDetector.h"
+#include "kimera-vio/loopclosure/LoopClosureDetectorParams.h"
 
 namespace VIO {
 
-// JIST ONNX wrapper for sequence-based visual place recognition
-struct JistONNXWrapper : xfeat::JistONNX {
-  using Base = xfeat::JistONNX;
+// Generic VPR wrapper: holds any PlaceRecognizer + a FAISS database.
+struct VPRONNXWrapper {
   using GlobalDesc = cv::Mat;
   using Desc = cv::Mat;
   using DescVector = std::vector<cv::Mat>;
   using DescMat = cv::Mat;
   using Database = xfeat::FaissDatabase;
 
-  template <typename... Args>
-  JistONNXWrapper(std::unique_ptr<Database> faiss_db, Args&&... args)
-      : Base(std::forward<Args>(args)...), db_(std::move(faiss_db)) {}
+  VPRONNXWrapper(std::unique_ptr<Database> faiss_db,
+                 std::unique_ptr<xfeat::PlaceRecognizer> model)
+      : model_(std::move(model)), db_(std::move(faiss_db)) {}
 
-  // Transform function now takes all cached frames and computes descriptor for
-  // target frame by using a sequence of seq_length frames ending at
-  // target_frame_id
+  int get_seq_length() const { return model_->get_seq_length(); }
+  int get_descriptor_dim() const { return model_->get_descriptor_dim(); }
+
   void transform(std::vector<LCDFrame::Ptr> frames, GlobalDesc& global_desc) {
-    const int seq_length = Base::get_seq_length();
-
-    // Collect sequence of frames for inference
     std::vector<cv::Mat> image_sequence;
-    image_sequence.reserve(seq_length);
-
-    CHECK_EQ(seq_length, frames.size());
-
+    image_sequence.reserve(frames.size());
+    CHECK_EQ(static_cast<int>(frames.size()), model_->get_seq_length());
     for (const auto& frame : frames) {
       image_sequence.push_back(frame->image_);
     }
-
-    // Run JIST inference
-    global_desc = Base::infer(image_sequence);
+    global_desc = model_->infer(image_sequence);
   }
 
   void add(const GlobalDesc& global_desc) {
@@ -81,11 +77,12 @@ struct JistONNXWrapper : xfeat::JistONNX {
     if (id_to_desc_map_.count(id)) {
       return id_to_desc_map_.at(id);
     } else {
-      return GlobalDesc();  // Return an empty cv::Mat if id not found
+      return GlobalDesc();
     }
   }
 
  private:
+  std::unique_ptr<xfeat::PlaceRecognizer> model_;
   std::unique_ptr<Database> db_;
   std::map<faiss::idx_t, cv::Mat> id_to_desc_map_;
 };
@@ -109,14 +106,14 @@ class DummyFeatureDetector : cv::FeatureDetector {
 };
 
 class VLADLoopClosureDetector
-    : public LoopClosureDetector<JistONNXWrapper,
+    : public LoopClosureDetector<VPRONNXWrapper,
                                  DummyFeatureDetector,
                                  xfeat::LighterGlueCV> {
  public:
   KIMERA_POINTER_TYPEDEFS(VLADLoopClosureDetector);
   KIMERA_DELETE_COPY_CONSTRUCTORS(VLADLoopClosureDetector);
 
-  using Database = JistONNXWrapper;
+  using Database = VPRONNXWrapper;
 
   static constexpr bool kVLADLCDUseGPU = true;
 
@@ -125,8 +122,8 @@ class VLADLoopClosureDetector
       : LoopClosureDetector(std::forward<Args>(args)...) {
     CHECK(!lcd_params_.lcd_lg_model_path_.empty())
         << "VLADLoopClosureDetector: lcd_lg_model_path_ must be set!";
-    CHECK(!lcd_params_.jist_model_path_.empty())
-        << "VLADLoopClosureDetector: jist_model_path_ must be set!";
+    CHECK(!lcd_params_.vpr_model_path_.empty())
+        << "VLADLoopClosureDetector: vpr_model_path_ must be set!";
 
     // Sparse stereo reconstruction members (only if stereo_camera is provided)
     if (stereo_camera_) {
@@ -158,6 +155,35 @@ class VLADLoopClosureDetector
             .n_kpts = lcd_params_.lcd_lg_num_features_,
         });
 
+    // Build VPR model selected by vpr_model_type_
+    std::unique_ptr<xfeat::PlaceRecognizer> vpr_model;
+    switch (lcd_params_.vpr_model_type_) {
+      case VprModelType::kMixVPR: {
+        xfeat::MixVPRONNX::Params p;
+        p.model_path = lcd_params_.vpr_model_path_;
+        p.use_gpu = kVLADLCDUseGPU;
+        p.normalize_output = true;
+        vpr_model = std::make_unique<xfeat::MixVPRONNX>(env, p);
+        break;
+      }
+      case VprModelType::kPatchNetVLAD: {
+        xfeat::PatchNetVLADONNX::Params p;
+        p.model_path = lcd_params_.vpr_model_path_;
+        p.use_gpu = kVLADLCDUseGPU;
+        p.normalize_output = true;
+        vpr_model = std::make_unique<xfeat::PatchNetVLADONNX>(env, p);
+        break;
+      }
+      default: {  // kJist
+        xfeat::JistONNX::Params p;
+        p.model_path = lcd_params_.vpr_model_path_;
+        p.use_gpu = kVLADLCDUseGPU;
+        p.normalize_output = true;
+        vpr_model = std::make_unique<xfeat::JistONNX>(env, p);
+        break;
+      }
+    }
+
     size_t free_before, total;
     cudaMemGetInfo(&free_before, &total);
 
@@ -165,7 +191,7 @@ class VLADLoopClosureDetector
     int faiss_dim = 0;
     if (lcd_params_.lcd_faiss_index_path_.empty()) {
       faiss_mode = Database::Database::IndexMode::kFlat;
-      faiss_dim = 512;
+      faiss_dim = vpr_model->get_descriptor_dim();
     }
 
     auto faiss_db = std::make_unique<Database::Database>(
@@ -176,17 +202,7 @@ class VLADLoopClosureDetector
     LOG(INFO) << "GPU memory usage for loading FAISS index: "
               << (free_before - free_after) / (1024.0 * 1024.0) << " MB";
 
-    // Initialize JIST ONNX model
-    xfeat::JistONNX::Params jist_params;
-    jist_params.model_path = lcd_params_.jist_model_path_;
-    jist_params.use_gpu = kVLADLCDUseGPU;
-    jist_params.seq_length = lcd_params_.jist_seq_length_;
-    jist_params.img_height = lcd_params_.network_input_height_;
-    jist_params.img_width = lcd_params_.network_input_width_;
-    jist_params.descriptor_dim = lcd_params_.jist_descriptor_dim_;
-    jist_params.normalize_output = true;
-
-    db_ = std::make_unique<Database>(std::move(faiss_db), env, jist_params);
+    vpr_db_ = std::make_unique<VPRONNXWrapper>(std::move(faiss_db), std::move(vpr_model));
   }
 
   /* ------------------------------------------------------------------------
@@ -289,9 +305,7 @@ class VLADLoopClosureDetector
     matches_match_query->clear();
     std::vector<cv::DMatch> matches;
 
-    // Use configured network input size for matching (width, height)
-    cv::Size image_size0(static_cast<int>(lcd_params_.network_input_width_),
-                         static_cast<int>(lcd_params_.network_input_height_));
+    cv::Size image_size0 = feature_matcher_->params_.image_size;
 
     cv::Mat ref_kp_mat(ref.keypoints_.size(), 2, CV_32F);
     for (size_t i = 0; i < ref.keypoints_.size(); ++i) {
@@ -348,6 +362,9 @@ class VLADLoopClosureDetector
 
   std::vector<LCDFrame::Ptr> new_seq_frames_;
   static size_t new_seq_id_;
+
+ private:
+  std::unique_ptr<VPRONNXWrapper> vpr_db_;
 };
 
 }  // namespace VIO

@@ -20,22 +20,22 @@ void VLADLoopClosureDetector::computeSequenceGlobalDesc(
   new_frame->seq_id_ = new_seq_id_;
   new_frame->descriptors_vec_.clear();
 
-  if ((target_frame_id % lcd_params_.jist_seq_interval_ == 0) and
+  if ((target_frame_id % lcd_params_.vpr_seq_interval_ == 0) and
       add_to_sequence) {
     new_seq_frames_.emplace_back(new_frame);
   }
 
-  // CHECK_EQ(lcd_params_.jist_seq_interval_, 1)
+  // CHECK_EQ(lcd_params_.vpr_seq_interval_, 1)
       // << "locked to 1 for now, to debug adaptive sequence";
 
   if (new_seq_frames_.size() ==
-      static_cast<size_t>(lcd_params_.jist_seq_length_)) {
+      static_cast<size_t>(vpr_db_->get_seq_length())) {
     // We have enough frames for a sequence. Proceed with loop detection.
     VLOG(2) << "VLADLoopClosureDetector: Processing sequence of size: "
             << new_seq_frames_.size() << ".";
 
     auto global_desc = cv::Mat();
-    db_->transform(new_seq_frames_, global_desc);
+    vpr_db_->transform(new_seq_frames_, global_desc);
 
     std::vector<FrameId> frame_ids;
     for (auto seq_frame : new_seq_frames_) {
@@ -65,13 +65,13 @@ void VLADLoopClosureDetector::detectLoopOutsideLocalWindow(
     FrameId* query_frame,
     FrameIdSet* global_candidates) {
   CHECK_NOTNULL(result);
-  CHECK_NOTNULL(db_);
+  CHECK_NOTNULL(vpr_db_);
   result->query_id_ = {frame_id};
   if (query_frame) {
     *query_frame = frame_id;
   }
 
-  cv::Mat global_desc = db_->get(frame_id);
+  cv::Mat global_desc = vpr_db_->get(frame_id);
   CHECK(!global_desc.empty())
       << "VLADLoopClosureDetector: Global descriptor for frame " << frame_id
       << " is empty.";
@@ -96,7 +96,7 @@ void VLADLoopClosureDetector::detectLoopOutsideLocalWindow(
   Database::Database::QueryDistances query_distance(
       top_k, std::numeric_limits<float>::max());
 
-  db_->search(global_desc, top_k, query_result, query_distance);
+  vpr_db_->search(global_desc, top_k, query_result, query_distance);
 
   // remove -1 from query_result
   for (size_t i = 0; i < query_result.size(); ++i) {
