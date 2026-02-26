@@ -1,5 +1,8 @@
 #pragma once
 
+#include <gtsam/nonlinear/LevenbergMarquardtOptimizer.h>
+#include <gtsam/nonlinear/NonlinearFactor.h>
+
 #include <cuda_runtime.h>
 #include <xfeat-cpp/faiss_database.h>
 #include <xfeat-cpp/place_recognition/jist_onnx.h>
@@ -8,7 +11,18 @@
 #include <xfeat-cpp/place_recognition/place_recognizer.h>
 #include <xfeat-cpp/xfeat_cv.h>
 
+#include "kimera-vio/frontend/RgbdCamera.h"
+#include "kimera-vio/frontend/RgbdFrame.h"
+#include "kimera-vio/frontend/StereoCamera.h"
+#include "kimera-vio/frontend/StereoFrame.h"
+#include "kimera-vio/frontend/StereoMatcher.h"
+#include "kimera-vio/frontend/Tracker.h"
+#include "kimera-vio/logging/Logger.h"
 #include "kimera-vio/loopclosure/FrameCache.h"
+#include "kimera-vio/loopclosure/LandmarkManager.h"
+#include "kimera-vio/loopclosure/LcdGridFrame.h"
+#include "kimera-vio/loopclosure/LcdOutputPacket.h"
+#include "kimera-vio/loopclosure/LcdThirdPartyWrapper.h"
 #include "kimera-vio/loopclosure/LoopClosureDetector.h"
 #include "kimera-vio/loopclosure/LoopClosureDetectorParams.h"
 
@@ -87,131 +101,53 @@ struct VPRONNXWrapper {
   std::map<faiss::idx_t, cv::Mat> id_to_desc_map_;
 };
 
-// dummy feature detector that does nothing
-class DummyFeatureDetector : cv::FeatureDetector {
- public:
-  KIMERA_POINTER_TYPEDEFS(DummyFeatureDetector);
-  KIMERA_DELETE_COPY_CONSTRUCTORS(DummyFeatureDetector);
-
-  DummyFeatureDetector() = default;
-
-  CV_WRAP void compute(cv::InputArray image,
-                       CV_OUT CV_IN_OUT std::vector<cv::KeyPoint>& keypoints,
-                       cv::OutputArray descriptors) final {}
-
-  CV_WRAP void compute(cv::InputArrayOfArrays images,
-                       CV_OUT CV_IN_OUT
-                           std::vector<std::vector<cv::KeyPoint> >& keypoints,
-                       cv::OutputArrayOfArrays descriptors) final {}
-};
-
-class VLADLoopClosureDetector
-    : public LoopClosureDetector<VPRONNXWrapper,
-                                 DummyFeatureDetector,
-                                 xfeat::LighterGlueCV> {
+class VLADLoopClosureDetector : public LoopClosureDetectorBase {
  public:
   KIMERA_POINTER_TYPEDEFS(VLADLoopClosureDetector);
   KIMERA_DELETE_COPY_CONSTRUCTORS(VLADLoopClosureDetector);
-
-  using Database = VPRONNXWrapper;
+  EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
   static constexpr bool kVLADLCDUseGPU = true;
 
-  template <typename... Args>
-  VLADLoopClosureDetector(Ort::Env& env, Args&&... args)
-      : LoopClosureDetector(std::forward<Args>(args)...) {
-    CHECK(!lcd_params_.lcd_lg_model_path_.empty())
-        << "VLADLoopClosureDetector: lcd_lg_model_path_ must be set!";
-    CHECK(!lcd_params_.vpr_model_path_.empty())
-        << "VLADLoopClosureDetector: vpr_model_path_ must be set!";
+  VLADLoopClosureDetector(
+      Ort::Env& env,
+      const LoopClosureDetectorParams& lcd_params,
+      const CameraParams& tracker_cam_params,
+      const gtsam::Pose3& B_Pose_Cam,
+      const std::optional<VIO::StereoCamera::ConstPtr>& stereo_camera,
+      const std::optional<StereoMatchingParams>& stereo_matching_params,
+      const std::optional<VIO::RgbdCamera::ConstPtr>& rgbd_camera,
+      bool log_output);
 
-    // Sparse stereo reconstruction members (only if stereo_camera is provided)
-    if (stereo_camera_) {
-      VLOG(5) << "LoopClosureDetector initializing in stereo mode.";
-      auto lcd_stereo_params = stereo_matching_params_;
-      // In LCD we set min_dist and max_dist to not discard points
-      // TODO: Find better solution instead of hardcoding
-      static const bool kVLADLCDDisableStereoMatchDepthCheck = false;
-      if (kVLADLCDDisableStereoMatchDepthCheck) {
-        lcd_stereo_params.min_point_dist_ = 0.01;
-        lcd_stereo_params.max_point_dist_ = 100.0;
-      }
-      stereo_matcher_ =
-          std::make_unique<StereoMatcher>(stereo_camera_, lcd_stereo_params);
-    } else {
-      VLOG(5) << "LoopClosureDetector initializing in mono mode.";
-    }
-
-    // should not need to run feature detection again, so the detector should be
-    // empty
-    feature_detector_.reset(new DummyFeatureDetector());
-
-    feature_matcher_ = xfeat::LighterGlueCV::create(
-        env,
-        xfeat::LighterGlueCV::Params{
-            .model_path = lcd_params_.lcd_lg_model_path_,
-            .use_gpu = true,
-            .min_score = -1,
-            .n_kpts = lcd_params_.lcd_lg_num_features_,
-        });
-
-    // Build VPR model selected by vpr_model_type_
-    std::unique_ptr<xfeat::PlaceRecognizer> vpr_model;
-    switch (lcd_params_.vpr_model_type_) {
-      case VprModelType::kMixVPR: {
-        xfeat::MixVPRONNX::Params p;
-        p.model_path = lcd_params_.vpr_model_path_;
-        p.use_gpu = kVLADLCDUseGPU;
-        p.normalize_output = true;
-        vpr_model = std::make_unique<xfeat::MixVPRONNX>(env, p);
-        break;
-      }
-      case VprModelType::kPatchNetVLAD: {
-        xfeat::PatchNetVLADONNX::Params p;
-        p.model_path = lcd_params_.vpr_model_path_;
-        p.use_gpu = kVLADLCDUseGPU;
-        p.normalize_output = true;
-        vpr_model = std::make_unique<xfeat::PatchNetVLADONNX>(env, p);
-        break;
-      }
-      default: {  // kJist
-        xfeat::JistONNX::Params p;
-        p.model_path = lcd_params_.vpr_model_path_;
-        p.use_gpu = kVLADLCDUseGPU;
-        p.normalize_output = true;
-        vpr_model = std::make_unique<xfeat::JistONNX>(env, p);
-        break;
-      }
-    }
-
-    size_t free_before, total;
-    cudaMemGetInfo(&free_before, &total);
-
-    auto faiss_mode = Database::Database::IndexMode::kIVFFlat;
-    int faiss_dim = 0;
-    if (lcd_params_.lcd_faiss_index_path_.empty()) {
-      faiss_mode = Database::Database::IndexMode::kFlat;
-      faiss_dim = vpr_model->get_descriptor_dim();
-    }
-
-    auto faiss_db = std::make_unique<Database::Database>(
-        faiss_mode, lcd_params_.lcd_faiss_index_path_, false, faiss_dim);
-
-    size_t free_after, total_after;
-    cudaMemGetInfo(&free_after, &total_after);
-    LOG(INFO) << "GPU memory usage for loading FAISS index: "
-              << (free_before - free_after) / (1024.0 * 1024.0) << " MB";
-
-    vpr_db_ = std::make_unique<VPRONNXWrapper>(std::move(faiss_db), std::move(vpr_model));
-  }
+  ~VLADLoopClosureDetector() override = default;
 
   /* ------------------------------------------------------------------------
    */
-  virtual ~VLADLoopClosureDetector() override = default;
+  /**
+   * @brief Register a loop closure between two frames in a threadsafe manner
+   */
+  LoopResult registerFrames(FrameId query_id, FrameId match_id) override;
 
-  double computeSequenceScore(const FrameId anchor_frame_id) override;
+  LcdOutput::UniquePtr spinOnce(const LcdInput& input) override;
 
-  std::optional<FrameId> getCurrentAnchorFrameId() override {
+  inline void registerIsBackendQueueFilledCallback(
+      const IsBackendQueueFilledCallback& cb) override {}
+
+  /* ------------------------------------------------------------------------
+   */
+  /** @brief Computes the indices of keypoints that match between two frames
+   * using LighterGlue.
+   */
+  void computeDescriptorMatches(const LCDFrame& ref,
+                                const LCDFrame& curr,
+                                KeypointMatches* matches_match_query,
+                                bool cut_matches = false) const;
+
+  void verifyAndRecoverPose(LoopResult* result);
+
+  double computeSequenceScore(const FrameId anchor_frame_id);
+
+  std::optional<FrameId> getCurrentAnchorFrameId() {
     if (new_seq_frames_.empty()) {
       return std::optional<FrameId>();
     } else {
@@ -220,12 +156,12 @@ class VLADLoopClosureDetector
   }
 
   void computeSequenceGlobalDesc(const FrameId target_frame_id,
-                                 bool add_to_sequence) override;
+                                 bool add_to_sequence);
 
   void detectLoop(const FrameId& frame_id,
                   LoopResult* result,
                   FrameId* query_frame = nullptr,
-                  FrameIdSet* global_candidates = nullptr) override;
+                  FrameIdSet* global_candidates = nullptr);
 
   void detectLoopOutsideLocalWindow(const FrameId& frame_id,
                                     LoopResult* result,
@@ -235,43 +171,21 @@ class VLADLoopClosureDetector
   std::optional<FrameId> findFirstFrameIdOutsideLocalWindow(
       const FrameId& frame_id) const {
     if (frame_id < static_cast<FrameId>(lcd_params_.local_window_size_)) {
-      return std::nullopt;  // No frames outside the local window.
+      return std::nullopt;
     } else {
       return frame_id - lcd_params_.local_window_size_;
-      // Return the first frame ID outside the local window.
     }
   }
 
-  void getNewFeaturesAndDescriptors(
-      const cv::Mat& img,
-      std::vector<cv::KeyPoint>* keypoints,
-      typename Database::Desc* descriptors_mat) override {
-    throw std::runtime_error(
-        "VLADLoopClosureDetector: getNewFeaturesAndDescriptors is deleted for "
-        "VLAD LCD.");
-  }
+  void getNewFeaturesAndDescriptors(const Frame& frame,
+                                    std::vector<cv::KeyPoint>* keypoints,
+                                    cv::Mat* descriptors_mat);
 
-  void getNewFeaturesAndDescriptors(
-      const Frame& frame,
-      std::vector<cv::KeyPoint>* keypoints,
-      typename Database::Desc* descriptors_mat) override;
+  void descriptorMatToVec(const Frame& frame,
+                          const cv::Mat& descriptors_mat,
+                          std::vector<cv::Mat>* descriptors_vec);
 
-  void descriptorMatToVec(
-      const typename Database::DescMat& descriptors_mat,
-      typename Database::DescVector* descriptors_vec) override {
-    throw std::runtime_error(
-        "VLADLoopClosureDetector: descriptorMatToVec is deleted for VLAD "
-        "LCD.");
-  }
-
-  void descriptorMatToVec(
-      const Frame& frame,
-      const typename Database::DescMat& descriptors_mat,
-      typename Database::DescVector* descriptors_vec) override;
-
-  // TODO(mikexyl): try remove this
-  std::map<int, double> globalDescToMap(
-      const typename Database::GlobalDesc& global_desc) override {
+  std::map<int, double> globalDescToMap(const cv::Mat& global_desc) {
     std::map<int, double> desc_map;
     CHECK_EQ(global_desc.rows, 1);
     for (int i = 0; i < global_desc.cols; ++i) {
@@ -280,88 +194,150 @@ class VLADLoopClosureDetector
     return desc_map;
   }
 
-  // using xfeat nv, lcd frame's descriptors_vec are 2 mats: M1 and x_prep
-  // and lcd frames' descriptors_mat are the actual xfeat descriptors of each
-  // keypoints
-  void computeDescriptorMatches(const typename Database::Desc& ref_descriptors,
-                                const typename Database::Desc& cur_descriptors,
-                                KeypointMatches* matches_match_query,
-                                bool cut_matches = false) const override {
-    throw std::runtime_error(
-        "VLADLoopClosureDetector: computeDescriptorMatches is deleted for VLAD "
-        "LCD.");
-  }
-
-  void computeDescriptorMatches(const LCDFrame& ref,
-                                const LCDFrame& curr,
-                                KeypointMatches* matches_match_query,
-                                bool cut_matches = false) const override {
-    // the keypoint descriptors from frontend frame should be used, so the
-    // ref/cur descriptors are empty, and this function is replace with the
-    // function following
-    CHECK_NOTNULL(matches_match_query);
-    CHECK_NOTNULL(feature_matcher_);
-
-    matches_match_query->clear();
-    std::vector<cv::DMatch> matches;
-
-    cv::Size image_size0 = feature_matcher_->params_.image_size;
-
-    cv::Mat ref_kp_mat(ref.keypoints_.size(), 2, CV_32F);
-    for (size_t i = 0; i < ref.keypoints_.size(); ++i) {
-      ref_kp_mat.at<float>(i, 0) = ref.keypoints_[i].pt.x;
-      ref_kp_mat.at<float>(i, 1) = ref.keypoints_[i].pt.y;
-    }
-
-    cv::Mat cur_kp_mat(curr.keypoints_.size(), 2, CV_32F);
-    for (size_t i = 0; i < curr.keypoints_.size(); ++i) {
-      cur_kp_mat.at<float>(i, 0) = curr.keypoints_[i].pt.x;
-      cur_kp_mat.at<float>(i, 1) = curr.keypoints_[i].pt.y;
-    }
-
-    xfeat::DetectionResult ref_ret{
-        .keypoints = ref_kp_mat,
-        .scores = {},
-        .descriptors = ref.descriptors_mat_,
-    },
-        cur_ret{
-            .keypoints = cur_kp_mat,
-            .scores = {},
-            .descriptors = curr.descriptors_mat_,
-        };
-    ref_ret.scores.create(ref_ret.keypoints.rows, 1, CV_32F);
-    for (int i = 0; i < ref_ret.keypoints.rows; ++i) {
-      ref_ret.scores.at<float>(i, 0) = 1.0f;
-    }
-    cur_ret.scores.create(cur_ret.keypoints.rows, 1, CV_32F);
-    for (int i = 0; i < cur_ret.keypoints.rows; ++i) {
-      cur_ret.scores.at<float>(i, 0) = 1.0f;
-    }
-
-    feature_matcher_->match(
-        cur_ret, image_size0, ref_ret, image_size0, matches);
-
-    if (matches.size() <
-        static_cast<size_t>(lcd_params_.lcd_min_matched_features_)) {
-      LOG(WARNING) << "VLADLCD: LG: Not enough matches found: "
-                   << matches.size() << ".";
-      return;
-    }
-
-    matches_match_query->reserve(matches.size());
-    for (const auto& match : matches) {
-      matches_match_query->emplace_back(match.trainIdx, match.queryIdx);
-    }
-  }
-
   LCDFrame::Ptr processMonoPnP(const Frame& frame,
                                const PointsWithIdMap& W_points_with_ids,
-                               const gtsam::Pose3& W_Pose_Blkf) override;
+                               const gtsam::Pose3& W_Pose_Blkf);
 
-  void cleanFrame(const LCDFrame::Ptr& frame) override {}
+  /* ------------------------------------------------------------------------
+   */
+  /**
+   * @brief Processed a single frame and adds it to relevant internal
+   * databases.
+   */
+  FrameId processAndAddMonoFrame(const Frame& frame,
+                                 const PointsWithIdMap& W_points_with_ids,
+                                 const gtsam::Pose3& W_Pose_Blkf);
+
+  FrameId processAndAddStereoFrame(const StereoFrame& stereo_frame,
+                                   const Pose3& W_Pose_Blkf);
+
+  FrameId processAndAddRgbdFrame(const RgbdFrame& rgbd_frame);
+
+  const FrameCache& getFrameCache() const { return cache_; }
+
+  LcdOutput::UniquePtr makeOutputPayload(Timestamp msg_timestamp,
+                                         FrameId lcd_frame_id);
+
+  void filterKeypointsWithGrid(
+      int img_width,
+      int img_height,
+      int grid_cols,
+      int grid_rows,
+      std::vector<cv::KeyPoint>* keypoints,
+      Landmarks* landmarks,
+      cv::Mat* descriptors_mat,
+      BearingVectors* bearing_vectors,
+      std::vector<StatusKeypointCV>* left_kpts_rect = nullptr,
+      std::vector<StatusKeypointCV>* right_kpts_rect = nullptr,
+      std::vector<LandmarkId>* landmark_ids = nullptr) const;
+
+  std::optional<LcdGridFrame> augmentAndFilterFrameFeatures(
+      FrameId lcd_frame_id);
+
+  bool geometricVerificationCam2d2d(const LCDFrame& ref_frame,
+                                    const LCDFrame& cur_frame,
+                                    const KeypointMatches& matches_match_query,
+                                    gtsam::Pose3* camMatch_T_camQuery_2d,
+                                    std::vector<int>* inliers);
+
+  LCDStatus recoverPoseBody(const LCDFrame& ref_frame,
+                            const LCDFrame& cur_frame,
+                            const gtsam::Pose3& camMatch_T_camQuery_2d,
+                            const KeypointMatches& matches_match_query,
+                            gtsam::Pose3* bodyMatch_T_bodyQuery_3d,
+                            gtsam::Pose3* bodyQuery_T_bodyMatch_3d,
+                            std::vector<int>* inliers);
+
+  gtsam::Pose3 refinePoses(const StereoLCDFrame& ref_frame,
+                           const StereoLCDFrame& cur_frame,
+                           const gtsam::Pose3& camMatch_T_camQuery_3d,
+                           const KeypointMatches& matches_match_query);
+
+  void transformCameraPoseToBodyPose(
+      const gtsam::Pose3& camMatch_T_camQuery,
+      gtsam::Pose3* bodyMatch_T_bodyQuery) const {
+    CHECK_NOTNULL(bodyMatch_T_bodyQuery);
+    *bodyMatch_T_bodyQuery =
+        B_Pose_Cam_ * camMatch_T_camQuery * B_Pose_Cam_.inverse();
+  }
+
+  void transformBodyPoseToCameraPose(
+      const gtsam::Pose3& bodyMatch_T_bodyQuery,
+      gtsam::Pose3* camMatch_T_camQuery) const {
+    CHECK_NOTNULL(camMatch_T_camQuery);
+    *camMatch_T_camQuery =
+        B_Pose_Cam_.inverse() * bodyMatch_T_bodyQuery * B_Pose_Cam_;
+  }
+
+  void cleanFrame(const FrameId& frame_id) {
+    auto frame = cache_.getFrame(frame_id);
+    if (frame) {
+      cache_.removeFrame(frame_id);
+    } else {
+      LOG(WARNING) << "LoopClosureDetector: Attempted to clean frame with ID "
+                   << frame_id << " but it does not exist in the cache.";
+    }
+  }
+
+  void cleanFrame(const LCDFrame::Ptr& frame) {}
+
+  void cleanFrameUntil(const FrameId& frame_id) {
+    for (const auto& id : cache_.getFrameIds()) {
+      if (id < frame_id) {
+        cache_.removeFrame(id);
+      }
+    }
+  }
+
+  void updatePoseGraph(const gtsam::Values& smoother_states,
+                       const gtsam::Pose3& T_W_B);
+
+  void print() const { lcd_params_.print(); }
 
   std::vector<LCDFrame::Ptr> new_seq_frames_;
   static size_t new_seq_id_;
+
+ protected:
+  enum class LcdState {
+    Bootstrap,
+    Nominal
+  };
+  LcdState lcd_state_ = LcdState::Bootstrap;
+
+  LoopClosureDetectorParams lcd_params_;
+
+  cv::Ptr<xfeat::LighterGlueCV> feature_matcher_;
+
+  StereoCamera::ConstPtr stereo_camera_;
+  StereoMatchingParams stereo_matching_params_;
+  StereoMatcher::UniquePtr stereo_matcher_;
+
+  RgbdCamera::ConstPtr rgbd_camera_;
+
+  FrameCache cache_;
+  FrameIDTimestampMap timestamp_map_;
+
+  gtsam::SharedNoiseModel shared_noise_model_;
+
+  gtsam::Pose3 B_Pose_Cam_;
+
+  std::unique_ptr<cv::Mat> latest_global_vec_;
+
+  Tracker::UniquePtr tracker_;
+
+  std::unique_ptr<LcdLandmarkManager> landmark_manager_{nullptr};
+
+  std::unique_ptr<LcdThirdPartyWrapper> lcd_tp_wrapper_;
+
+  std::map<std::pair<FrameId, FrameId>, gtsam::NonlinearFactor::shared_ptr> pg_;
+  gtsam::Values pg_values_;
+
+  std::unique_ptr<LoopClosureDetectorLogger> logger_;
+  LcdDebugInfo debug_info_;
+
+  std::vector<std::vector<FrameId>> seq_frames_;
+
+  const bool log_output_ = false;
 
  private:
   std::unique_ptr<VPRONNXWrapper> vpr_db_;

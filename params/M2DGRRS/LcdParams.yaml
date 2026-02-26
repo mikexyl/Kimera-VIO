@@ -90,7 +90,6 @@ min_lmk_parallax: 20
 lcd_min_matched_features: 30
 max_lmk_reproj_error: 3
 
-
 vpr_model_type: jist
 vpr_model_path: "/workspaces/src/JIST/exported_models/JIST_r18_512_seqgem_simplified.onnx"
 vpr_seq_interval: 1
