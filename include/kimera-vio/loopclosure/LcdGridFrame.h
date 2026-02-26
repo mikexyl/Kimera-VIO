@@ -135,6 +135,39 @@ class LcdGridFrame {
     return stats;
   }
 
+  double computeDescriptorVariancePenalty() const {
+    // tau_dist: saturation threshold calibrated for XFeat 64-D L2-normalised
+    // unit vectors.  For such descriptors V_app = (1/N)*Σ||d_k - d_bar|| ≈
+    // sqrt(1 - ||d_bar||²), which ranges from ~0.44 (very repetitive scene,
+    // ||d_bar||≈0.9) to ~1.0 (fully random/diverse). Setting tau_dist=0.8
+    // means V_app must reach 0.8 before the penalty saturates, giving useful
+    // discrimination between repetitive and diverse frames.
+    // (Previously 0.5 caused perpetual saturation to 1.0.)
+    static constexpr double tau_dist = 0.8;
+
+    cv::Mat descs = getDescriptors();  // N × D, CV_32F
+    const int N = descs.rows;
+    if (N == 0) return 0.0;
+
+    // Mean descriptor: d_bar = (1/N) * sum_k d_k
+    cv::Mat mean_desc;
+    cv::reduce(descs, mean_desc, /*dim=*/0, cv::REDUCE_AVG, CV_32F);
+
+    // V_app = (1/N) * sum_k || d_k - d_bar ||_2
+    double V_app = 0.0;
+    for (int i = 0; i < N; ++i) {
+      V_app += cv::norm(descs.row(i) - mean_desc, cv::NORM_L2);
+    }
+    V_app /= N;
+
+    VLOG(5) << "DescriptorVariancePenalty: N=" << N << " V_app=" << V_app
+            << " tau=" << tau_dist
+            << " penalty=" << std::min(1.0, V_app / tau_dist);
+
+    // S_app = min(1, V_app / tau_dist)
+    return std::min(1.0, V_app / tau_dist);
+  }
+
   double computeCoverageScore() const {
     std::vector<double> feature_masses;
     for (const auto& row : cells_) {
@@ -179,6 +212,11 @@ class LcdGridFrame {
     }
 
     double total_w = std::accumulate(w_k.begin(), w_k.end(), 0.0);
+    if (total_w == 0.0) {
+      LOG(WARNING) << "Total weight is zero in structure score computation "
+                      "(empty grid frame).";
+      return 0.0;
+    }
     gtsam::Point3 bar_P{0.0, 0.0, 0.0};
     for (size_t i = 0; i < w_k.size(); ++i) {
       const auto& c = cells_[i / grid_cols][i % grid_cols];
@@ -229,8 +267,7 @@ class LcdGridFrame {
 
     double S_geom = (lambda_2 / lambda_1) *
                     (lambda_3 / lambda_2 + (1 - lambda_3 / lambda_2) * c);
-    S_geom = std::sqrt(
-        S_geom);  // make it more linear
+    S_geom = std::sqrt(S_geom);  // make it more linear
     return S_geom;
   }
 };

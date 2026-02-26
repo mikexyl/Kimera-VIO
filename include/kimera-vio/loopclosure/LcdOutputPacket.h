@@ -102,6 +102,7 @@ struct LcdOutput : PipelinePayload {
   double coverage_score{0.0};   ///< Shannon-entropy coverage score of the feature grid
   double structure_score{0.0};  ///< Geometric structure score of the feature grid
   double covisibility_score{0.0};  ///< Covisibility score between the current frame and the previous frame
+  double similarity_penalty{0.0};  ///< Covisibility score between the current frame and the previous frame
 };
 
 }  // namespace VIO

@@ -368,7 +368,7 @@ VLADLoopClosureDetector::augmentAndFilterFrameFeatures(FrameId lcd_frame_id) {
           continue;
         }
 
-        CHECK_GE(static_cast<size_t>(covis_frame->descriptors_mat_.rows), lmk_i)
+        CHECK_GT(static_cast<size_t>(covis_frame->descriptors_mat_.rows), lmk_i)
             << "Descriptor index out of bounds";
 
         auto T_w_lmk = landmark_manager_->getLandmark(lmk_id);
@@ -481,6 +481,7 @@ LcdOutput::UniquePtr VLADLoopClosureDetector::makeOutputPayload(
 
   double S_cover = grid_frame->computeCoverageScore();
   double S_struct = grid_frame->computeStructureScore();
+  double S_sim = grid_frame->computeDescriptorVariancePenalty();
 
   auto filtered_keypoints = grid_frame->getKeypoints();
   auto filtered_landmarks = grid_frame->getLandmarks();
@@ -513,7 +514,7 @@ LcdOutput::UniquePtr VLADLoopClosureDetector::makeOutputPayload(
   std::map<int, double> bow_vec{};
   if (curr_frame->descriptors_vec_.size() and
       S_cover > lcd_params_.min_seq_coverage_score_ and
-      S_struct > lcd_params_.min_seq_structure_score_) {
+      S_struct > lcd_params_.min_seq_structure_score_ and S_sim > 0.85) {
     bow_vec = globalDescToMap(curr_frame->descriptors_vec_[0]);
   } else {
     bow_vec = {};
@@ -598,6 +599,8 @@ LcdOutput::UniquePtr VLADLoopClosureDetector::makeOutputPayload(
   output_payload->covisibility_score =
       landmark_manager_->computeCovisibilityScore(lcd_frame_id - 1,
                                                   lcd_frame_id);
+  output_payload->similarity_penalty =
+      grid_frame->computeDescriptorVariancePenalty();
 
   return output_payload;
 }
