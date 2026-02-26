@@ -81,8 +81,6 @@ netvlad_model_path: /workspaces/src/xfeat-cpp/onnx_model/netvlad_fc_512.onnx
 
 
 
-network_input_width: 320
-network_input_height: 224
 
 local_window_size: 10
 

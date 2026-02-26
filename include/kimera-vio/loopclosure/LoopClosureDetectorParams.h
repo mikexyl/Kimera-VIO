@@ -34,6 +34,12 @@ enum class PoseRecoveryType {
   k5ptRotOnly = 2,
 };
 
+enum class VprModelType {
+  kJist = 0,       // Sequence-based (JIST)
+  kMixVPR = 1,     // Single-image (MixVPR)
+  kPatchNetVLAD = 2,  // Single-image with re-ranking (PatchNetVLAD)
+};
+
 class LoopClosureDetectorParams : public PipelineParams {
  public:
   KIMERA_POINTER_TYPEDEFS(LoopClosureDetectorParams);
@@ -132,11 +138,10 @@ class LoopClosureDetectorParams : public PipelineParams {
   std::string netvlad_model_path_{};
   int lcd_min_matched_features_ = 5;
 
-  // JIST model parameters
-  std::string jist_model_path_{};
-  int jist_seq_length_ = 5;  // Number of frames in JIST sequence
-  int jist_seq_interval_ = 1;
-  int jist_descriptor_dim_ = 512;  // JIST descriptor dimension
+  // VPR model parameters
+  std::string vpr_model_path_{};
+  VprModelType vpr_model_type_ = VprModelType::kJist;
+  int vpr_seq_interval_ = 1;
 
   int local_window_size_ = 50;  // number of most recent keyframes to skip when
   // detecting loops
@@ -149,9 +154,6 @@ class LoopClosureDetectorParams : public PipelineParams {
   double min_seq_coverage_score_ = 0.0;   ///< Min coverage score for sequence frames
   double min_seq_structure_score_ = 0.0;  ///< Min structure score for sequence frames
   double max_covisibility_score_ = 1.0;   ///< Max covisibility score with previous frame (high covisibility means similar viewpoint, not a loop)
-
-  int network_input_width_ = 320;
-  int network_input_height_ = 224;
 
   //! When the BoW vector is empty (no global descriptor), publish a minimal
   //! output payload so downstream modules do not stall. Set to false to

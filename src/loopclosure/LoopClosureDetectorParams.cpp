@@ -171,8 +171,6 @@ bool LoopClosureDetectorParams::parseYAML(const std::string& filepath) {
   yaml_parser.getYamlParam("xfeat_nv_head_model_path",
                            &xfeat_nv_head_model_path_);
   yaml_parser.getYamlParam("netvlad_model_path", &netvlad_model_path_);
-  yaml_parser.getYamlParam("network_input_width", &network_input_width_);
-  yaml_parser.getYamlParam("network_input_height", &network_input_height_);
   yaml_parser.getYamlParam("local_window_size", &local_window_size_);
   yaml_parser.getYamlParam("min_lmk_obs_ratio", &min_lmk_obs_ratio_);
   yaml_parser.getYamlParam("min_lmk_obs_count", &min_lmk_obs_cnt_);
@@ -181,11 +179,18 @@ bool LoopClosureDetectorParams::parseYAML(const std::string& filepath) {
                            &lcd_min_matched_features_);
   yaml_parser.getYamlParam("max_lmk_reproj_error", &max_lmk_reproj_error);
 
-  // JIST parameters
-  yaml_parser.getYamlParam("jist_model_path", &jist_model_path_);
-  yaml_parser.getYamlParam("jist_seq_length", &jist_seq_length_);
-  yaml_parser.getYamlParam("jist_seq_interval", &jist_seq_interval_);
-  yaml_parser.getYamlParam("jist_descriptor_dim", &jist_descriptor_dim_);
+  // VPR parameters
+  yaml_parser.getYamlParam("vpr_model_path", &vpr_model_path_);
+  yaml_parser.getYamlParam("vpr_seq_interval", &vpr_seq_interval_);
+  std::string vpr_model_type_str = "jist";
+  yaml_parser.getYamlParam("vpr_model_type", &vpr_model_type_str);
+  if (vpr_model_type_str == "mixvpr") {
+    vpr_model_type_ = VprModelType::kMixVPR;
+  } else if (vpr_model_type_str == "patchnetvlad") {
+    vpr_model_type_ = VprModelType::kPatchNetVLAD;
+  } else {
+    vpr_model_type_ = VprModelType::kJist;
+  }
 
   yaml_parser.getYamlParam("min_seq_coverage_score", &min_seq_coverage_score_);
   yaml_parser.getYamlParam("min_seq_structure_score",
@@ -279,18 +284,13 @@ void LoopClosureDetectorParams::print() const {
                         frame_cache.num_frames_per_file,
                         "frame_cahce.remove_cache_on_exit",
                         frame_cache.remove_cache_on_exit);
-  // network input spatial dimensions
   PipelineParams::print(out,
-                        "network_input_width_",
-                        network_input_width_,
-                        "network_input_height_",
-                        network_input_height_,
-                        "jist_model_path_",
-                        jist_model_path_,
-                        "jist_seq_length_",
-                        jist_seq_length_,
-                        "jist_descriptor_dim_",
-                        jist_descriptor_dim_,
+                        "vpr_model_path_",
+                        vpr_model_path_,
+                        "vpr_model_type_",
+                        static_cast<int>(vpr_model_type_),
+                        "vpr_seq_interval_",
+                        vpr_seq_interval_,
                         "min_seq_coverage_score_",
                         min_seq_coverage_score_,
                         "min_seq_structure_score_",
@@ -348,11 +348,9 @@ bool LoopClosureDetectorParams::equals(const LoopClosureDetectorParams& lp2,
           lp2.frame_cache.num_frames_per_file) &&
          (frame_cache.remove_cache_on_exit ==
           lp2.frame_cache.remove_cache_on_exit) &&
-         (network_input_width_ == lp2.network_input_width_) &&
-         (network_input_height_ == lp2.network_input_height_) &&
-         (jist_model_path_ == lp2.jist_model_path_) &&
-         (jist_seq_length_ == lp2.jist_seq_length_) &&
-         (jist_descriptor_dim_ == lp2.jist_descriptor_dim_) &&
+         (vpr_model_path_ == lp2.vpr_model_path_) &&
+         (vpr_model_type_ == lp2.vpr_model_type_) &&
+         (vpr_seq_interval_ == lp2.vpr_seq_interval_) &&
          (fabs(min_seq_coverage_score_ - lp2.min_seq_coverage_score_) <= tol) &&
          (fabs(min_seq_structure_score_ - lp2.min_seq_structure_score_) <=
           tol) &&
