@@ -588,13 +588,8 @@ LcdOutput::UniquePtr VLADLoopClosureDetector::makeOutputPayload(
       std::make_pair(lcd_frame_id, debug_seq_frame);
   output_payload->is_seq_frame = is_seq_frame;
 
-  if (auto current_anchor_frame_id = getCurrentAnchorFrameId()) {
-    auto anchor_grid = augmentAndFilterFrameFeatures(*current_anchor_frame_id);
-    output_payload->coverage_score =
-        anchor_grid ? anchor_grid->computeCoverageScore() : 0.0;
-    output_payload->structure_score =
-        anchor_grid ? anchor_grid->computeStructureScore() : 0.0;
-  }
+  output_payload->coverage_score = S_cover;
+  output_payload->structure_score = S_struct;
 
   output_payload->covisibility_score =
       landmark_manager_->computeCovisibilityScore(lcd_frame_id - 1,
