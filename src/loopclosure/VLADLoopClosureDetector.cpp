@@ -1142,7 +1142,17 @@ void VLADLoopClosureDetector::computeSequenceGlobalDesc(
 
   if ((target_frame_id % lcd_params_.vpr_seq_interval_ == 0) and
       add_to_sequence) {
-    new_seq_frames_.emplace_back(new_frame);
+    // When starting a new sequence, enforce inter-sequence interval: the first
+    // frame of the new sequence must be at least vpr_seq_interval_ frames after
+    // the last frame of the previous sequence.
+    const bool in_active_seq = !new_seq_frames_.empty();
+    const bool cooldown_expired =
+        !last_seq_end_frame_id_.has_value() ||
+        target_frame_id >=
+            *last_seq_end_frame_id_ + lcd_params_.vpr_seq_interval_;
+    if (in_active_seq || cooldown_expired) {
+      new_seq_frames_.emplace_back(new_frame);
+    }
   }
 
   if (new_seq_frames_.size() ==
@@ -1163,6 +1173,7 @@ void VLADLoopClosureDetector::computeSequenceGlobalDesc(
 
     new_frame->descriptors_vec_.push_back(global_desc.clone());
 
+    last_seq_end_frame_id_ = new_seq_frames_.back()->id_;
     new_seq_frames_.clear();
     new_seq_id_++;
   }

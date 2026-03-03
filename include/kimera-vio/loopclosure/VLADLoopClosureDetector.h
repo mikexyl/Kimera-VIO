@@ -1,5 +1,7 @@
 #pragma once
 
+#include <optional>
+
 #include <gtsam/nonlinear/LevenbergMarquardtOptimizer.h>
 #include <gtsam/nonlinear/NonlinearFactor.h>
 
@@ -296,6 +298,7 @@ class VLADLoopClosureDetector : public LoopClosureDetectorBase {
 
   std::vector<LCDFrame::Ptr> new_seq_frames_;
   static size_t new_seq_id_;
+  std::optional<FrameId> last_seq_end_frame_id_;
 
  protected:
   enum class LcdState {
