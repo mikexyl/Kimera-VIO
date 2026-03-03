@@ -514,7 +514,8 @@ LcdOutput::UniquePtr VLADLoopClosureDetector::makeOutputPayload(
   std::map<int, double> bow_vec{};
   if (curr_frame->descriptors_vec_.size() and
       S_cover > lcd_params_.min_seq_coverage_score_ and
-      S_struct > lcd_params_.min_seq_structure_score_ and S_sim > 0.85) {
+      S_struct > lcd_params_.min_seq_structure_score_ and
+      S_sim > lcd_params_.min_sim_score_) {
     bow_vec = globalDescToMap(curr_frame->descriptors_vec_[0]);
   } else {
     bow_vec = {};

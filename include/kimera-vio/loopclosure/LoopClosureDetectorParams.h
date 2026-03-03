@@ -153,6 +153,7 @@ class LoopClosureDetectorParams : public PipelineParams {
 
   double min_seq_coverage_score_ = 0.0;   ///< Min coverage score for sequence frames
   double min_seq_structure_score_ = 0.0;  ///< Min structure score for sequence frames
+  double min_sim_score_ = 0.85;           ///< Min similarity score for sequence frames
   double max_covisibility_score_ = 1.0;   ///< Max covisibility score with previous frame (high covisibility means similar viewpoint, not a loop)
 
   //! When the BoW vector is empty (no global descriptor), publish a minimal
