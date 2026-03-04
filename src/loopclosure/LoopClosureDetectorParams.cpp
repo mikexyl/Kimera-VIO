@@ -198,6 +198,7 @@ bool LoopClosureDetectorParams::parseYAML(const std::string& filepath) {
   yaml_parser.getYamlParam("min_sim_score", &min_sim_score_);
   yaml_parser.getYamlParam("max_covisibility_score", &max_covisibility_score_);
   yaml_parser.getYamlParam("publish_only_sequence", &publish_only_sequence_);
+  yaml_parser.getYamlParam("use_covis_projection", &use_covis_projection_);
   return true;
 }
 
@@ -301,7 +302,9 @@ void LoopClosureDetectorParams::print() const {
                         "max_covisibility_score_",
                         max_covisibility_score_,
                         "publish_empty_output_",
-                        publish_only_sequence_);
+                        publish_only_sequence_,
+                        "use_covis_projection_",
+                        use_covis_projection_);
   LOG(INFO) << out.str();
 }
 
@@ -359,7 +362,8 @@ bool LoopClosureDetectorParams::equals(const LoopClosureDetectorParams& lp2,
           tol) &&
          (fabs(min_sim_score_ - lp2.min_sim_score_) <= tol) &&
          (fabs(max_covisibility_score_ - lp2.max_covisibility_score_) <= tol) &&
-         (publish_only_sequence_ == lp2.publish_only_sequence_);
+         (publish_only_sequence_ == lp2.publish_only_sequence_) &&
+         (use_covis_projection_ == lp2.use_covis_projection_);
 }
 
 }  // namespace VIO

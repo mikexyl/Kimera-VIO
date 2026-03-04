@@ -160,6 +160,10 @@ class LoopClosureDetectorParams : public PipelineParams {
   //! output payload so downstream modules do not stall. Set to false to
   //! suppress the output entirely for frames without a descriptor.
   bool publish_only_sequence_ = true;
+
+  //! If false, skip projecting covisible frames' landmarks and use only the
+  //! current lcd_frame's own keypoints/descriptors.
+  bool use_covis_projection_ = true;
 };
 
 }  // namespace VIO

@@ -403,7 +403,8 @@ StatusMonoMeasurementsPtr MonoVisionImuFrontend::processFrame(
 
         // Select the edge with the highest expected Fiedler gain.
         // required_node=cur_idx restricts candidates to pairs that include
-        // the current frame, without needing to manipulate the adjacency matrix.
+        // the current frame, without needing to manipulate the adjacency
+        // matrix.
         const EdgeCandidate best_edge = EdgeSelection::selectGoldenEdge(
             window, adjacency, edge_selection_params_, cur_idx);
 
@@ -411,6 +412,10 @@ StatusMonoMeasurementsPtr MonoVisionImuFrontend::processFrame(
           CHECK(best_edge.id_i == cur_idx || best_edge.id_j == cur_idx);
           const int hist_idx =
               (best_edge.id_i == cur_idx) ? best_edge.id_j : best_edge.id_i;
+
+          LOG(INFO) << "golden edge between curr " << mono_frame_k_->id_
+                    << " and hist " << mono_frames_[hist_idx]->id_;
+
           // ref_frame (arg1) must own the descriptors: use the historical KF.
           // cur_frame (arg2) is the current frame that receives the
           // associations.

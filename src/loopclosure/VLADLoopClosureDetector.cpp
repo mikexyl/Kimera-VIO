@@ -354,7 +354,8 @@ VLADLoopClosureDetector::augmentAndFilterFrameFeatures(FrameId lcd_frame_id) {
   BearingVectors frame_bearing_vectors = curr_frame->bearing_vectors_;
 
   auto covis_it = landmark_manager_->getCovisGraph().find(lcd_frame_id);
-  if (covis_it != landmark_manager_->getCovisGraph().end()) {
+  if (lcd_params_.use_covis_projection_ &&
+      covis_it != landmark_manager_->getCovisGraph().end()) {
     for (const auto& covis_frame_id : covis_it->second) {
       auto covis_frame = cache_.getFrame(covis_frame_id);
       if (!covis_frame) continue;
