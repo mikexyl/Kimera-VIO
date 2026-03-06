@@ -37,6 +37,13 @@ struct EdgeSelectionParams {
   //! Maximum baseline distance [m] between camera centres for a feasible match.
   double max_depth_range = 20.0;
 
+  //! Minimum baseline distance [m] between camera centres for a feasible match.
+  //! Pairs whose camera centres are closer than this are rejected, which
+  //! effectively enforces a minimum temporal separation between selected frames.
+  //! Default 0.0 (no minimum). Increase (e.g. 1.0–3.0 m) to avoid picking
+  //! temporally adjacent keyframes.
+  double min_baseline = 0.0;
+
   //! Minimum cosine of the angle between principal camera Z-axes.
   //! Default cos(120°) = -0.5 — pairs whose viewing directions diverge by more
   //! than 120° are considered geometrically infeasible.
@@ -193,7 +200,7 @@ inline double EdgeSelection::calculateOverlapProbability(
   // --- 1. Baseline distance check (between camera centres) ------------------
   const double distance =
       (W_T_C_i.translation() - W_T_C_j.translation()).norm();
-  if (distance > params.max_depth_range) {
+  if (distance < params.min_baseline || distance > params.max_depth_range) {
     return 0.0;
   }
 
@@ -270,74 +277,92 @@ inline EdgeCandidate EdgeSelection::selectGoldenEdge(
     required_node = std::nullopt;
   }
 
-  EdgeCandidate best_edge;
-  double max_expected_gain = -1.0;
-
   if (N < 2) {
-    LOG(WARNING) << "EdgeSelection::selectGoldenEdge: sliding window too small "
-                    "(N="
-                 << N << "); no edge can be selected.";
-    return best_edge;
+    LOG(FATAL) << "EdgeSelection::selectGoldenEdge: sliding window too small "
+                  "(N=" << N << "); this is a bug — VO cannot be running "
+                  "without at least two keyframes.";
   }
 
   // ---- Step 1 & 2: Compute the Fiedler vector --------------------------------
   const Eigen::VectorXd v2 = computeFiedlerVector(adjacency);
-  if (v2.isZero(0.0)) {
+  const bool fiedler_valid = !v2.isZero(0.0);
+  if (!fiedler_valid) {
     LOG(WARNING)
         << "EdgeSelection::selectGoldenEdge: Fiedler vector is zero; "
-           "skipping candidate evaluation.";
-    return best_edge;
+           "will fall back to most-recent geometrically feasible edge.";
   }
 
+  // ---- Helper: evaluate a candidate pair and update best_edge if better -----
+  EdgeCandidate best_edge;
+  double max_expected_gain = -1.0;
+  bool has_feasible_pair = false;  // any pair passed the geometric check
+
+  auto try_pair = [&](int i, int j) {
+    // Do not skip pairs that already have covisibility — VO tracking
+    // connections are not loop-closure edges. The Fiedler score naturally
+    // deprioritises well-connected pairs, so they only win when truly best.
+    const double p_ij =
+        calculateOverlapProbability(window[i].pose, window[j].pose, params);
+    if (p_ij <= 0.0) return;
+    has_feasible_pair = true;
+    const double delta_v2 = fiedler_valid ? (v2(i) - v2(j)) : 0.0;
+    const double expected_gain = p_ij * delta_v2 * delta_v2;
+    if (expected_gain > max_expected_gain) {
+      max_expected_gain    = expected_gain;
+      best_edge.id_i       = i;
+      best_edge.id_j       = j;
+      best_edge.frame_id_i = window[i].frame_id;
+      best_edge.frame_id_j = window[j].frame_id;
+      best_edge.score      = expected_gain;
+    }
+  };
+
   // ---- Step 3: Evaluate all non-adjacent candidate pairs --------------------
-  for (int i = 0; i < N; ++i) {
-    for (int j = i + 1; j < N; ++j) {
-
-      // If a required node is set, skip pairs that don't include it.
-      if (required_node.has_value() &&
-          i != *required_node && j != *required_node) {
-        continue;
+  if (fiedler_valid) {
+    for (int i = 0; i < N; ++i) {
+      for (int j = i + 1; j < N; ++j) {
+        if (required_node.has_value() &&
+            i != *required_node && j != *required_node) {
+          continue;
+        }
+        try_pair(i, j);
       }
+    }
+  }
 
-      // Skip pairs that already share a pose-graph edge.
-      if (adjacency(i, j) > 0.0) {
-        continue;
-      }
-
-      // Geometric feasibility: probability that the deep matcher succeeds.
-      const double p_ij = calculateOverlapProbability(
-          window[i].pose, window[j].pose, params);
-      if (p_ij <= 0.0) {
-        continue;
-      }
-
-      // Topological stiffening value: how much bridging i–j improves λ₂.
-      const double delta_v2 = v2(i) - v2(j);
-      const double topological_gain = delta_v2 * delta_v2;
-
-      // Expected Fiedler gain: E[Δλ₂] = p_ij · (v₂ᵢ − v₂ⱼ)²
-      const double expected_gain = p_ij * topological_gain;
-
-      // ---- Step 4: Track the global maximum --------------------------------
-      if (expected_gain > max_expected_gain) {
-        max_expected_gain = expected_gain;
-        best_edge.id_i      = i;
-        best_edge.id_j      = j;
+  // ---- Fallback: Fiedler unavailable — scan all pairs by p_ij only ----------
+  if (!best_edge.isValid()) {
+    for (int j = N - 1; j >= 1 && !best_edge.isValid(); --j) {
+      for (int i = j - 1; i >= 0 && !best_edge.isValid(); --i) {
+        if (required_node.has_value() &&
+            i != *required_node && j != *required_node) {
+          continue;
+        }
+        const double p_ij =
+            calculateOverlapProbability(window[i].pose, window[j].pose, params);
+        if (p_ij <= 0.0) continue;
+        has_feasible_pair = true;
+        best_edge.id_i       = i;
+        best_edge.id_j       = j;
         best_edge.frame_id_i = window[i].frame_id;
         best_edge.frame_id_j = window[j].frame_id;
-        best_edge.score      = expected_gain;
+        best_edge.score      = 0.0;
       }
     }
   }
 
   if (!best_edge.isValid()) {
-    VLOG(2) << "EdgeSelection::selectGoldenEdge: no valid candidate edge found "
-               "(all pairs are either adjacent or geometrically infeasible).";
-  } else {
-    VLOG(2) << "EdgeSelection::selectGoldenEdge: best edge ("
-            << best_edge.frame_id_i << ", " << best_edge.frame_id_j
-            << ") with expected Fiedler gain " << best_edge.score;
+    if (has_feasible_pair) {
+      LOG(FATAL) << "EdgeSelection::selectGoldenEdge: geometrically feasible "
+                    "pairs exist but none were selected — this is a bug.";
+    }
+    VLOG(2) << "EdgeSelection::selectGoldenEdge: no geometrically feasible "
+               "pair found (all poses too far or divergent); skipping.";
   }
+
+  VLOG(2) << "EdgeSelection::selectGoldenEdge: best edge ("
+          << best_edge.frame_id_i << ", " << best_edge.frame_id_j
+          << ") with score " << best_edge.score;
 
   return best_edge;
 }

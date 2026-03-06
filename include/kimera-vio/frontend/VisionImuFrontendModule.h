@@ -64,6 +64,10 @@ class VisionImuFrontendModule
     vio_frontend_->updateImuBias(imu_bias);
   }
 
+  inline void updateNavState(const VioNavStateTimestamped& nav_state) {
+    vio_frontend_->updateNavState(nav_state);
+  }
+
   inline void updateMap(const LandmarksMap& map) const {
     vio_frontend_->updateMap(map);
   }

@@ -483,58 +483,73 @@ StatusStereoMeasurementsPtr StereoVisionImuFrontend::processStereoFrame(
     if (!stereo_frames_.empty() &&
         tracker_status_summary_.kfTrackingStatus_mono_ !=
             TrackingStatus::LOW_DISPARITY) {
-      // Build the SlidingWindow: historical KFs first, current KF last.
-      SlidingWindow window;
-      window.reserve(stereo_frames_.size() + 1);
-      for (size_t idx = 0; idx < stereo_frames_.size(); ++idx) {
-        window.push_back(
-            {stereo_frames_[idx]->left_frame_.id_, kf_poses_[idx]});
-      }
-      const int cur_idx = static_cast<int>(window.size());
-      {
-        const auto nav_state = getLatestNavStateFromBackend();
-        window.push_back({stereoFrame_k_->left_frame_.id_,
-                          nav_state ? nav_state->pose_ : gtsam::Pose3()});
-      }
+      // The current frame's pose comes from the backend, which is async and
+      // always one step behind. Skip edge selection if no pose is available yet
+      // — without it, geometric feasibility for cur_idx cannot be computed.
+      const auto nav_state = getLatestNavStateFromBackend();
+      if (!nav_state) {
+        VLOG(2) << "EdgeSelection: skipping — no backend pose for current "
+                   "frame yet.";
+      } else {
+        // Build the SlidingWindow: historical KFs first, current KF last.
+        SlidingWindow window;
+        window.reserve(stereo_frames_.size() + 1);
+        for (size_t idx = 0; idx < stereo_frames_.size(); ++idx) {
+          window.push_back(
+              {stereo_frames_[idx]->left_frame_.id_, kf_poses_[idx]});
+        }
+        const int cur_idx = static_cast<int>(window.size());
+        window.push_back({stereoFrame_k_->left_frame_.id_, nav_state->pose_});
 
-      // Build the N×N adjacency matrix from covisibility (shared tracks).
-      static constexpr double kCovisNorm = 200.0;
-      const int N = static_cast<int>(window.size());
-      Eigen::MatrixXd adjacency = Eigen::MatrixXd::Zero(N, N);
-      for (int i = 0; i < N; ++i) {
-        for (int j = i + 1; j < N; ++j) {
-          const Frame& fi = (i == cur_idx) ? stereoFrame_k_->left_frame_
-                                           : stereo_frames_[i]->left_frame_;
-          const Frame& fj = (j == cur_idx) ? stereoFrame_k_->left_frame_
-                                           : stereo_frames_[j]->left_frame_;
-          const double shared = static_cast<double>(countSharedTracks(fi, fj));
-          if (shared > 0.0) {
-            adjacency(i, j) = adjacency(j, i) =
-                std::min(shared / kCovisNorm, 1.0);
+        // Build the N×N adjacency matrix from covisibility (shared tracks).
+        static constexpr double kCovisNorm = 200.0;
+        const int N = static_cast<int>(window.size());
+        Eigen::MatrixXd adjacency = Eigen::MatrixXd::Zero(N, N);
+        for (int i = 0; i < N; ++i) {
+          for (int j = i + 1; j < N; ++j) {
+            const Frame& fi = (i == cur_idx) ? stereoFrame_k_->left_frame_
+                                             : stereo_frames_[i]->left_frame_;
+            const Frame& fj = (j == cur_idx) ? stereoFrame_k_->left_frame_
+                                             : stereo_frames_[j]->left_frame_;
+            const double shared =
+                static_cast<double>(countSharedTracks(fi, fj));
+            if (shared > 0.0) {
+              adjacency(i, j) = adjacency(j, i) =
+                  std::min(shared / kCovisNorm, 1.0);
+            }
           }
         }
-      }
 
-      // Select the edge with the highest expected Fiedler gain.
-      // required_node=cur_idx restricts candidates to pairs that include
-      // the current keyframe, without needing to manipulate the adjacency matrix.
-      const EdgeCandidate best_edge = EdgeSelection::selectGoldenEdge(
-          window, adjacency, edge_selection_params_, cur_idx);
+        // Select the edge with the highest expected Fiedler gain.
+        // required_node=cur_idx restricts candidates to pairs that include
+        // the current keyframe, without needing to manipulate the adjacency
+        // matrix.
+        const EdgeCandidate best_edge = EdgeSelection::selectGoldenEdge(
+            window, adjacency, edge_selection_params_, cur_idx);
 
-      if (best_edge.isValid()) {
-        CHECK(best_edge.id_i == cur_idx or best_edge.id_j == cur_idx);
-        const int hist_idx =
-            (best_edge.id_i == cur_idx) ? best_edge.id_j : best_edge.id_i;
-        LOG(INFO) << "golden edge between curr " << stereoFrame_k_->id_
-                  << " and past " << stereo_frames_.at(hist_idx)->id_;
-        tracker_->featureTrackingDesc(&stereo_frames_.at(hist_idx)->left_frame_,
-                                      &stereoFrame_k_->left_frame_,
-                                      {},
-                                      frontend_params_.feature_detector_params_,
-                                      std::nullopt,
-                                      false,
-                                      DescTrackingMode::kDescriptorOnly);
-      }
+        if (best_edge.isValid()) {
+          CHECK(best_edge.id_i == cur_idx or best_edge.id_j == cur_idx);
+          const int hist_idx =
+              (best_edge.id_i == cur_idx) ? best_edge.id_j : best_edge.id_i;
+          LOG(INFO) << "golden edge between curr " << stereoFrame_k_->id_
+                    << " and past " << stereo_frames_.at(hist_idx)->id_;
+          tracker_->featureTrackingDesc(
+              &stereo_frames_.at(hist_idx)->left_frame_,
+              &stereoFrame_k_->left_frame_,
+              {},
+              frontend_params_.feature_detector_params_,
+              std::nullopt,
+              false,
+              DescTrackingMode::kDescriptorOnly);
+        } else {
+          LOG(WARNING) << "No valid golden edge found for current keyframe "
+                       << stereoFrame_k_->id_
+                       << ": no additional tracking will be performed.";
+        }
+      }  // nav_state
+    } else {
+      LOG(WARNING) << "EdgeSelection: skipping — no historical keyframes or "
+                      "low disparity.";
     }
 
     if (VLOG_IS_ON(2)) {

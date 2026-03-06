@@ -51,6 +51,7 @@ MonoVisionImuFrontend::MonoVisionImuFrontend(
       feature_detector_(nullptr),
       mono_camera_(camera) {
   CHECK(mono_camera_);
+  edge_selection_params_.b_T_c = mono_camera_->getBodyPoseCam();
 
   frontend_params_.tracker_params_.print();
 
@@ -369,66 +370,82 @@ StatusMonoMeasurementsPtr MonoVisionImuFrontend::processFrame(
       // maximises the expected pose-graph algebraic connectivity gain
       // E[Δλ₂] = p_ij · (v₂ᵢ − v₂ⱼ)².
       if (!mono_frames_.empty()) {
-        // Build the SlidingWindow: historical KFs first, current frame last.
-        SlidingWindow window;
-        window.reserve(mono_frames_.size() + 1);
-        for (size_t idx = 0; idx < mono_frames_.size(); ++idx) {
-          window.push_back({mono_frames_[idx]->id_, kf_poses_[idx]});
-        }
-        const int cur_idx = static_cast<int>(window.size());
-        {
-          const auto nav_state = getLatestNavStateFromBackend();
-          window.push_back({mono_frame_k_->id_,
-                            nav_state ? nav_state->pose_ : gtsam::Pose3()});
-        }
+        // The current frame's pose comes from the backend, which is async and
+        // always one step behind. Skip edge selection if no pose is available
+        // yet — without it, geometric feasibility for cur_idx cannot be
+        // computed.
+        const auto nav_state = getLatestNavStateFromBackend();
+        if (!nav_state) {
+          LOG(INFO) << "EdgeSelection: skipping — no backend pose for current "
+                       "frame yet.";
+        } else {
+          // Build the SlidingWindow: historical KFs first, current frame last.
+          SlidingWindow window;
+          window.reserve(mono_frames_.size() + 1);
+          for (size_t idx = 0; idx < mono_frames_.size(); ++idx) {
+            window.push_back({mono_frames_[idx]->id_, kf_poses_[idx]});
+          }
+          const int cur_idx = static_cast<int>(window.size());
+          window.push_back({mono_frame_k_->id_, nav_state->pose_});
 
-        // Build the N×N adjacency matrix from covisibility (shared tracks).
-        static constexpr double kCovisNorm = 200.0;
-        const int N = static_cast<int>(window.size());
-        Eigen::MatrixXd adjacency = Eigen::MatrixXd::Zero(N, N);
-        for (int i = 0; i < N; ++i) {
-          for (int j = i + 1; j < N; ++j) {
-            const Frame& fi =
-                (i == cur_idx) ? *mono_frame_k_ : *mono_frames_[i];
-            const Frame& fj =
-                (j == cur_idx) ? *mono_frame_k_ : *mono_frames_[j];
-            const double shared =
-                static_cast<double>(countSharedTracks(fi, fj));
-            if (shared > 0.0) {
-              adjacency(i, j) = adjacency(j, i) =
-                  std::min(shared / kCovisNorm, 1.0);
+          // Build the N×N adjacency matrix from covisibility (shared tracks).
+          static constexpr double kCovisNorm = 200.0;
+          const int N = static_cast<int>(window.size());
+          Eigen::MatrixXd adjacency = Eigen::MatrixXd::Zero(N, N);
+          for (int i = 0; i < N; ++i) {
+            for (int j = i + 1; j < N; ++j) {
+              const Frame& fi =
+                  (i == cur_idx) ? *mono_frame_k_ : *mono_frames_[i];
+              const Frame& fj =
+                  (j == cur_idx) ? *mono_frame_k_ : *mono_frames_[j];
+              const double shared =
+                  static_cast<double>(countSharedTracks(fi, fj));
+              if (shared > 0.0) {
+                adjacency(i, j) = adjacency(j, i) =
+                    std::min(shared / kCovisNorm, 1.0);
+              }
             }
           }
-        }
 
-        // Select the edge with the highest expected Fiedler gain.
-        // required_node=cur_idx restricts candidates to pairs that include
-        // the current frame, without needing to manipulate the adjacency
-        // matrix.
-        const EdgeCandidate best_edge = EdgeSelection::selectGoldenEdge(
-            window, adjacency, edge_selection_params_, cur_idx);
+          // Select the edge with the highest expected Fiedler gain.
+          // required_node=cur_idx restricts candidates to pairs that include
+          // the current frame, without needing to manipulate the adjacency
+          // matrix.
+          const EdgeCandidate best_edge = EdgeSelection::selectGoldenEdge(
+              window, adjacency, edge_selection_params_, cur_idx);
 
-        if (best_edge.isValid()) {
-          CHECK(best_edge.id_i == cur_idx || best_edge.id_j == cur_idx);
-          const int hist_idx =
-              (best_edge.id_i == cur_idx) ? best_edge.id_j : best_edge.id_i;
+          if (best_edge.isValid()) {
+            CHECK(best_edge.id_i == cur_idx || best_edge.id_j == cur_idx);
+            const int hist_idx =
+                (best_edge.id_i == cur_idx) ? best_edge.id_j : best_edge.id_i;
 
-          LOG(INFO) << "golden edge between curr " << mono_frame_k_->id_
-                    << " and hist " << mono_frames_[hist_idx]->id_;
+            LOG(INFO) << "golden edge between curr " << mono_frame_k_->id_
+                      << " and hist " << mono_frames_[hist_idx]->id_;
 
-          // ref_frame (arg1) must own the descriptors: use the historical KF.
-          // cur_frame (arg2) is the current frame that receives the
-          // associations.
-          tracker_->featureTrackingDesc(
-              mono_frames_.at(hist_idx).get(),
-              mono_frame_k_.get(),
-              {},
-              frontend_params_.feature_detector_params_,
-              std::nullopt,
-              false,
-              DescTrackingMode::kDescriptorOnly);
-        }
+            // ref_frame (arg1) must own the descriptors: use the historical KF.
+            // cur_frame (arg2) is the current frame that receives the
+            // associations.
+            tracker_->featureTrackingDesc(
+                mono_frames_.at(hist_idx).get(),
+                mono_frame_k_.get(),
+                {},
+                frontend_params_.feature_detector_params_,
+                std::nullopt,
+                false,
+                DescTrackingMode::kDescriptorOnly);
+          } else {
+            LOG(WARNING) << "No valid golden edge found for current keyframe "
+                         << mono_frame_k_->id_
+                         << ": no additional tracking will be performed.";
+          }
+        }  // nav_state
+      } else {
+        LOG(WARNING) << "EdgeSelection: skipping — no historical keyframes or "
+                        "low disparity.";
       }
+    } else {
+      LOG(WARNING) << "Skipping edge selection and descriptor tracking due to "
+                      "low disparity.";
     }
 
     if (feature_tracks) {
