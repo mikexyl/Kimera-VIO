@@ -392,6 +392,10 @@ StatusStereoMeasurementsPtr StereoVisionImuFrontend::processStereoFrame(
   if (new_keyframe) {
     ++keyframe_count_;  // mainly for debugging
 
+    // If its been long enough, make it a keyframe
+    last_keyframe_timestamp_ = stereoFrame_k_->timestamp_;
+    stereoFrame_k_->setIsKeyframe(true);
+
     tracker_status_summary_.kfTrackingStatus_mono_ = TrackingStatus::INVALID;
     tracker_status_summary_.kfTrackingStatus_stereo_ = TrackingStatus::INVALID;
 
@@ -558,10 +562,6 @@ StatusStereoMeasurementsPtr StereoVisionImuFrontend::processStereoFrame(
       printTrackingStatus(tracker_status_summary_.kfTrackingStatus_stereo_,
                           "stereo");
     }
-
-    // If its been long enough, make it a keyframe
-    last_keyframe_timestamp_ = stereoFrame_k_->timestamp_;
-    stereoFrame_k_->setIsKeyframe(true);
 
     // Log images if needed.
     if (logger_ &&

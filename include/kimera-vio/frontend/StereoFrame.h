@@ -61,8 +61,16 @@ class StereoFrame {
   /// Setters
   inline void setIsKeyframe(bool is_kf) {
     is_keyframe_ = is_kf;
-    left_frame_.isKeyframe_ = is_kf;
-    right_frame_.isKeyframe_ = is_kf;
+    if (is_kf) {
+      left_frame_.markAsKeyframe();
+      right_frame_.isKeyframe_ = true;
+      right_frame_.keyframe_id_ = left_frame_.keyframe_id_;
+    } else {
+      left_frame_.isKeyframe_ = false;
+      left_frame_.keyframe_id_ = std::nullopt;
+      right_frame_.isKeyframe_ = false;
+      right_frame_.keyframe_id_ = std::nullopt;
+    }
   }
   inline void setIsRectified(bool is_rect) { is_rectified_ = is_rect; }
   void setRectifiedImages(const cv::Mat& left_rectified_img,

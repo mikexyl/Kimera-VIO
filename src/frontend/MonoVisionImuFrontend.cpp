@@ -216,7 +216,7 @@ MonoFrontendOutput::UniquePtr MonoVisionImuFrontend::nominalSpinMono(
 void MonoVisionImuFrontend::processFirstFrame(const Frame& first_frame) {
   VLOG(2) << "Processing first mono frame \n";
   mono_frame_k_ = std::make_shared<Frame>(first_frame);
-  mono_frame_k_->isKeyframe_ = true;
+  mono_frame_k_->markAsKeyframe();
   last_keyframe_timestamp_ = mono_frame_k_->timestamp_;
 
   CHECK_EQ(mono_frame_k_->keypoints_.size(), 0)
@@ -459,7 +459,7 @@ StatusMonoMeasurementsPtr MonoVisionImuFrontend::processFrame(
     }
 
     last_keyframe_timestamp_ = mono_frame_k_->timestamp_;
-    mono_frame_k_->isKeyframe_ = true;
+    mono_frame_k_->markAsKeyframe();
 
     // Log images if needed.
     if (logger_ &&

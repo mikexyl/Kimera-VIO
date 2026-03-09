@@ -1556,6 +1556,11 @@ void Tracker::featureTrackingDesc(
   CHECK_NOTNULL(cur_frame);
   auto tic = utils::Timer::tic();
 
+  CHECK(ref_frame->isKeyframe_);
+  CHECK(cur_frame->isKeyframe_);
+  CHECK_GT(*cur_frame->keyframe_id_, *ref_frame->keyframe_id_);
+  int kf_interval = *cur_frame->keyframe_id_ - *ref_frame->keyframe_id_;
+
   // Fill up structure for reference pixels and their labels.
   KeypointsCV px_ref;
   std::vector<size_t> indices_of_valid_landmarks;
@@ -1643,11 +1648,12 @@ void Tracker::featureTrackingDesc(
     auto cur_i = match.trainIdx;
 
     auto lmk_age = ref_frame->landmarks_age_.at(ref_i);
-    if (invalidate_landmarks and
-        lmk_age > tracker_params_.max_feature_track_age_) {
+    if (lmk_age + kf_interval >= tracker_params_.max_feature_track_age_) {
       // If the feature is too old, we do not track it anymore.
-      ref_frame->landmarks_.at(ref_i) = -1;
-      ref_frame->of_landmarks_.at(ref_i) = -1;
+      if (invalidate_landmarks) {
+        ref_frame->landmarks_.at(ref_i) = -1;
+        ref_frame->of_landmarks_.at(ref_i) = -1;
+      }
       continue;
     }
 
@@ -1665,9 +1671,10 @@ void Tracker::featureTrackingDesc(
     // mergeLandmark(ref_frame.get(), ref_i, &ref_kp_kdtree);
     cur_frame->landmarks_.at(cur_i) = ref_frame->landmarks_.at(ref_i);
     tracked_lmk_ids.insert(ref_frame->landmarks_.at(ref_i));
-    ref_frame->landmarks_age_.at(ref_i)++;
-    cur_frame->landmarks_age_.at(cur_i) = ref_frame->landmarks_age_.at(ref_i) +
-                                          1;  // increment age of feature track
+    ref_frame->landmarks_age_.at(ref_i) += kf_interval;
+    cur_frame->landmarks_age_.at(cur_i) =
+        ref_frame->landmarks_age_.at(ref_i) +
+        kf_interval;  // increment age of feature track
     cur_frame->scores_.at(cur_i) = static_cast<double>(match.distance);
     if (cur_frame->scores_.at(cur_i) < min_score) {
       min_score = cur_frame->scores_.at(cur_i);

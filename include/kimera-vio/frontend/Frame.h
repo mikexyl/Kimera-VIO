@@ -20,8 +20,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include <atomic>
 #include <cstdlib>
 #include <numeric>
+#include <optional>
 #include <opencv2/core/core.hpp>
 #include <opencv2/features2d/features2d.hpp>
 #include <opencv2/highgui/highgui.hpp>
@@ -73,6 +75,7 @@ class Frame : public PipelinePayload {
         cam_param_(frame.cam_param_),
         img_(frame.img_),
         isKeyframe_(frame.isKeyframe_),
+        keyframe_id_(frame.keyframe_id_),
         keypoints_(frame.keypoints_),
         keypoints_undistorted_(frame.keypoints_undistorted_),
         scores_(frame.scores_),
@@ -170,6 +173,14 @@ class Frame : public PipelinePayload {
 
   // Results of image processing.
   bool isKeyframe_ = false;
+  std::optional<FrameId> keyframe_id_ = std::nullopt;
+
+  void markAsKeyframe() {
+    if (!isKeyframe_) {
+      isKeyframe_ = true;
+      keyframe_id_ = keyframe_counter_++;
+    }
+  }
 
   // These containers must have same size.
   KeypointsCV keypoints_;
@@ -190,6 +201,8 @@ class Frame : public PipelinePayload {
   mutable cv::Mat detection_mask_;
 
   cv::Mat xfeat_M1_, xfeat_x_prep_;
+
+  inline static std::atomic<FrameId> keyframe_counter_{0};
   std::vector<double> prim_stds_;
   std::vector<double> secd_stds_;
   std::vector<double> secd_scores_;
