@@ -314,6 +314,8 @@ StatusMonoMeasurementsPtr MonoVisionImuFrontend::processFrame(
       shouldBeKeyframe(*mono_frame_k_, *mono_frame_lkf_, &n_tracked);
   if (new_keyframe) {
     ++keyframe_count_;
+    last_keyframe_timestamp_ = mono_frame_k_->timestamp_;
+    mono_frame_k_->markAsKeyframe();
 
     CHECK_EQ(mono_frame_lkf_->keypoints_.size(),
              mono_frame_lkf_->scores_.size())
@@ -457,9 +459,6 @@ StatusMonoMeasurementsPtr MonoVisionImuFrontend::processFrame(
       printTrackingStatus(tracker_status_summary_.kfTrackingStatus_mono_,
                           "mono");
     }
-
-    last_keyframe_timestamp_ = mono_frame_k_->timestamp_;
-    mono_frame_k_->markAsKeyframe();
 
     // Log images if needed.
     if (logger_ &&

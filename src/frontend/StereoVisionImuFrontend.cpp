@@ -535,8 +535,6 @@ StatusStereoMeasurementsPtr StereoVisionImuFrontend::processStereoFrame(
           CHECK(best_edge.id_i == cur_idx or best_edge.id_j == cur_idx);
           const int hist_idx =
               (best_edge.id_i == cur_idx) ? best_edge.id_j : best_edge.id_i;
-          LOG(INFO) << "golden edge between curr " << stereoFrame_k_->id_
-                    << " and past " << stereo_frames_.at(hist_idx)->id_;
           tracker_->featureTrackingDesc(
               &stereo_frames_.at(hist_idx)->left_frame_,
               &stereoFrame_k_->left_frame_,
@@ -552,8 +550,8 @@ StatusStereoMeasurementsPtr StereoVisionImuFrontend::processStereoFrame(
         }
       }  // nav_state
     } else {
-      LOG(WARNING) << "EdgeSelection: skipping — no historical keyframes or "
-                      "low disparity.";
+      // LOG(WARNING) << "EdgeSelection: skipping — no historical keyframes or "
+                      // "low disparity.";
     }
 
     if (VLOG_IS_ON(2)) {
