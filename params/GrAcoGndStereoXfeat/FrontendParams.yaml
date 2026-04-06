@@ -107,7 +107,7 @@ track_on_keyframe: 1
 min_lmk_merge_sim: 0.7
 max_lmk_merge_px: 0
 
-kf_queue_size: 10
+kf_queue_size: 0
 rematch_threshold: 0.5
 
 vilib_cell_width: 32
@@ -171,7 +171,7 @@ medianBlurDisparity: 0
 
 stereoDepthMethod: ONNX_Stereo
 # enginePath: /workspaces/src/ONNX-FastACVNet-Depth-Estimation/models/fast_acvnet_plus_generalization_opset11_288x512.onnx
-enginePath: /workspaces/src/ONNX-FastACVNet-Depth-Estimation/models/fast_acvnet_plus_generalization_opset11_288x512.onnx
+enginePath: /workspaces/src/xfeat-cpp/onnx_model/fast_acvnet_plus_generalization_opset11_288x512.onnx
 dispWidth: 512
 dispHeight: 288
 onnxWarmupIterations: 3
