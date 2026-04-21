@@ -98,9 +98,13 @@ void FeatureDetectorParams::print() const {
 }
 
 bool FeatureDetectorParams::parseYAML(const std::string& filepath) {
-  YamlParser yaml_parser(filepath);
+  const auto get_yaml_param = [&filepath](const auto& id, auto* output) {
+    YamlParser yaml_parser(filepath);
+    yaml_parser.getYamlParam(id, output);
+  };
+
   int feature_detector_type;
-  yaml_parser.getYamlParam("feature_detector_type", &feature_detector_type);
+  get_yaml_param("feature_detector_type", &feature_detector_type);
   switch (feature_detector_type) {
     case VIO::to_underlying(FeatureDetectorType::FAST): {
       feature_detector_type_ = FeatureDetectorType::FAST;
@@ -123,18 +127,13 @@ bool FeatureDetectorParams::parseYAML(const std::string& filepath) {
     }
   }
 
-  yaml_parser.getYamlParam("enable_subpixel_corner_finder",
-                           &enable_subpixel_corner_refinement_);
+  get_yaml_param("enable_subpixel_corner_finder",
+                 &enable_subpixel_corner_refinement_);
 
-  if (enable_subpixel_corner_refinement_) {
-    subpixel_corner_finder_params_.parseYAML(filepath);
-  }
-
-  yaml_parser.getYamlParam("enable_non_max_suppression",
-                           &enable_non_max_suppression_);
+  get_yaml_param("enable_non_max_suppression",
+                 &enable_non_max_suppression_);
   int non_max_suppression_type;
-  yaml_parser.getYamlParam("non_max_suppression_type",
-                           &non_max_suppression_type);
+  get_yaml_param("non_max_suppression_type", &non_max_suppression_type);
   switch (non_max_suppression_type) {
     case VIO::to_underlying(AnmsAlgorithmType::TopN): {
       non_max_suppression_type_ = AnmsAlgorithmType::TopN;
@@ -166,18 +165,24 @@ bool FeatureDetectorParams::parseYAML(const std::string& filepath) {
     }
   }
 
-  yaml_parser.getYamlParam("maxFeaturesPerFrame", &max_features_per_frame_);
+  get_yaml_param("maxFeaturesPerFrame", &max_features_per_frame_);
 
   // GFTT specific parameters
-  yaml_parser.getYamlParam("quality_level", &quality_level_);
-  yaml_parser.getYamlParam("min_distance",
-                           &min_distance_btw_tracked_and_detected_features_);
-  yaml_parser.getYamlParam("block_size", &block_size_);
-  yaml_parser.getYamlParam("use_harris_detector", &use_harris_corner_detector_);
-  yaml_parser.getYamlParam("k", &k_);
+  get_yaml_param("quality_level", &quality_level_);
+  get_yaml_param("min_distance",
+                 &min_distance_btw_tracked_and_detected_features_);
+  get_yaml_param("block_size", &block_size_);
+  get_yaml_param("use_harris_detector", &use_harris_corner_detector_);
+  get_yaml_param("k", &k_);
 
   // FAST specific params
-  yaml_parser.getYamlParam("fast_thresh", &fast_thresh_);
+  get_yaml_param("fast_thresh", &fast_thresh_);
+
+  if (enable_subpixel_corner_refinement_) {
+    subpixel_corner_finder_params_.parseYAML(filepath);
+  }
+
+  return true;
 }
 
 bool FeatureDetectorParams::equals(const FeatureDetectorParams& tp2,

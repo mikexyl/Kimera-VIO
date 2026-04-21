@@ -251,7 +251,7 @@ class StereoCamera {
         UtilsOpenCV::cvMatToGtsamRot3(right_cam_rectified_params->R_rectify_)
             .inverse();
     gtsam::Pose3 camR_Pose_camRrect =
-        gtsam::Pose3(camR_Rot_camRrect, gtsam::Point3());
+        gtsam::Pose3(camR_Rot_camRrect, gtsam::Point3::Zero());
     gtsam::Pose3 B_Pose_camRrect =
         (right_cam_params.body_Pose_cam_).compose(camR_Pose_camRrect);
 

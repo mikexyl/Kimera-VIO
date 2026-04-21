@@ -52,7 +52,7 @@ StereoVisionFrontEnd::StereoVisionFrontEnd(
     : stereoFrame_k_(nullptr),
       stereoFrame_km1_(nullptr),
       stereoFrame_lkf_(nullptr),
-      keyframe_R_ref_frame_(gtsam::Rot3::Identity()),
+      keyframe_R_ref_frame_(gtsam::Rot3()),
       frame_count_(0),
       keyframe_count_(0),
       feature_detector_(nullptr),
@@ -405,7 +405,7 @@ void StereoVisionFrontEnd::outlierRejectionMono(
     TrackingStatusPose* status_pose_mono) {
   CHECK_NOTNULL(status_pose_mono);
   if (tracker_.tracker_params_.ransac_use_2point_mono_ &&
-      !calLrectLkf_R_camLrectKf_imu.equals(gtsam::Rot3::Identity()) &&
+      !calLrectLkf_R_camLrectKf_imu.equals(gtsam::Rot3()) &&
       !force_53point_ransac_) {
     // 2-point RANSAC.
     *status_pose_mono = tracker_.geometricOutlierRejectionMonoGivenRotation(
@@ -443,7 +443,7 @@ void StereoVisionFrontEnd::outlierRejectionStereo(
 
   gtsam::Matrix infoMatStereoTranslation = gtsam::Matrix3::Zero();
   if (tracker_.tracker_params_.ransac_use_1point_stereo_ &&
-      !calLrectLkf_R_camLrectKf_imu.equals(gtsam::Rot3::Identity()) &&
+      !calLrectLkf_R_camLrectKf_imu.equals(gtsam::Rot3()) &&
       !force_53point_ransac_) {
     // 1-point RANSAC.
     std::tie(*status_pose_stereo, infoMatStereoTranslation) =

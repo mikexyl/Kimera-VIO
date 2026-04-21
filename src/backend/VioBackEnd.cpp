@@ -63,6 +63,36 @@ DEFINE_bool(compute_state_covariance,
 
 namespace VIO {
 
+namespace {
+
+gtsam::Vector6 MakeSplitVector6(const double first, const double second) {
+  gtsam::Vector6 values;
+  values << first, first, first, second, second, second;
+  return values;
+}
+
+__attribute__((noinline)) gtsam::SharedNoiseModel MakeDiagonalSigmas6(
+    const gtsam::Vector6& sigmas) {
+  return gtsam::noiseModel::Diagonal::Sigmas(sigmas);
+}
+
+__attribute__((noinline)) gtsam::SharedNoiseModel MakeDiagonalPrecisions6(
+    const gtsam::Vector6& precisions) {
+  return gtsam::noiseModel::Diagonal::Precisions(precisions);
+}
+
+__attribute__((noinline)) gtsam::SharedNoiseModel MakeGaussianCovariance6(
+    const gtsam::Matrix66& covariance) {
+  return gtsam::noiseModel::Gaussian::Covariance(covariance);
+}
+
+__attribute__((noinline)) gtsam::SharedNoiseModel MakeIsotropicSigma3(
+    const double sigma) {
+  return gtsam::noiseModel::Isotropic::Sigma(3, sigma);
+}
+
+}  // namespace
+
 /* -------------------------------------------------------------------------- */
 VioBackEnd::VioBackEnd(const Pose3& B_Pose_leftCam,
                        const StereoCalibPtr& stereo_calibration,
@@ -751,11 +781,11 @@ void VioBackEnd::addImuFactor(const FrameId& from_id,
       // 1/sqrt(nominalImuRate_) to discretize, then
       // sqrt(pim_->deltaTij()/nominalImuRate_) to count the nr of measurements.
       const double d = std::sqrt(pim.deltaTij()) / imu_params_.nominal_rate_;
-      Vector6 biasSigmas;
-      biasSigmas.head<3>().setConstant(d * imu_params_.acc_walk_);
-      biasSigmas.tail<3>().setConstant(d * imu_params_.gyro_walk_);
-      const gtsam::SharedNoiseModel& bias_noise_model =
-          gtsam::noiseModel::Diagonal::Sigmas(biasSigmas);
+      const gtsam::Vector6 biasSigmas =
+          MakeSplitVector6(d * imu_params_.acc_walk_,
+                           d * imu_params_.gyro_walk_);
+      const gtsam::SharedNoiseModel bias_noise_model =
+          MakeDiagonalSigmas6(biasSigmas);
 
       new_imu_prior_and_other_factors_.push_back(
           boost::make_shared<
@@ -786,12 +816,11 @@ void VioBackEnd::addImuFactor(const FrameId& from_id,
 void VioBackEnd::addBetweenFactor(const FrameId& from_id,
                                   const FrameId& to_id,
                                   const gtsam::Pose3& from_id_POSE_to_id) {
-  Vector6 precisions;
-  precisions.head<3>().setConstant(backend_params_.betweenRotationPrecision_);
-  precisions.tail<3>().setConstant(
-      backend_params_.betweenTranslationPrecision_);
-  const gtsam::SharedNoiseModel& betweenNoise_ =
-      gtsam::noiseModel::Diagonal::Precisions(precisions);
+  const gtsam::Vector6 precisions =
+      MakeSplitVector6(backend_params_.betweenRotationPrecision_,
+                       backend_params_.betweenTranslationPrecision_);
+  const gtsam::SharedNoiseModel betweenNoise_ =
+      MakeDiagonalPrecisions6(precisions);
 
   new_imu_prior_and_other_factors_.push_back(
       boost::make_shared<gtsam::BetweenFactor<gtsam::Pose3>>(
@@ -1069,7 +1098,7 @@ void VioBackEnd::addInitialPriorFactors(const FrameId& frame_id) {
   // Add pose prior.
   // TODO(Toni): Make this noise model a member constant.
   gtsam::SharedNoiseModel noise_init_pose =
-      gtsam::noiseModel::Gaussian::Covariance(pose_prior_covariance);
+      MakeGaussianCovariance6(pose_prior_covariance);
   new_imu_prior_and_other_factors_.push_back(
       boost::make_shared<gtsam::PriorFactor<gtsam::Pose3>>(
           gtsam::Symbol('x', frame_id), W_Pose_B_lkf_, noise_init_pose));
@@ -1077,19 +1106,18 @@ void VioBackEnd::addInitialPriorFactors(const FrameId& frame_id) {
   // Add initial velocity priors.
   // TODO(Toni): Make this noise model a member constant.
   gtsam::SharedNoiseModel noise_init_vel_prior =
-      gtsam::noiseModel::Isotropic::Sigma(
-          3, backend_params_.initialVelocitySigma_);
+      MakeIsotropicSigma3(backend_params_.initialVelocitySigma_);
   new_imu_prior_and_other_factors_.push_back(
       boost::make_shared<gtsam::PriorFactor<gtsam::Vector3>>(
           gtsam::Symbol('v', frame_id), W_Vel_B_lkf_, noise_init_vel_prior));
 
   // Add initial bias priors:
-  Vector6 prior_biasSigmas;
-  prior_biasSigmas.head<3>().setConstant(backend_params_.initialAccBiasSigma_);
-  prior_biasSigmas.tail<3>().setConstant(backend_params_.initialGyroBiasSigma_);
+  const gtsam::Vector6 prior_biasSigmas =
+      MakeSplitVector6(backend_params_.initialAccBiasSigma_,
+                       backend_params_.initialGyroBiasSigma_);
   // TODO(Toni): Make this noise model a member constant.
   gtsam::SharedNoiseModel imu_bias_prior_noise =
-      gtsam::noiseModel::Diagonal::Sigmas(prior_biasSigmas);
+      MakeDiagonalSigmas6(prior_biasSigmas);
   if (VLOG_IS_ON(10)) {
     LOG(INFO) << "Imu bias for backend prior:";
     imu_bias_lkf_.print();
@@ -1516,10 +1544,10 @@ void VioBackEnd::setFactorsParams(
 
   //////////////////////// NO MOTION FACTORS SETTINGS
   /////////////////////////////
-  Vector6 sigmas;
-  sigmas.head<3>().setConstant(vio_params.noMotionRotationSigma_);
-  sigmas.tail<3>().setConstant(vio_params.noMotionPositionSigma_);
-  *no_motion_prior_noise = gtsam::noiseModel::Diagonal::Sigmas(sigmas);
+  const gtsam::Vector6 sigmas =
+      MakeSplitVector6(vio_params.noMotionRotationSigma_,
+                       vio_params.noMotionPositionSigma_);
+  *no_motion_prior_noise = MakeDiagonalSigmas6(sigmas);
 
   //////////////////////// ZERO VELOCITY FACTORS SETTINGS
   /////////////////////////

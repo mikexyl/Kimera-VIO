@@ -468,8 +468,8 @@ class VioBackEnd {
   gtsam::Matrix state_covariance_lkf_ = Eigen::MatrixXd::Zero(15, 15);
 
   // Vision params.
-  gtsam::SmartStereoProjectionParams smart_factors_params_;
-  gtsam::SharedNoiseModel smart_noise_;
+  gtsam::SmartStereoProjectionParams smart_factors_params_{};
+  gtsam::SharedNoiseModel smart_noise_ = nullptr;
   const Pose3 B_Pose_leftCam_;  // pose of the left camera wrt body
   const gtsam::Cal3_S2Stereo::shared_ptr
       stereo_cal_;  // stores calibration, baseline
@@ -514,9 +514,9 @@ class VioBackEnd {
 
  private:
   //! No motion factors settings.
-  gtsam::SharedNoiseModel zero_velocity_prior_noise_;
-  gtsam::SharedNoiseModel no_motion_prior_noise_;
-  gtsam::SharedNoiseModel constant_velocity_prior_noise_;
+  gtsam::SharedNoiseModel zero_velocity_prior_noise_ = nullptr;
+  gtsam::SharedNoiseModel no_motion_prior_noise_ = nullptr;
+  gtsam::SharedNoiseModel constant_velocity_prior_noise_ = nullptr;
 
   //! Landmark count.
   int landmark_count_;
