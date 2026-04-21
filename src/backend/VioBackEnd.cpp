@@ -919,8 +919,7 @@ void VioBackEnd::optimize(
   if (VLOG_IS_ON(10)) {
     // Get state before optimization to compute error.
     debug_info_.stateBeforeOpt = gtsam::Values(state_);
-    BOOST_FOREACH (const gtsam::Values::ConstKeyValuePair& key_value,
-                   new_values_) {
+    for (const auto& key_value : new_values_) {
       debug_info_.stateBeforeOpt.insert(key_value.key, key_value.value);
     }
   }
@@ -952,8 +951,7 @@ void VioBackEnd::optimize(
   std::map<Key, double> timestamps;
   // Also needs to convert to seconds...
   double timestamp_kf = static_cast<double>(timestamp_kf_nsec) * 1e-9;
-  BOOST_FOREACH (const gtsam::Values::ConstKeyValuePair& key_value,
-                 new_values_) {
+  for (const auto& key_value : new_values_) {
     timestamps[key_value.key] =
         timestamp_kf;  // for the latest pose, velocity, and bias
   }
@@ -1479,12 +1477,12 @@ void VioBackEnd::setIsam2Params(const BackendParams& vio_params,
 
   // TODO (Toni): remove hardcoded
   // Cache Linearized Factors seems to improve performance.
-  isam_param->setCacheLinearizedFactors(true);
+  isam_param->cacheLinearizedFactors = true;
   isam_param->relinearizeThreshold = vio_params.relinearizeThreshold_;
   isam_param->relinearizeSkip = vio_params.relinearizeSkip_;
   isam_param->findUnusedFactorSlots = true;
   // isam_param->enablePartialRelinearizationCheck = true;
-  isam_param->setEvaluateNonlinearError(false);  // only for debugging
+  isam_param->evaluateNonlinearError = false;  // only for debugging
   isam_param->enableDetailedResults = false;     // only for debugging.
   isam_param->factorization = gtsam::ISAM2Params::CHOLESKY;  // QR
   if (VLOG_IS_ON(1)) isam_param->print("isam_param");
@@ -1697,7 +1695,7 @@ void VioBackEnd::printSmootherInfo(
   /////////////////////////////
   LOG(INFO) << "Nr of values in state_ : " << state_.size() << ", with keys:";
   std::cout << "[\n\t";
-  BOOST_FOREACH (const gtsam::Values::ConstKeyValuePair& key_value, state_) {
+  for (const auto& key_value : state_) {
     std::cout << gtsam::DefaultKeyFormatter(key_value.key) << " ";
   }
   std::cout << std::endl;
@@ -1707,8 +1705,7 @@ void VioBackEnd::printSmootherInfo(
   LOG(INFO) << "Nr values in new_values_ : " << new_values_.size()
             << ", with keys:";
   std::cout << "[\n\t";
-  BOOST_FOREACH (const gtsam::Values::ConstKeyValuePair& key_value,
-                 new_values_) {
+  for (const auto& key_value : new_values_) {
     std::cout << " " << gtsam::DefaultKeyFormatter(key_value.key) << " ";
   }
   std::cout << std::endl;

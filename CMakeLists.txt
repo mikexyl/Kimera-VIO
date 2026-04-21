@@ -32,14 +32,37 @@ endif()
 find_package(Gflags REQUIRED)
 find_package(Glog 0.3.5 REQUIRED)
 find_package(GTSAM REQUIRED)
+get_target_property(GTSAM_LIBRARY_LOCATION gtsam IMPORTED_LOCATION_RELEASE)
+if(NOT GTSAM_LIBRARY_LOCATION)
+  get_target_property(GTSAM_LIBRARY_LOCATION gtsam IMPORTED_LOCATION)
+endif()
+if(GTSAM_LIBRARY_LOCATION)
+  get_filename_component(GTSAM_LIBRARY_DIR "${GTSAM_LIBRARY_LOCATION}" DIRECTORY)
+endif()
+find_library(GTSAM_UNSTABLE_LIBRARY
+  NAMES gtsam_unstable
+  HINTS ${GTSAM_LIBRARY_DIR})
+if(NOT GTSAM_UNSTABLE_LIBRARY)
+  message(FATAL_ERROR "Could not find gtsam_unstable next to ${GTSAM_LIBRARY_LOCATION}")
+endif()
+if(NOT TARGET gtsam_unstable)
+  add_library(gtsam_unstable SHARED IMPORTED)
+  set_target_properties(gtsam_unstable PROPERTIES
+    IMPORTED_LOCATION "${GTSAM_UNSTABLE_LIBRARY}"
+    INTERFACE_INCLUDE_DIRECTORIES "${GTSAM_INCLUDE_DIR}")
+endif()
 find_package(opengv REQUIRED)
-find_package(OpenCV 3.3.1 REQUIRED)
+find_package(OpenCV 4.2.0 REQUIRED)
 find_package(DBoW2 REQUIRED)
+set(DBoW2_PUBLIC_INCLUDE_DIRS "${DBoW2_INCLUDE_DIRS}")
+if(NOT DBoW2_PUBLIC_INCLUDE_DIRS)
+  set(DBoW2_PUBLIC_INCLUDE_DIRS "${DBoW2_INCLUDE_DIR}")
+endif()
 if(NOT TARGET DBoW2::DBoW2)
   add_library(DBoW2::DBoW2 INTERFACE IMPORTED)
   set_target_properties(DBoW2::DBoW2 PROPERTIES
   INTERFACE_LINK_LIBRARIES "${DBoW2_LIBRARIES}"
-  INTERFACE_INCLUDE_DIRECTORIES "${DBoW2_INCLUDE_DIRS}")
+  INTERFACE_INCLUDE_DIRECTORIES "${DBoW2_PUBLIC_INCLUDE_DIRS}")
 endif()
 find_package(KimeraRPGO REQUIRED)
 
@@ -116,10 +139,6 @@ add_subdirectory(include/kimera-vio/visualizer)
 add_subdirectory(src/visualizer)
 
 target_link_libraries(${PROJECT_NAME}
-  PRIVATE
-    opengv
-    DBoW2::DBoW2
-    KimeraRPGO
   PUBLIC
     Boost::boost
     ${OpenCV_LIBRARIES}
@@ -127,6 +146,10 @@ target_link_libraries(${PROJECT_NAME}
     ${GLOG_LIBRARIES}
     gtsam
     gtsam_unstable
+    DBoW2::DBoW2
+  PRIVATE
+    opengv
+    KimeraRPGO
  )
 target_include_directories(${PROJECT_NAME}
   PUBLIC
@@ -134,7 +157,7 @@ target_include_directories(${PROJECT_NAME}
     ${GFLAGS_INCLUDE_DIRS}
     ${GLOG_INCLUDE_DIRS}
     ${GTSAM_INCLUDE_DIR}
-    ${DBoW2_INCLUDE_DIRS}/..
+    ${DBoW2_PUBLIC_INCLUDE_DIRS}
     ${opengv_DIR}/../../../include
     $<BUILD_INTERFACE:${CMAKE_CURRENT_LIST_DIR}/include>
     $<INSTALL_INTERFACE:include>
@@ -153,8 +176,11 @@ target_compile_features(${PROJECT_NAME} PUBLIC
 # e.g. when testing
 add_library(kimera_vio::kimera_vio ALIAS kimera_vio)
 
-add_executable(stereoVIOEuroc ./examples/KimeraVIO.cpp)
-target_link_libraries(stereoVIOEuroc PUBLIC kimera_vio::kimera_vio)
+option(KIMERA_BUILD_EXAMPLES "Build Kimera-VIO example binaries" OFF)
+if(KIMERA_BUILD_EXAMPLES)
+  add_executable(stereoVIOEuroc ./examples/KimeraVIO.cpp)
+  target_link_libraries(stereoVIOEuroc PUBLIC kimera_vio::kimera_vio)
+endif()
 
 ############################### TESTS ##########################################
 ### Add testing

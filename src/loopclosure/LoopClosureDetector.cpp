@@ -80,13 +80,16 @@ LoopClosureDetector::LoopClosureDetector(
                                           lcd_params_.edge_threshold_,
                                           lcd_params_.first_level_,
                                           lcd_params_.WTA_K_,
-                                          lcd_params_.score_type_,
+                                          static_cast<cv::ORB::ScoreType>(
+                                              lcd_params_.score_type_),
                                           lcd_params_.patch_sze_,
                                           lcd_params_.fast_threshold_);
 
   // Initialize our feature matching object:
   orb_feature_matcher_ =
-      cv::DescriptorMatcher::create(lcd_params_.matcher_type_);
+      cv::DescriptorMatcher::create(
+          static_cast<cv::DescriptorMatcher::MatcherType>(
+              lcd_params_.matcher_type_));
 
   // Load ORB vocabulary:
   std::ifstream f_vocab(FLAGS_vocabulary_path.c_str());

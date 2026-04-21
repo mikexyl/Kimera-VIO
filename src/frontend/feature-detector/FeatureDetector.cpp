@@ -42,7 +42,7 @@ FeatureDetector::FeatureDetector(
           10;  // Very small bcs we don't use descriptors (yet).
       static constexpr int first_level = 0;
       static constexpr int WTA_K = 0;  // We don't use descriptors (yet).
-      static constexpr int score_type = cv::ORB::HARRIS_SCORE;
+      static constexpr auto score_type = cv::ORB::HARRIS_SCORE;
       static constexpr int patch_size = 0;  // We don't use descriptors (yet).
       feature_detector_ =
           cv::ORB::create(feature_detector_params_.max_features_per_frame_,
@@ -51,7 +51,7 @@ FeatureDetector::FeatureDetector(
                           edge_threshold,
                           first_level,
                           WTA_K,
-                          score_type,
+                          static_cast<cv::ORB::ScoreType>(score_type),
                           patch_size,
                           feature_detector_params.fast_thresh_);
       break;
