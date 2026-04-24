@@ -49,4 +49,10 @@ void VioBackendModule::registerMapUpdateCallback(
   vio_backend_->registerMapUpdateCallback(map_update_callback);
 }
 
+void VioBackendModule::enqueueExternalPoseBeliefs(
+    const std::vector<ExternalPoseBelief>& beliefs) {
+  CHECK(vio_backend_);
+  vio_backend_->enqueueExternalPoseBeliefs(beliefs);
+}
+
 }  // namespace VIO

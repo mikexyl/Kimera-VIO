@@ -46,7 +46,10 @@
 
 #include <fstream>
 #include <iostream>
+#include <deque>
+#include <map>
 #include <memory>
+#include <mutex>
 #include <unordered_map>
 
 #include "kimera-vio/backend/VioBackend-definitions.h"
@@ -117,6 +120,10 @@ class VioBackend {
    * optimizing.
    */
   void registerMapUpdateCallback(const MapCallback& map_update_callback);
+
+  // Thread-safe ingestion of external pose beliefs (e.g., from LiDAR backend).
+  void enqueueExternalPoseBeliefs(
+      const std::vector<ExternalPoseBelief>& beliefs);
 
   // Get valid 3D points - TODO: this copies the graph.
   void get3DPoints(std::vector<gtsam::Point3>* points_3d) const;
@@ -361,6 +368,40 @@ class VioBackend {
       const std::vector<LandmarkId>& lmk_ids_of_new_smart_factors_tmp,
       SmartFactorMap* old_smart_factors);
 
+  struct ExternalBeliefFactorId {
+    uint8_t source_agent = 0u;
+    FrameId local_frame_id = 0;
+    bool operator==(const ExternalBeliefFactorId& other) const {
+      return source_agent == other.source_agent &&
+             local_frame_id == other.local_frame_id;
+    }
+  };
+
+  struct ExternalBeliefFactorSlot {
+    ExternalBeliefFactorId id;
+    size_t slot = 0u;
+  };
+
+  std::vector<ExternalPoseBelief> popPendingExternalPoseBeliefs();
+
+  void updateKeyframeTimestampIndex(const FrameId& frame_id,
+                                    const Timestamp& timestamp_kf_nsec);
+
+  bool resolveExternalBeliefTargetFrame(const ExternalPoseBelief& belief,
+                                        const FrameId& cur_id,
+                                        FrameId* local_frame_id) const;
+
+  void collectExternalBeliefFactors(
+      const FrameId& cur_id,
+      gtsam::FactorIndices* delete_slots,
+      gtsam::NonlinearFactorGraph* new_factors_tmp,
+      std::vector<ExternalBeliefFactorId>* inserted_external_factor_ids);
+
+  void refreshExternalBeliefFactorSlots(
+      const size_t num_factors_before_external,
+      const std::vector<ExternalBeliefFactorId>&
+          inserted_external_factor_ids);
+
   // Set parameters for all types of factors.
   void setFactorsParams(
       const BackendParams& vio_params,
@@ -541,6 +582,14 @@ class VioBackend {
 
   //! Number of Cheirality exceptions
   size_t counter_of_exceptions_ = 0;
+
+  // External belief bridge state.
+  mutable std::mutex external_beliefs_mutex_;
+  std::deque<ExternalPoseBelief> pending_external_pose_beliefs_;
+  std::vector<ExternalBeliefFactorSlot> active_external_belief_factor_slots_;
+  std::map<FrameId, double> keyframe_timestamp_sec_;
+  size_t max_pending_external_pose_beliefs_ = 800u;
+  double external_belief_timestamp_tolerance_sec_ = 0.05;
 
   //! Logger.
   const bool log_output_ = {false};

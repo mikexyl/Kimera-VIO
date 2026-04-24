@@ -32,6 +32,8 @@
 #include <gflags/gflags.h>
 #include <glog/logging.h>
 
+#include <algorithm>
+#include <cmath>
 #include <limits>  // for numeric_limits<>
 #include <map>
 #include <string>
@@ -250,6 +252,229 @@ void VioBackend::registerImuBiasUpdateCallback(
 void VioBackend::registerMapUpdateCallback(
     const MapCallback& map_update_callback) {
   map_update_callback_ = map_update_callback;
+}
+
+void VioBackend::enqueueExternalPoseBeliefs(
+    const std::vector<ExternalPoseBelief>& beliefs) {
+  if (beliefs.empty()) {
+    return;
+  }
+
+  std::lock_guard<std::mutex> lock(external_beliefs_mutex_);
+  for (const auto& belief : beliefs) {
+    pending_external_pose_beliefs_.push_back(belief);
+  }
+  while (pending_external_pose_beliefs_.size() > max_pending_external_pose_beliefs_) {
+    pending_external_pose_beliefs_.pop_front();
+  }
+}
+
+std::vector<ExternalPoseBelief> VioBackend::popPendingExternalPoseBeliefs() {
+  std::vector<ExternalPoseBelief> beliefs;
+  std::lock_guard<std::mutex> lock(external_beliefs_mutex_);
+  beliefs.reserve(pending_external_pose_beliefs_.size());
+  while (!pending_external_pose_beliefs_.empty()) {
+    beliefs.push_back(pending_external_pose_beliefs_.front());
+    pending_external_pose_beliefs_.pop_front();
+  }
+  return beliefs;
+}
+
+void VioBackend::updateKeyframeTimestampIndex(const FrameId& frame_id,
+                                              const Timestamp& timestamp_kf_nsec) {
+  const double stamp_sec = static_cast<double>(timestamp_kf_nsec) * 1e-9;
+  keyframe_timestamp_sec_[frame_id] = stamp_sec;
+
+  const FrameId min_keep_frame =
+      std::max<FrameId>(0, frame_id - static_cast<FrameId>(backend_params_.nr_states_ * 3));
+  auto it = keyframe_timestamp_sec_.begin();
+  while (it != keyframe_timestamp_sec_.end() && it->first < min_keep_frame) {
+    it = keyframe_timestamp_sec_.erase(it);
+  }
+}
+
+bool VioBackend::resolveExternalBeliefTargetFrame(
+    const ExternalPoseBelief& belief,
+    const FrameId& cur_id,
+    FrameId* local_frame_id) const {
+  CHECK_NOTNULL(local_frame_id);
+
+  const FrameId oldest_active_frame_id = std::max<FrameId>(
+      0, cur_id - static_cast<FrameId>(backend_params_.nr_states_) + 1);
+  const FrameId requested_frame_id = static_cast<FrameId>(belief.pose_index);
+
+  if (requested_frame_id >= oldest_active_frame_id && requested_frame_id <= cur_id) {
+    *local_frame_id = requested_frame_id;
+    return true;
+  }
+
+  if (belief.stamp_sec <= 0.0 || keyframe_timestamp_sec_.empty()) {
+    return false;
+  }
+
+  double best_dt = std::numeric_limits<double>::max();
+  FrameId best_frame = 0;
+  bool has_best_frame = false;
+  for (const auto& [frame_id, frame_stamp_sec] : keyframe_timestamp_sec_) {
+    if (frame_id < oldest_active_frame_id || frame_id > cur_id) {
+      continue;
+    }
+    const double dt = std::abs(frame_stamp_sec - belief.stamp_sec);
+    if (dt < best_dt) {
+      best_dt = dt;
+      best_frame = frame_id;
+      has_best_frame = true;
+    }
+  }
+
+  if (!has_best_frame || best_dt > external_belief_timestamp_tolerance_sec_) {
+    return false;
+  }
+
+  *local_frame_id = best_frame;
+  return true;
+}
+
+void VioBackend::collectExternalBeliefFactors(
+    const FrameId& cur_id,
+    gtsam::FactorIndices* delete_slots,
+    gtsam::NonlinearFactorGraph* new_factors_tmp,
+    std::vector<ExternalBeliefFactorId>* inserted_external_factor_ids) {
+  CHECK_NOTNULL(delete_slots);
+  CHECK_NOTNULL(new_factors_tmp);
+  CHECK_NOTNULL(inserted_external_factor_ids);
+
+  const FrameId oldest_active_frame_id = std::max<FrameId>(
+      0, cur_id - static_cast<FrameId>(backend_params_.nr_states_) + 1);
+
+  // Remove tracked factors that are already gone from the graph or outside the active window.
+  std::vector<ExternalBeliefFactorSlot> active_slots_kept;
+  active_slots_kept.reserve(active_external_belief_factor_slots_.size());
+  for (const auto& active_slot : active_external_belief_factor_slots_) {
+    if (!smoother_->getFactors().exists(active_slot.slot)) {
+      continue;
+    }
+    if (active_slot.id.local_frame_id < oldest_active_frame_id) {
+      delete_slots->push_back(active_slot.slot);
+      continue;
+    }
+    active_slots_kept.push_back(active_slot);
+  }
+  active_external_belief_factor_slots_.swap(active_slots_kept);
+
+  const auto pending_beliefs = popPendingExternalPoseBeliefs();
+  if (pending_beliefs.empty()) {
+    return;
+  }
+
+  std::map<std::pair<uint8_t, FrameId>, ExternalPoseBelief> selected_beliefs;
+  size_t dropped_unmatched = 0u;
+  for (const auto& belief : pending_beliefs) {
+    FrameId local_frame_id = 0;
+    if (!resolveExternalBeliefTargetFrame(belief, cur_id, &local_frame_id)) {
+      ++dropped_unmatched;
+      continue;
+    }
+    ExternalPoseBelief selected = belief;
+    selected.pose_index = static_cast<uint32_t>(local_frame_id);
+    const auto key = std::make_pair(selected.source_agent, local_frame_id);
+    auto selected_it = selected_beliefs.find(key);
+    if (selected_it == selected_beliefs.end() ||
+        selected.stamp_sec >= selected_it->second.stamp_sec) {
+      selected_beliefs[key] = selected;
+    }
+  }
+
+  size_t inserted_factors = 0u;
+  for (const auto& [id_key, belief] : selected_beliefs) {
+    const FrameId local_frame_id = id_key.second;
+    const gtsam::Key pose_key = gtsam::Symbol(kPoseSymbolChar, local_frame_id);
+    if (!state_.exists(pose_key) && !new_values_.exists(pose_key)) {
+      ++dropped_unmatched;
+      continue;
+    }
+
+    const ExternalBeliefFactorId id{belief.source_agent, local_frame_id};
+
+    // Replace any prior factor associated to the same source/frame pair.
+    active_external_belief_factor_slots_.erase(
+        std::remove_if(active_external_belief_factor_slots_.begin(),
+                       active_external_belief_factor_slots_.end(),
+                       [&](const ExternalBeliefFactorSlot& active_slot) {
+                         if (!(active_slot.id == id)) {
+                           return false;
+                         }
+                         if (smoother_->getFactors().exists(active_slot.slot)) {
+                           delete_slots->push_back(active_slot.slot);
+                         }
+                         return true;
+                       }),
+        active_external_belief_factor_slots_.end());
+
+    gtsam::Vector6 mu = gtsam::Vector6::Zero();
+    gtsam::Matrix6 covariance = gtsam::Matrix6::Zero();
+    for (size_t i = 0u; i < 6u; ++i) {
+      mu(i) = belief.mu[i];
+    }
+    for (size_t r = 0u; r < 6u; ++r) {
+      for (size_t c = 0u; c < 6u; ++c) {
+        covariance(r, c) = belief.covariance[r * 6u + c];
+      }
+    }
+
+    covariance = 0.5 * (covariance + covariance.transpose());
+    if (!covariance.allFinite()) {
+      ++dropped_unmatched;
+      continue;
+    }
+    if (belief.relax_factor > 0.0) {
+      covariance *= (1.0 + belief.relax_factor);
+    }
+    for (size_t i = 0u; i < 6u; ++i) {
+      if (!std::isfinite(covariance(i, i)) || covariance(i, i) <= 1e-9) {
+        covariance(i, i) = 1e-3;
+      }
+    }
+
+    const auto noise = gtsam::noiseModel::Gaussian::Covariance(covariance);
+    new_factors_tmp->emplace_shared<gtsam::PriorFactor<gtsam::Pose3>>(
+        pose_key, gtsam::Pose3::Expmap(mu), noise);
+    inserted_external_factor_ids->push_back(id);
+    ++inserted_factors;
+  }
+
+  if (dropped_unmatched > 0u) {
+    LOG(WARNING) << "Dropped " << dropped_unmatched
+                 << " external beliefs (outside active window or invalid).";
+  }
+  VLOG(2) << "Injected " << inserted_factors << " external belief factors.";
+}
+
+void VioBackend::refreshExternalBeliefFactorSlots(
+    const size_t num_factors_before_external,
+    const std::vector<ExternalBeliefFactorId>& inserted_external_factor_ids) {
+  if (inserted_external_factor_ids.empty()) {
+    return;
+  }
+
+  const auto& new_factor_indices = smoother_->getISAM2Result().newFactorsIndices;
+  const size_t required_size =
+      num_factors_before_external + inserted_external_factor_ids.size();
+  if (new_factor_indices.size() < required_size) {
+    LOG(WARNING) << "Unexpected iSAM2 result while mapping external belief "
+                 << "factor slots: expected at least " << required_size
+                 << " entries, got " << new_factor_indices.size() << ".";
+    return;
+  }
+
+  for (size_t i = 0u; i < inserted_external_factor_ids.size(); ++i) {
+    const size_t slot = new_factor_indices[num_factors_before_external + i];
+    if (!smoother_->getFactors().exists(slot)) {
+      continue;
+    }
+    active_external_belief_factor_slots_.push_back(
+        ExternalBeliefFactorSlot{inserted_external_factor_ids[i], slot});
+  }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1058,6 +1283,7 @@ bool VioBackend::optimize(
   // vector, and is only used to give flexibility to subclasses (regular
   // vio).
   gtsam::FactorIndices delete_slots = extra_factor_slots_to_delete;
+  updateKeyframeTimestampIndex(cur_id, timestamp_kf_nsec);
 
   // TODO we know the actual end size... but I am not sure how to use factor
   // graph API for appending factors without copying or re-allocation...
@@ -1118,6 +1344,19 @@ bool VioBackend::optimize(
   // (factors are not copied)
   new_factors_tmp.push_back(new_imu_prior_and_other_factors_.begin(),
                             new_imu_prior_and_other_factors_.end());
+
+  const size_t num_factors_before_external = new_factors_tmp.size();
+  std::vector<ExternalBeliefFactorId> inserted_external_factor_ids;
+  collectExternalBeliefFactors(cur_id,
+                               &delete_slots,
+                               &new_factors_tmp,
+                               &inserted_external_factor_ids);
+
+  // Avoid repeated deletions of the same slot when replacing beliefs and
+  // removing stale factors in the same iteration.
+  std::sort(delete_slots.begin(), delete_slots.end());
+  delete_slots.erase(std::unique(delete_slots.begin(), delete_slots.end()),
+                     delete_slots.end());
 
   //////////////////////////////////////////////////////////////////////////////
 
@@ -1208,6 +1447,8 @@ bool VioBackend::optimize(
     VLOG(10) << "Starting to find smart factors slots.";
     updateNewSmartFactorsSlots(lmk_ids_of_new_smart_factors_tmp,
                                &old_smart_factors_);
+    refreshExternalBeliefFactorSlots(num_factors_before_external,
+                                     inserted_external_factor_ids);
     VLOG(10) << "Finished to find smart factors slots.";
 
     if (VLOG_IS_ON(5) || log_output_) {

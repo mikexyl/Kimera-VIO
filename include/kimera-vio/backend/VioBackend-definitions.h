@@ -20,6 +20,8 @@
 #include <gtsam_unstable/nonlinear/IncrementalFixedLagSmoother.h>
 #include <gtsam_unstable/slam/SmartStereoProjectionPoseFactor.h>
 
+#include <array>
+#include <cstdint>
 #include <vector>
 
 #include "kimera-vio/common/VioNavState.h"
@@ -106,6 +108,16 @@ class FeatureTrack {
 // frame id and pixel location.
 // TODO(Toni): what is this doing here... should be in Frontend at worst.
 using FeatureTracks = std::unordered_map<LandmarkId, FeatureTrack>;
+
+////////////////////////////////////////////////////////////////////////////////
+struct ExternalPoseBelief {
+  uint8_t source_agent = 0u;
+  uint32_t pose_index = 0u;
+  double stamp_sec = 0.0;
+  std::array<double, 6> mu{};
+  std::array<double, 36> covariance{};
+  double relax_factor = 0.0;
+};
 
 ////////////////////////////////////////////////////////////////////////////////
 class DebugVioInfo {

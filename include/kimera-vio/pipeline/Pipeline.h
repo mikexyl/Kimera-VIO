@@ -90,6 +90,15 @@ class Pipeline {
     data_provider_module_->fillExternalOdometryQueue(odom_measurement);
   }
 
+  inline void enqueueExternalPoseBeliefs(
+      const std::vector<ExternalPoseBelief>& beliefs) {
+    if (beliefs.empty()) {
+      return;
+    }
+    CHECK(vio_backend_module_);
+    vio_backend_module_->enqueueExternalPoseBeliefs(beliefs);
+  }
+
   inline LcdModule* getLcdModule() const { return lcd_module_.get(); }
 
  public:
