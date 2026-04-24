@@ -31,6 +31,7 @@ find_package(opengv REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(DBoW2 REQUIRED)
 find_package(KimeraRPGO REQUIRED)
+find_package(cbs REQUIRED)
 # Pangolin is optional
 find_package(Pangolin QUIET)
 
@@ -130,6 +131,7 @@ target_link_libraries(${PROJECT_NAME}
     gtsam
     gtsam_unstable
     opengv
+    cbs
 )
 target_include_directories(${PROJECT_NAME}
   PUBLIC

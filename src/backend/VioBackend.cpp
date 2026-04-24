@@ -37,9 +37,12 @@
 #include <limits>  // for numeric_limits<>
 #include <map>
 #include <string>
+#include <typeinfo>
+#include <unordered_set>
 #include <utility>  // for make_pair
 #include <vector>
 
+#include "kimera-vio/backend/CbsLocalBeliefCovariance.h"
 #include "kimera-vio/common/VioNavState.h"
 #include "kimera-vio/imu-frontend/ImuFrontend-definitions.h"
 #include "kimera-vio/logging/Logger.h"
@@ -64,6 +67,15 @@ DEFINE_int32(max_number_of_cheirality_exceptions,
 DEFINE_bool(compute_state_covariance,
             false,
             "Flag to compute state covariance from optimization Backend");
+DEFINE_bool(cbs_use_local_smoother_for_belief_covariance,
+            true,
+            "Use a mirror fixed-lag smoother without external belief factors "
+            "to compute local-only covariance for CBS pose belief publishing.");
+DEFINE_bool(cbs_use_bpsam_for_local_belief_covariance,
+            false,
+            "Use a BPSAM snapshot built from the local-sidecar graph/state for "
+            "pose belief covariance extraction. Falls back to local smoother "
+            "covariance if the BPSAM snapshot path fails.");
 DEFINE_bool(no_incremental_pose,
             false,
             "Flag to disable incremental pose usage in backend");
@@ -114,12 +126,20 @@ VioBackend::VioBackend(const gtsam::Pose3& B_Pose_leftCamRect,
   BackendParams::setIsam2Params(backend_params, &isam_param);
 
   smoother_ = std::make_unique<Smoother>(backend_params.nr_states_, isam_param);
+  if (FLAGS_cbs_use_local_smoother_for_belief_covariance) {
+    local_belief_cov_smoother_ =
+        std::make_unique<Smoother>(backend_params.nr_states_, isam_param);
+  }
 #else  // BATCH SMOOTHER
   gtsam::LevenbergMarquardtParams lmParams;
   lmParams.setlambdaInitial(0.0);     // same as GN
   lmParams.setlambdaLowerBound(0.0);  // same as GN
   lmParams.setlambdaUpperBound(0.0);  // same as GN)
   smoother_ = std::make_unique<Smoother>(backend_params.nr_states_, lmParams);
+  if (FLAGS_cbs_use_local_smoother_for_belief_covariance) {
+    local_belief_cov_smoother_ =
+        std::make_unique<Smoother>(backend_params.nr_states_, lmParams);
+  }
 #endif
 
   // Set parameters for all factors.
@@ -224,7 +244,9 @@ BackendOutput::UniquePtr VioBackend::spinOnce(const BackendInput& input) {
         landmark_count_,
         debug_info_,
         lmk_ids_to_3d_points_in_time_horizon,
-        lmk_id_to_lmk_type_map);
+        lmk_id_to_lmk_type_map,
+        pose_belief_local_covariance_lkf_,
+        pose_belief_local_covariance_valid_);
 
     if (logger_) {
       logger_->logBackendOutput(*output_payload);
@@ -734,6 +756,10 @@ void VioBackend::addLandmarkToGraph(const LandmarkId& lmk_id,
   new_smart_factors_.insert(std::make_pair(lmk_id, new_factor));
   old_smart_factors_.insert(
       std::make_pair(lmk_id, std::make_pair(new_factor, -1)));
+  if (local_belief_cov_smoother_) {
+    old_smart_factors_local_belief_cov_.insert(
+        std::make_pair(lmk_id, std::make_pair(new_factor, -1)));
+  }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -766,6 +792,15 @@ void VioBackend::updateLandmarkInGraph(
                << lmk_id;
   }
   old_smart_factors_it->second.first = new_factor;
+  if (local_belief_cov_smoother_) {
+    auto it_local = old_smart_factors_local_belief_cov_.find(lmk_id);
+    if (it_local != old_smart_factors_local_belief_cov_.end()) {
+      it_local->second.first = new_factor;
+    } else {
+      old_smart_factors_local_belief_cov_.insert(
+          std::make_pair(lmk_id, std::make_pair(new_factor, -1)));
+    }
+  }
   VLOG(10) << "updateLandmarkInGraph: added observation to point: " << lmk_id;
 }
 
@@ -1264,6 +1299,9 @@ bool VioBackend::optimize(
     const size_t& max_extra_iterations,
     const gtsam::FactorIndices& extra_factor_slots_to_delete) {
   DCHECK(smoother_) << "Incremental smoother is a null pointer.";
+  const bool use_local_belief_cov_smoother =
+      static_cast<bool>(local_belief_cov_smoother_) &&
+      typeid(*this) == typeid(VioBackend);
 
   // Only for statistics and debugging.
   // Store start time to calculate absolute total time taken.
@@ -1283,15 +1321,21 @@ bool VioBackend::optimize(
   // vector, and is only used to give flexibility to subclasses (regular
   // vio).
   gtsam::FactorIndices delete_slots = extra_factor_slots_to_delete;
+  gtsam::FactorIndices local_delete_slots;
   updateKeyframeTimestampIndex(cur_id, timestamp_kf_nsec);
 
   // TODO we know the actual end size... but I am not sure how to use factor
   // graph API for appending factors without copying or re-allocation...
   std::vector<LandmarkId> lmk_ids_of_new_smart_factors_tmp;
+  std::vector<LandmarkId> lmk_ids_of_new_smart_factors_local_belief_cov;
   lmk_ids_of_new_smart_factors_tmp.reserve(new_smart_factors_size);
+  lmk_ids_of_new_smart_factors_local_belief_cov.reserve(new_smart_factors_size);
   gtsam::NonlinearFactorGraph new_factors_tmp;
+  gtsam::NonlinearFactorGraph new_factors_local_belief_cov;
   new_factors_tmp.reserve(new_smart_factors_size +
                           new_imu_prior_and_other_factors_.size());
+  new_factors_local_belief_cov.reserve(new_smart_factors_size +
+                                       new_imu_prior_and_other_factors_.size());
   for (const auto& new_smart_factor : new_smart_factors_) {
     // Push back the smart factor to the list of new factors to add to the
     // graph. // Smart factor, so same address right?
@@ -1344,6 +1388,50 @@ bool VioBackend::optimize(
   // (factors are not copied)
   new_factors_tmp.push_back(new_imu_prior_and_other_factors_.begin(),
                             new_imu_prior_and_other_factors_.end());
+
+  if (use_local_belief_cov_smoother) {
+    // Keep local-smart-factor bookkeeping aligned with the main map.
+    for (auto it = old_smart_factors_local_belief_cov_.begin();
+         it != old_smart_factors_local_belief_cov_.end();) {
+      if (!old_smart_factors_.exists(it->first)) {
+        it = old_smart_factors_local_belief_cov_.erase(it);
+      } else {
+        ++it;
+      }
+    }
+
+    // For the local covariance smoother we only remove smart-factor slots that
+    // belong to this local graph.
+    local_delete_slots.clear();
+    for (const auto& new_smart_factor : new_smart_factors_) {
+      const LandmarkId lmk_id = new_smart_factor.first;
+      auto it_local = old_smart_factors_local_belief_cov_.find(lmk_id);
+      if (it_local == old_smart_factors_local_belief_cov_.end()) {
+        it_local = old_smart_factors_local_belief_cov_.insert(
+            std::make_pair(lmk_id, std::make_pair(new_smart_factor.second, -1)))
+                       .first;
+      }
+
+      Slot local_slot = it_local->second.second;
+      if (local_slot != -1 &&
+          local_belief_cov_smoother_->getFactors().exists(local_slot)) {
+        local_delete_slots.push_back(local_slot);
+      }
+
+      new_factors_local_belief_cov.push_back(new_smart_factor.second);
+      lmk_ids_of_new_smart_factors_local_belief_cov.push_back(lmk_id);
+      it_local->second.first = new_smart_factor.second;
+    }
+
+    new_factors_local_belief_cov.push_back(
+        new_imu_prior_and_other_factors_.begin(),
+        new_imu_prior_and_other_factors_.end());
+
+    std::sort(local_delete_slots.begin(), local_delete_slots.end());
+    local_delete_slots.erase(
+        std::unique(local_delete_slots.begin(), local_delete_slots.end()),
+        local_delete_slots.end());
+  }
 
   const size_t num_factors_before_external = new_factors_tmp.size();
   std::vector<ExternalBeliefFactorId> inserted_external_factor_ids;
@@ -1430,6 +1518,28 @@ bool VioBackend::optimize(
 
   /////////////////////////// BOOKKEEPING //////////////////////////////////////
   if (is_smoother_ok) {
+    bool pose_belief_covariance_ok = false;
+    if (use_local_belief_cov_smoother) {
+      const bool local_update_ok = updatePoseBeliefLocalSidecar(
+          new_factors_local_belief_cov,
+          new_values_,
+          key_frame_count,
+          local_delete_slots,
+          max_extra_iterations,
+          lmk_ids_of_new_smart_factors_local_belief_cov);
+      if (local_update_ok) {
+        pose_belief_covariance_ok =
+            computePoseBeliefLocalCovarianceFromSidecar(cur_id);
+      } else {
+        LOG(WARNING) << "CBS local belief covariance smoother update failed.";
+      }
+    }
+    if (!pose_belief_covariance_ok) {
+      pose_belief_covariance_ok =
+          computePoseBeliefCovarianceWithoutExternalFactors(cur_id);
+    }
+    pose_belief_local_covariance_valid_ = pose_belief_covariance_ok;
+
     // Reset everything for next round.
     // TODO what about the old_smart_factors_?
     VLOG(10) << "Clearing new_smart_factors_!";
@@ -2002,6 +2112,222 @@ void VioBackend::updateNewSmartFactorsSlots(
   }
 }
 
+void VioBackend::updateLocalSmartFactorsSlots(
+    const std::vector<LandmarkId>& lmk_ids_of_new_smart_factors) {
+  if (!local_belief_cov_smoother_) {
+    return;
+  }
+
+  const gtsam::ISAM2Result& result = local_belief_cov_smoother_->getISAM2Result();
+  for (size_t i = 0u; i < lmk_ids_of_new_smart_factors.size(); ++i) {
+    if (i >= result.newFactorsIndices.size()) {
+      break;
+    }
+
+    const size_t slot = result.newFactorsIndices.at(i);
+    if (!local_belief_cov_smoother_->getFactors().exists(slot)) {
+      continue;
+    }
+
+    const auto& it_local = old_smart_factors_local_belief_cov_.find(
+        lmk_ids_of_new_smart_factors.at(i));
+    if (it_local == old_smart_factors_local_belief_cov_.end()) {
+      continue;
+    }
+
+    const auto* smart_factor = dynamic_cast<const SmartStereoFactor*>(
+        local_belief_cov_smoother_->getFactors().at(slot).get());
+    if (!smart_factor) {
+      continue;
+    }
+    it_local->second.second = static_cast<Slot>(slot);
+  }
+}
+
+bool VioBackend::updateLocalBeliefCovarianceSmoother(
+    const gtsam::NonlinearFactorGraph& new_factors_tmp,
+    const gtsam::Values& new_values,
+    const std::map<Key, double>& timestamps,
+    const gtsam::FactorIndices& delete_slots,
+    size_t max_extra_iterations) {
+  if (!local_belief_cov_smoother_) {
+    return false;
+  }
+
+  Smoother local_backup(*local_belief_cov_smoother_);
+  try {
+    Smoother::Result local_result;
+    local_result = local_belief_cov_smoother_->update(
+        new_factors_tmp, new_values, timestamps, delete_slots);
+    for (size_t n_iter = 1; n_iter < max_extra_iterations; ++n_iter) {
+      local_result = local_belief_cov_smoother_->update();
+    }
+    local_belief_cov_state_ = local_belief_cov_smoother_->calculateEstimate();
+  } catch (const std::exception& e) {
+    *local_belief_cov_smoother_ = local_backup;
+    LOG(WARNING) << "Local belief covariance smoother update failed: "
+                 << e.what();
+    return false;
+  } catch (...) {
+    *local_belief_cov_smoother_ = local_backup;
+    LOG(WARNING)
+        << "Local belief covariance smoother update failed with unknown error.";
+    return false;
+  }
+  return true;
+}
+
+bool VioBackend::updatePoseBeliefLocalSidecar(
+    const gtsam::NonlinearFactorGraph& new_factors_tmp,
+    const gtsam::Values& new_values,
+    const std::map<Key, double>& timestamps,
+    const gtsam::FactorIndices& delete_slots,
+    size_t max_extra_iterations,
+    const std::vector<LandmarkId>& lmk_ids_of_new_smart_factors) {
+  const bool local_update_ok = updateLocalBeliefCovarianceSmoother(
+      new_factors_tmp, new_values, timestamps, delete_slots, max_extra_iterations);
+  if (!local_update_ok) {
+    return false;
+  }
+  updateLocalSmartFactorsSlots(lmk_ids_of_new_smart_factors);
+  return true;
+}
+
+bool VioBackend::computeLocalPoseBeliefCovariance(const FrameId& cur_id) {
+  if (!local_belief_cov_smoother_) {
+    return false;
+  }
+  const gtsam::Key pose_key = gtsam::Symbol(kPoseSymbolChar, cur_id);
+  if (!local_belief_cov_state_.exists(pose_key)) {
+    return false;
+  }
+
+  try {
+    gtsam::Marginals marginals(local_belief_cov_smoother_->getFactors(),
+                               local_belief_cov_state_,
+                               gtsam::Marginals::Factorization::CHOLESKY);
+    const gtsam::Matrix pose_cov = marginals.marginalCovariance(pose_key);
+    if (pose_cov.rows() != 6 || pose_cov.cols() != 6 || !pose_cov.allFinite()) {
+      return false;
+    }
+    pose_belief_local_covariance_lkf_ = pose_cov;
+  } catch (const std::exception& e) {
+    LOG(WARNING) << "Failed local pose covariance extraction: " << e.what();
+    return false;
+  } catch (...) {
+    LOG(WARNING) << "Failed local pose covariance extraction.";
+    return false;
+  }
+  return true;
+}
+
+bool VioBackend::computePoseBeliefLocalCovarianceFromSidecar(
+    const FrameId& cur_id) {
+  if (!FLAGS_cbs_use_bpsam_for_local_belief_covariance) {
+    return computeLocalPoseBeliefCovariance(cur_id);
+  }
+
+  if (!local_belief_cov_smoother_) {
+    return false;
+  }
+
+  const gtsam::Key pose_key = gtsam::Symbol(kPoseSymbolChar, cur_id);
+  if (!local_belief_cov_state_.exists(pose_key)) {
+    return false;
+  }
+
+  gtsam::NonlinearFactorGraph local_graph;
+  const auto& raw_factors = local_belief_cov_smoother_->getFactors();
+  local_graph.reserve(raw_factors.size());
+  for (size_t slot = 0u; slot < raw_factors.size(); ++slot) {
+    if (!raw_factors.exists(slot)) {
+      continue;
+    }
+    const auto& factor = raw_factors.at(slot);
+    if (!factor) {
+      continue;
+    }
+    local_graph.push_back(factor);
+  }
+  if (local_graph.empty()) {
+    return false;
+  }
+
+  gtsam::Values local_values;
+  for (const gtsam::Key& key : local_graph.keys()) {
+    if (local_belief_cov_state_.exists(key)) {
+      local_values.insert_or_assign(key, local_belief_cov_state_.at(key));
+    } else if (state_.exists(key)) {
+      local_values.insert_or_assign(key, state_.at(key));
+    } else {
+      LOG(WARNING) << "BPSAM local covariance snapshot missing value for key "
+                   << gtsam::DefaultKeyFormatter(key) << ".";
+      return computeLocalPoseBeliefCovariance(cur_id);
+    }
+  }
+
+  gtsam::ISAM2Params isam_params;
+  BackendParams::setIsam2Params(backend_params_, &isam_params);
+  const auto pose_cov = computePoseBeliefCovarianceWithBpsamSnapshot(
+      local_graph, local_values, pose_key, isam_params, 'k');
+  if (pose_cov) {
+    pose_belief_local_covariance_lkf_ = *pose_cov;
+    return true;
+  }
+  LOG(WARNING) << "BPSAM local covariance snapshot failed. Falling back to "
+                  "local smoother covariance.";
+  return computeLocalPoseBeliefCovariance(cur_id);
+}
+
+bool VioBackend::computePoseBeliefCovarianceWithoutExternalFactors(
+    const FrameId& cur_id) {
+  DCHECK(smoother_) << "Incremental smoother is a null pointer.";
+  const gtsam::Key pose_key = gtsam::Symbol(kPoseSymbolChar, cur_id);
+  if (!state_.exists(pose_key)) {
+    return false;
+  }
+
+  const gtsam::NonlinearFactorGraph& full_graph = smoother_->getFactors();
+  std::unordered_set<size_t> external_slots;
+  external_slots.reserve(active_external_belief_factor_slots_.size());
+  for (const auto& active_slot : active_external_belief_factor_slots_) {
+    external_slots.insert(active_slot.slot);
+  }
+
+  gtsam::NonlinearFactorGraph local_only_graph;
+  local_only_graph.reserve(full_graph.size());
+  for (size_t slot = 0u; slot < full_graph.size(); ++slot) {
+    if (!full_graph.exists(slot)) {
+      continue;
+    }
+    if (external_slots.find(slot) != external_slots.end()) {
+      continue;
+    }
+    local_only_graph.push_back(full_graph.at(slot));
+  }
+
+  if (local_only_graph.empty()) {
+    return false;
+  }
+
+  try {
+    gtsam::Marginals marginals(local_only_graph,
+                               state_,
+                               gtsam::Marginals::Factorization::CHOLESKY);
+    const gtsam::Matrix pose_cov = marginals.marginalCovariance(pose_key);
+    if (pose_cov.rows() != 6 || pose_cov.cols() != 6 || !pose_cov.allFinite()) {
+      return false;
+    }
+    pose_belief_local_covariance_lkf_ = pose_cov;
+    return true;
+  } catch (const std::exception& e) {
+    LOG(WARNING) << "Failed local-only pose covariance extraction: " << e.what();
+  } catch (...) {
+    LOG(WARNING) << "Failed local-only pose covariance extraction.";
+  }
+  return false;
+}
+
 void VioBackend::setFactorsParams(
     const BackendParams& vio_params,
     gtsam::SharedNoiseModel* smart_noise,
@@ -2558,6 +2884,7 @@ bool VioBackend::deleteLmkFromFeatureTracks(const LandmarkId& lmk_id) {
   if (feature_tracks_.find(lmk_id) != feature_tracks_.end()) {
     VLOG(2) << "Deleting feature track for lmk with id: " << lmk_id;
     feature_tracks_.erase(lmk_id);
+    old_smart_factors_local_belief_cov_.erase(lmk_id);
     return true;
   }
   return false;

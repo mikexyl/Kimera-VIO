@@ -10,6 +10,7 @@
   <buildtool_depend>cmake</buildtool_depend>
 
   <depend>dbow2_catkin</depend>
+  <depend>cbs</depend>
   <depend>gtsam</depend>
   <depend>kimera_rpgo</depend>
   <depend>libgflags-dev</depend>

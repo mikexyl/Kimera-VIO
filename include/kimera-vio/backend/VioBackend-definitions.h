@@ -310,7 +310,10 @@ struct BackendOutput : public PipelinePayload {
                 const int& landmark_count,
                 const DebugVioInfo& debug_info,
                 const PointsWithIdMap& landmarks_with_id_map,
-                const LmkIdToLmkTypeMap& lmk_id_to_lmk_type_map)
+                const LmkIdToLmkTypeMap& lmk_id_to_lmk_type_map,
+                const gtsam::Matrix& pose_belief_local_covariance_lkf =
+                    gtsam::Matrix(),
+                bool pose_belief_local_covariance_valid = false)
       : PipelinePayload(timestamp_kf),
         W_State_Blkf_(timestamp_kf, W_Pose_Blkf, W_Vel_Blkf, imu_bias_lkf),
         state_(state),
@@ -320,7 +323,10 @@ struct BackendOutput : public PipelinePayload {
         landmark_count_(landmark_count),
         debug_info_(debug_info),
         landmarks_with_id_map_(landmarks_with_id_map),
-        lmk_id_to_lmk_type_map_(lmk_id_to_lmk_type_map) {}
+        lmk_id_to_lmk_type_map_(lmk_id_to_lmk_type_map),
+        pose_belief_local_covariance_lkf_(pose_belief_local_covariance_lkf),
+        pose_belief_local_covariance_valid_(
+            pose_belief_local_covariance_valid) {}
 
   BackendOutput(const VioNavStateTimestamped& vio_navstate_timestamped,
                 const gtsam::Values& state,
@@ -330,7 +336,10 @@ struct BackendOutput : public PipelinePayload {
                 const int& landmark_count,
                 const DebugVioInfo& debug_info,
                 const PointsWithIdMap& landmarks_with_id_map,
-                const LmkIdToLmkTypeMap& lmk_id_to_lmk_type_map)
+                const LmkIdToLmkTypeMap& lmk_id_to_lmk_type_map,
+                const gtsam::Matrix& pose_belief_local_covariance_lkf =
+                    gtsam::Matrix(),
+                bool pose_belief_local_covariance_valid = false)
       : PipelinePayload(vio_navstate_timestamped.timestamp_),
         W_State_Blkf_(vio_navstate_timestamped),
         state_(state),
@@ -340,7 +349,10 @@ struct BackendOutput : public PipelinePayload {
         landmark_count_(landmark_count),
         debug_info_(debug_info),
         landmarks_with_id_map_(landmarks_with_id_map),
-        lmk_id_to_lmk_type_map_(lmk_id_to_lmk_type_map) {}
+        lmk_id_to_lmk_type_map_(lmk_id_to_lmk_type_map),
+        pose_belief_local_covariance_lkf_(pose_belief_local_covariance_lkf),
+        pose_belief_local_covariance_valid_(
+            pose_belief_local_covariance_valid) {}
 
   const VioNavStateTimestamped W_State_Blkf_;
   const gtsam::Values state_;
@@ -351,6 +363,8 @@ struct BackendOutput : public PipelinePayload {
   const DebugVioInfo debug_info_;
   const PointsWithIdMap landmarks_with_id_map_;
   const LmkIdToLmkTypeMap lmk_id_to_lmk_type_map_;
+  const gtsam::Matrix pose_belief_local_covariance_lkf_;
+  const bool pose_belief_local_covariance_valid_;
 };
 
 ////////////////////////////////////////////////////////////////////////////////

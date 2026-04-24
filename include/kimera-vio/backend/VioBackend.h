@@ -368,6 +368,31 @@ class VioBackend {
       const std::vector<LandmarkId>& lmk_ids_of_new_smart_factors_tmp,
       SmartFactorMap* old_smart_factors);
 
+  void updateLocalSmartFactorsSlots(
+      const std::vector<LandmarkId>& lmk_ids_of_new_smart_factors_tmp);
+
+  bool updateLocalBeliefCovarianceSmoother(
+      const gtsam::NonlinearFactorGraph& new_factors_tmp,
+      const gtsam::Values& new_values,
+      const std::map<Key, double>& timestamps,
+      const gtsam::FactorIndices& delete_slots,
+      size_t max_extra_iterations);
+
+  virtual bool updatePoseBeliefLocalSidecar(
+      const gtsam::NonlinearFactorGraph& new_factors_tmp,
+      const gtsam::Values& new_values,
+      const std::map<Key, double>& timestamps,
+      const gtsam::FactorIndices& delete_slots,
+      size_t max_extra_iterations,
+      const std::vector<LandmarkId>& lmk_ids_of_new_smart_factors_tmp);
+
+  bool computeLocalPoseBeliefCovariance(const FrameId& cur_id);
+
+  virtual bool computePoseBeliefLocalCovarianceFromSidecar(
+      const FrameId& cur_id);
+
+  bool computePoseBeliefCovarianceWithoutExternalFactors(const FrameId& cur_id);
+
   struct ExternalBeliefFactorId {
     uint8_t source_agent = 0u;
     FrameId local_frame_id = 0;
@@ -518,6 +543,9 @@ class VioBackend {
 
   // State covariance. (initialize to zero)
   gtsam::Matrix state_covariance_lkf_ = Eigen::MatrixXd::Zero(15, 15);
+  gtsam::Matrix pose_belief_local_covariance_lkf_ =
+      Eigen::MatrixXd::Zero(6, 6);
+  bool pose_belief_local_covariance_valid_ = false;
 
   // Vision params.
   gtsam::SmartStereoProjectionParams smart_factors_params_;
@@ -533,6 +561,8 @@ class VioBackend {
 
   // ISAM2 smoother
   std::unique_ptr<Smoother> smoother_;
+  std::unique_ptr<Smoother> local_belief_cov_smoother_;
+  gtsam::Values local_belief_cov_state_;
 
   // Values
   //!< new states to be added
@@ -545,6 +575,7 @@ class VioBackend {
   LandmarkIdSmartFactorMap new_smart_factors_;
   //!< landmarkId -> {SmartFactorPtr, SlotIndex}
   SmartFactorMap old_smart_factors_;
+  SmartFactorMap old_smart_factors_local_belief_cov_;
   // if SlotIndex is -1, means that the factor has not been inserted yet in
   // the graph
 
