@@ -1281,7 +1281,7 @@ void RegularVioBackend::removeOldRegularityFactors_Slow(
 
   // If the plane exists in the state_ and not in new_values_,
   // then let us remove old regularity factors.
-  const gtsam::NonlinearFactorGraph& graph = smoother_->getFactors();
+  const gtsam::NonlinearFactorGraph& graph = getMainBackendFactors();
   Slot slot = 0;
   // Loop over current graph.
   for (const auto& g : graph) {
@@ -1537,7 +1537,7 @@ void RegularVioBackend::fillDeleteSlots(
     for (const std::pair<Slot, LandmarkId>& ppf_bad :
          point_plane_factor_slots_bad) {
       CHECK_LT(i, delete_slots->size());
-      CHECK(smoother_->getFactors().exists(ppf_bad.first));
+      CHECK(mainBackendFactorExists(ppf_bad.first));
 
       // Add factor slot to delete slots.
       delete_slots->at(i) = ppf_bad.first;

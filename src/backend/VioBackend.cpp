@@ -29,15 +29,16 @@
 
 #include "kimera-vio/backend/VioBackend.h"
 
+#include <cbs/gbp/belief.h>
 #include <gflags/gflags.h>
 #include <glog/logging.h>
 
 #include <algorithm>
 #include <cmath>
+#include <exception>
 #include <limits>  // for numeric_limits<>
 #include <map>
 #include <string>
-#include <typeinfo>
 #include <unordered_set>
 #include <utility>  // for make_pair
 #include <vector>
@@ -76,11 +77,274 @@ DEFINE_bool(cbs_use_bpsam_for_local_belief_covariance,
             "Use a BPSAM snapshot built from the local-sidecar graph/state for "
             "pose belief covariance extraction. Falls back to local smoother "
             "covariance if the BPSAM snapshot path fails.");
+DEFINE_bool(cbs_use_persistent_bpsam_sidecar_for_belief_covariance,
+            false,
+            "Use a persistent BPSAM-backed local sidecar adapter for CBS "
+            "pose-belief covariance (experimental scaffold).");
+DEFINE_bool(cbs_use_persistent_bpsam_for_main_backend,
+            false,
+            "Use persistent fixed-lag BPSAM as the main Kimera backend "
+            "optimizer (experimental).");
+DEFINE_bool(cbs_log_covariance_sanity_diff,
+            false,
+            "Log debug-only local-vs-fused pose covariance sanity metrics.");
+DEFINE_double(cbs_external_belief_timestamp_tolerance_sec,
+              0.2,
+              "Max allowed absolute timestamp mismatch (seconds) when matching "
+              "incoming external pose beliefs to local keyframes.");
 DEFINE_bool(no_incremental_pose,
             false,
             "Flag to disable incremental pose usage in backend");
 
 namespace VIO {
+
+namespace {
+
+inline FrameId saturatingSubFrameId(const FrameId value, const FrameId delta) {
+  return value >= delta ? value - delta : 0u;
+}
+
+inline FrameId computeOldestActiveFrameId(const FrameId cur_id,
+                                          const BackendParams& backend_params) {
+  const FrameId window_size = std::max<FrameId>(
+      1u, static_cast<FrameId>(backend_params.nr_states_));
+  return saturatingSubFrameId(cur_id, window_size - 1u);
+}
+
+inline double nanValue() { return std::numeric_limits<double>::quiet_NaN(); }
+
+inline std::string sanitizeCsvToken(std::string token) {
+  std::replace(token.begin(), token.end(), ',', '_');
+  std::replace(token.begin(), token.end(), ' ', '_');
+  return token.empty() ? "na" : token;
+}
+
+inline std::string formatPoseKeyToken(const uint8_t source_agent,
+                                      const uint32_t pose_index) {
+  const char agent_char = static_cast<char>(source_agent);
+  return std::string("p:") + agent_char + ":" + std::to_string(pose_index);
+}
+
+inline double safeHellingerDistance(const gtsam::Vector6& mu_a,
+                                    const gtsam::Matrix6& cov_a,
+                                    const gtsam::Vector6& mu_b,
+                                    const gtsam::Matrix6& cov_b) {
+  try {
+    const gtsam::Pose3 pose_a = gtsam::Pose3::Expmap(mu_a);
+    const gtsam::Pose3 pose_b = gtsam::Pose3::Expmap(mu_b);
+    const gtsam::Vector6 delta = gtsam::Pose3::Logmap(pose_a.inverse() * pose_b);
+    const gtsam::Matrix6 cov_avg = 0.5 * (cov_a + cov_b);
+    const double det_a = cov_a.determinant();
+    const double det_b = cov_b.determinant();
+    const double det_avg = cov_avg.determinant();
+    if (det_a <= 0.0 || det_b <= 0.0 || det_avg <= 0.0) {
+      return nanValue();
+    }
+    const double exponent =
+        -0.125 * static_cast<double>(delta.transpose() * cov_avg.inverse() * delta);
+    const double bc = std::pow(det_a, 0.25) * std::pow(det_b, 0.25) /
+                      std::sqrt(det_avg) * std::exp(exponent);
+    return std::sqrt(std::max(0.0, 1.0 - bc));
+  } catch (...) {
+    return nanValue();
+  }
+}
+
+inline double safeMahalanobisDistance(const gtsam::Vector6& mu_ref,
+                                      const gtsam::Matrix6& cov_ref,
+                                      const gtsam::Vector6& mu_other) {
+  try {
+    const gtsam::Vector6 delta = mu_other - mu_ref;
+    const gtsam::Matrix6 cov_inv = cov_ref.inverse();
+    return static_cast<double>(delta.transpose() * cov_inv * delta);
+  } catch (...) {
+    return nanValue();
+  }
+}
+
+inline double safeDeltaNorm(const gtsam::Vector6& mu_a, const gtsam::Vector6& mu_b) {
+  return (mu_b - mu_a).norm();
+}
+
+inline gtsam::Matrix6 sanitizePoseCovariance(const gtsam::Matrix& state_covariance) {
+  gtsam::Matrix6 pose_cov = gtsam::Matrix6::Identity() * 1e-3;
+  if (state_covariance.rows() >= 6 && state_covariance.cols() >= 6) {
+    pose_cov = gtsam::sub(state_covariance, 0, 6, 0, 6);
+  }
+  pose_cov = 0.5 * (pose_cov + pose_cov.transpose());
+  for (size_t i = 0u; i < 6u; ++i) {
+    if (!std::isfinite(pose_cov(i, i)) || pose_cov(i, i) <= 1e-9) {
+      pose_cov(i, i) = 1e-3;
+    }
+  }
+  return pose_cov;
+}
+
+struct BpsamContractMergeResult {
+  bool success = false;
+  gtsam::Vector6 merged_mu = gtsam::Vector6::Zero();
+  gtsam::Matrix6 merged_cov = gtsam::Matrix6::Identity() * 1e-3;
+  double hellinger_local_merged = nanValue();
+  double dmu_local_merged = nanValue();
+  double step = nanValue();
+  double dxycurr = nanValue();
+  double dxy_target = nanValue();
+};
+
+inline BpsamContractMergeResult runBpsamContractMerge(
+    const gtsam::Key pose_key,
+    const gtsam::Vector6& local_mu,
+    const gtsam::Matrix6& local_cov,
+    const gtsam::Vector6& incoming_mu,
+    const gtsam::Matrix6& incoming_cov,
+    const double incoming_relax_factor) {
+  BpsamContractMergeResult result;
+  result.merged_mu = incoming_mu;
+  result.merged_cov = incoming_cov;
+  try {
+    gbp::Belief<gtsam::Pose3> receiver_local_belief(
+        pose_key, local_mu, local_cov, 1u);
+    gbp::Gaussian incoming_gaussian(
+        pose_key, incoming_mu, incoming_cov, 1u);
+    incoming_gaussian.relax_factor() = incoming_relax_factor;
+
+    gbp::UpdateParams update_params;
+    update_params.type = gbp::GaussianMergeType::Contract;
+    update_params.metric_type = gbp::MetricType::Hellinger;
+
+    gbp::UpdateResult update_result;
+    receiver_local_belief.update({incoming_gaussian},
+                                 update_params,
+                                 &update_result);
+    if (update_result.status.empty() ||
+        update_result.status.front() != gbp::UpdateResult::Success) {
+      return result;
+    }
+
+    result.success = true;
+    result.merged_mu = receiver_local_belief.mu();
+    result.merged_cov = sanitizePoseCovariance(receiver_local_belief.Sigma());
+    result.hellinger_local_merged = safeHellingerDistance(local_mu,
+                                                          local_cov,
+                                                          result.merged_mu,
+                                                          result.merged_cov);
+    result.dmu_local_merged = safeDeltaNorm(local_mu, result.merged_mu);
+    result.step = receiver_local_belief.contractionStepSize();
+    result.dxycurr = receiver_local_belief.dxycurr();
+    result.dxy_target = receiver_local_belief.dxy();
+  } catch (...) {
+    return result;
+  }
+  return result;
+}
+
+}  // namespace
+
+class VioBackend::LocalSmootherPoseBeliefCovarianceSidecarAdapter final
+    : public VioBackend::PoseBeliefCovarianceSidecarAdapter {
+ public:
+  explicit LocalSmootherPoseBeliefCovarianceSidecarAdapter(
+      VioBackend* backend)
+      : backend_(CHECK_NOTNULL(backend)) {}
+
+  bool update(
+      const gtsam::NonlinearFactorGraph& new_factors_tmp,
+      const gtsam::Values& new_values,
+      const std::map<Key, double>& timestamps,
+      const gtsam::FactorIndices& delete_slots,
+      size_t max_extra_iterations,
+      const std::vector<LandmarkId>& lmk_ids_of_new_smart_factors_tmp)
+      override {
+    return backend_->updatePoseBeliefLocalSidecar(new_factors_tmp,
+                                                  new_values,
+                                                  timestamps,
+                                                  delete_slots,
+                                                  max_extra_iterations,
+                                                  lmk_ids_of_new_smart_factors_tmp);
+  }
+
+  bool computePoseBeliefLocalCovariance(const FrameId& cur_id) override {
+    return backend_->computePoseBeliefLocalCovarianceFromSidecar(cur_id);
+  }
+
+  const char* covarianceSourceTag() const override { return "local_smoother"; }
+
+ private:
+  VioBackend* backend_ = nullptr;
+};
+
+class VioBackend::PersistentBpsamPoseBeliefCovarianceSidecarAdapter final
+    : public VioBackend::PoseBeliefCovarianceSidecarAdapter {
+ public:
+  PersistentBpsamPoseBeliefCovarianceSidecarAdapter(
+      VioBackend* backend,
+      const BackendParams& backend_params)
+      : backend_(CHECK_NOTNULL(backend)) {
+    gtsam::ISAM2Params isam2_params;
+    BackendParams::setIsam2Params(backend_params, &isam2_params);
+    sidecar_ = std::make_unique<PersistentBpsamLocalCovarianceSidecar>(
+        isam2_params,
+        'k',
+        std::max<size_t>(1u, backend_params.nr_states_));
+  }
+
+  bool update(
+      const gtsam::NonlinearFactorGraph& new_factors_tmp,
+      const gtsam::Values& new_values,
+      const std::map<Key, double>& timestamps,
+      const gtsam::FactorIndices& delete_slots,
+      size_t /*max_extra_iterations*/,
+      const std::vector<LandmarkId>& lmk_ids_of_new_smart_factors_tmp)
+      override {
+    if (!sidecar_) {
+      return false;
+    }
+
+    std::vector<size_t> smart_factor_slots;
+    const bool update_ok = sidecar_->update(new_factors_tmp,
+                                            new_values,
+                                            timestamps,
+                                            delete_slots,
+                                            lmk_ids_of_new_smart_factors_tmp.size(),
+                                            &smart_factor_slots);
+    if (!update_ok) {
+      LOG(WARNING) << "Persistent BPSAM sidecar update failed.";
+      return false;
+    }
+
+    const size_t n_smart_factors =
+        std::min(lmk_ids_of_new_smart_factors_tmp.size(),
+                 smart_factor_slots.size());
+    for (size_t i = 0u; i < n_smart_factors; ++i) {
+      const LandmarkId lmk_id = lmk_ids_of_new_smart_factors_tmp.at(i);
+      auto it_local = backend_->old_smart_factors_local_belief_cov_.find(lmk_id);
+      if (it_local == backend_->old_smart_factors_local_belief_cov_.end()) {
+        continue;
+      }
+      it_local->second.second = static_cast<Slot>(smart_factor_slots.at(i));
+    }
+    return true;
+  }
+
+  bool computePoseBeliefLocalCovariance(const FrameId& cur_id) override {
+    if (!sidecar_) {
+      return false;
+    }
+    const auto pose_cov =
+        sidecar_->computePoseCovariance(gtsam::Symbol(kPoseSymbolChar, cur_id));
+    if (!pose_cov) {
+      return false;
+    }
+    backend_->pose_belief_local_covariance_lkf_ = *pose_cov;
+    return true;
+  }
+
+  const char* covarianceSourceTag() const override { return "local_bpsam"; }
+
+ private:
+  VioBackend* backend_ = nullptr;
+  std::unique_ptr<PersistentBpsamLocalCovarianceSidecar> sidecar_;
+};
 
 /* -------------------------------------------------------------------------- */
 VioBackend::VioBackend(const gtsam::Pose3& B_Pose_leftCamRect,
@@ -126,7 +390,13 @@ VioBackend::VioBackend(const gtsam::Pose3& B_Pose_leftCamRect,
   BackendParams::setIsam2Params(backend_params, &isam_param);
 
   smoother_ = std::make_unique<Smoother>(backend_params.nr_states_, isam_param);
-  if (FLAGS_cbs_use_local_smoother_for_belief_covariance) {
+  if (FLAGS_cbs_use_persistent_bpsam_for_main_backend) {
+    main_bpsam_backend_ =
+        std::make_unique<PersistentBpsamLocalCovarianceSidecar>(
+            isam_param, 'k', std::max<size_t>(1u, backend_params.nr_states_));
+  }
+  if (FLAGS_cbs_use_local_smoother_for_belief_covariance &&
+      !FLAGS_cbs_use_persistent_bpsam_sidecar_for_belief_covariance) {
     local_belief_cov_smoother_ =
         std::make_unique<Smoother>(backend_params.nr_states_, isam_param);
   }
@@ -136,11 +406,27 @@ VioBackend::VioBackend(const gtsam::Pose3& B_Pose_leftCamRect,
   lmParams.setlambdaLowerBound(0.0);  // same as GN
   lmParams.setlambdaUpperBound(0.0);  // same as GN)
   smoother_ = std::make_unique<Smoother>(backend_params.nr_states_, lmParams);
-  if (FLAGS_cbs_use_local_smoother_for_belief_covariance) {
+  if (FLAGS_cbs_use_local_smoother_for_belief_covariance &&
+      !FLAGS_cbs_use_persistent_bpsam_sidecar_for_belief_covariance) {
     local_belief_cov_smoother_ =
         std::make_unique<Smoother>(backend_params.nr_states_, lmParams);
   }
 #endif
+
+  if (std::isfinite(FLAGS_cbs_external_belief_timestamp_tolerance_sec) &&
+      FLAGS_cbs_external_belief_timestamp_tolerance_sec > 0.0) {
+    external_belief_timestamp_tolerance_sec_ =
+        FLAGS_cbs_external_belief_timestamp_tolerance_sec;
+  } else {
+    LOG(WARNING) << "Invalid --cbs_external_belief_timestamp_tolerance_sec="
+                 << FLAGS_cbs_external_belief_timestamp_tolerance_sec
+                 << ", keeping default "
+                 << external_belief_timestamp_tolerance_sec_ << "s.";
+  }
+  LOG(INFO) << "CBS external belief matcher tolerance: "
+            << external_belief_timestamp_tolerance_sec_ << " s";
+
+  initializePoseBeliefCovarianceSidecarAdapter();
 
   // Set parameters for all factors.
   setFactorsParams(backend_params,
@@ -155,6 +441,69 @@ VioBackend::VioBackend(const gtsam::Pose3& B_Pose_leftCamRect,
 
   // Print parameters if verbose
   if (VLOG_IS_ON(1)) print();
+}
+
+VioBackend::~VioBackend() { LOG(INFO) << "Backend destructor called."; }
+
+bool VioBackend::usePersistentBpsamMainBackend() const {
+  return FLAGS_cbs_use_persistent_bpsam_for_main_backend &&
+         static_cast<bool>(main_bpsam_backend_);
+}
+
+const gtsam::NonlinearFactorGraph& VioBackend::getMainBackendFactors() const {
+  if (usePersistentBpsamMainBackend()) {
+    return main_bpsam_backend_->factors();
+  }
+  CHECK(smoother_);
+  return smoother_->getFactors();
+}
+
+bool VioBackend::mainBackendFactorExists(size_t slot) const {
+  if (usePersistentBpsamMainBackend()) {
+    return main_bpsam_backend_->factorExists(slot);
+  }
+  CHECK(smoother_);
+  return smoother_->getFactors().exists(slot);
+}
+
+const gtsam::NonlinearFactor::shared_ptr VioBackend::mainBackendFactorAt(
+    size_t slot) const {
+  if (usePersistentBpsamMainBackend()) {
+    return main_bpsam_backend_->factorAt(slot);
+  }
+  CHECK(smoother_);
+  return smoother_->getFactors().at(slot);
+}
+
+const gtsam::ISAM2Result& VioBackend::getMainBackendResult() const {
+  if (usePersistentBpsamMainBackend()) {
+    return main_bpsam_backend_->lastUpdateResult();
+  }
+  CHECK(smoother_);
+  return smoother_->getISAM2Result();
+}
+
+gtsam::Values VioBackend::calculateMainBackendEstimate() const {
+  if (usePersistentBpsamMainBackend()) {
+    return main_bpsam_backend_->calculateEstimate();
+  }
+  CHECK(smoother_);
+  return smoother_->calculateEstimate();
+}
+
+void VioBackend::initializePoseBeliefCovarianceSidecarAdapter() {
+  pose_belief_cov_sidecar_adapter_.reset();
+  if (FLAGS_cbs_use_persistent_bpsam_sidecar_for_belief_covariance) {
+    pose_belief_cov_sidecar_adapter_ =
+        std::make_unique<PersistentBpsamPoseBeliefCovarianceSidecarAdapter>(
+            this, backend_params_);
+    return;
+  }
+  if (!local_belief_cov_smoother_) {
+    return;
+  }
+  pose_belief_cov_sidecar_adapter_ =
+      std::make_unique<LocalSmootherPoseBeliefCovarianceSidecarAdapter>(this);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -214,7 +563,7 @@ BackendOutput::UniquePtr VioBackend::spinOnce(const BackendInput& input) {
       // WARNING this also cleans the lmks inside the old_smart_factors map!
       lmk_ids_to_3d_points_in_time_horizon =
           getMapLmkIdsTo3dPointsInTimeHorizon(
-              smoother_->getFactors(),
+              getMainBackendFactors(),
               kOutputLmkTypeMap ? &lmk_id_to_lmk_type_map : nullptr,
               kMinLmkObs);
     }
@@ -238,7 +587,7 @@ BackendOutput::UniquePtr VioBackend::spinOnce(const BackendInput& input) {
             imu_bias_lkf_),
         // TODO(Toni): Make all below optional!!
         state_,
-        smoother_->getFactors(),
+        getMainBackendFactors(),
         getCurrentStateCovariance(),
         curr_kf_id_,
         landmark_count_,
@@ -246,7 +595,8 @@ BackendOutput::UniquePtr VioBackend::spinOnce(const BackendInput& input) {
         lmk_ids_to_3d_points_in_time_horizon,
         lmk_id_to_lmk_type_map,
         pose_belief_local_covariance_lkf_,
-        pose_belief_local_covariance_valid_);
+        pose_belief_local_covariance_valid_,
+        pose_belief_covariance_source_);
 
     if (logger_) {
       logger_->logBackendOutput(*output_payload);
@@ -254,6 +604,10 @@ BackendOutput::UniquePtr VioBackend::spinOnce(const BackendInput& input) {
   }
 
   return output_payload;
+}
+
+void VioBackend::saveGraph(const std::string& filepath) const {
+  getMainBackendFactors().saveGraph(filepath);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -281,13 +635,21 @@ void VioBackend::enqueueExternalPoseBeliefs(
   if (beliefs.empty()) {
     return;
   }
+  external_beliefs_received_total_.fetch_add(beliefs.size(),
+                                             std::memory_order_relaxed);
 
   std::lock_guard<std::mutex> lock(external_beliefs_mutex_);
   for (const auto& belief : beliefs) {
     pending_external_pose_beliefs_.push_back(belief);
   }
+  size_t queue_dropped_now = 0u;
   while (pending_external_pose_beliefs_.size() > max_pending_external_pose_beliefs_) {
     pending_external_pose_beliefs_.pop_front();
+    ++queue_dropped_now;
+  }
+  if (queue_dropped_now > 0u) {
+    external_beliefs_queue_dropped_total_.fetch_add(queue_dropped_now,
+                                                    std::memory_order_relaxed);
   }
 }
 
@@ -307,8 +669,9 @@ void VioBackend::updateKeyframeTimestampIndex(const FrameId& frame_id,
   const double stamp_sec = static_cast<double>(timestamp_kf_nsec) * 1e-9;
   keyframe_timestamp_sec_[frame_id] = stamp_sec;
 
-  const FrameId min_keep_frame =
-      std::max<FrameId>(0, frame_id - static_cast<FrameId>(backend_params_.nr_states_ * 3));
+  const FrameId keep_span =
+      static_cast<FrameId>(backend_params_.nr_states_ * 3.0);
+  const FrameId min_keep_frame = saturatingSubFrameId(frame_id, keep_span);
   auto it = keyframe_timestamp_sec_.begin();
   while (it != keyframe_timestamp_sec_.end() && it->first < min_keep_frame) {
     it = keyframe_timestamp_sec_.erase(it);
@@ -318,43 +681,63 @@ void VioBackend::updateKeyframeTimestampIndex(const FrameId& frame_id,
 bool VioBackend::resolveExternalBeliefTargetFrame(
     const ExternalPoseBelief& belief,
     const FrameId& cur_id,
-    FrameId* local_frame_id) const {
+    FrameId* local_frame_id,
+    ExternalBeliefRejectReason* reject_reason) const {
   CHECK_NOTNULL(local_frame_id);
+  if (reject_reason) {
+    *reject_reason = ExternalBeliefRejectReason::kNone;
+  }
 
-  const FrameId oldest_active_frame_id = std::max<FrameId>(
-      0, cur_id - static_cast<FrameId>(backend_params_.nr_states_) + 1);
-  const FrameId requested_frame_id = static_cast<FrameId>(belief.pose_index);
+  const FrameId oldest_active_frame_id =
+      computeOldestActiveFrameId(cur_id, backend_params_);
+  const bool has_valid_stamp =
+      std::isfinite(belief.stamp_sec) && belief.stamp_sec > 0.0;
 
-  if (requested_frame_id >= oldest_active_frame_id && requested_frame_id <= cur_id) {
-    *local_frame_id = requested_frame_id;
+  if (has_valid_stamp) {
+    if (keyframe_timestamp_sec_.empty()) {
+      if (reject_reason) {
+        *reject_reason = ExternalBeliefRejectReason::kWindow;
+      }
+      return false;
+    }
+
+    double best_dt = std::numeric_limits<double>::max();
+    FrameId best_frame = 0;
+    bool has_best_frame = false;
+    for (const auto& [frame_id, frame_stamp_sec] : keyframe_timestamp_sec_) {
+      if (frame_id < oldest_active_frame_id || frame_id > cur_id) {
+        continue;
+      }
+      const double dt = std::abs(frame_stamp_sec - belief.stamp_sec);
+      if (dt < best_dt) {
+        best_dt = dt;
+        best_frame = frame_id;
+        has_best_frame = true;
+      }
+    }
+
+    if (!has_best_frame) {
+      if (reject_reason) {
+        *reject_reason = ExternalBeliefRejectReason::kWindow;
+      }
+      return false;
+    }
+
+    if (best_dt > external_belief_timestamp_tolerance_sec_) {
+      if (reject_reason) {
+        *reject_reason = ExternalBeliefRejectReason::kTimestamp;
+      }
+      return false;
+    }
+
+    *local_frame_id = best_frame;
     return true;
   }
 
-  if (belief.stamp_sec <= 0.0 || keyframe_timestamp_sec_.empty()) {
-    return false;
+  if (reject_reason) {
+    *reject_reason = ExternalBeliefRejectReason::kTimestamp;
   }
-
-  double best_dt = std::numeric_limits<double>::max();
-  FrameId best_frame = 0;
-  bool has_best_frame = false;
-  for (const auto& [frame_id, frame_stamp_sec] : keyframe_timestamp_sec_) {
-    if (frame_id < oldest_active_frame_id || frame_id > cur_id) {
-      continue;
-    }
-    const double dt = std::abs(frame_stamp_sec - belief.stamp_sec);
-    if (dt < best_dt) {
-      best_dt = dt;
-      best_frame = frame_id;
-      has_best_frame = true;
-    }
-  }
-
-  if (!has_best_frame || best_dt > external_belief_timestamp_tolerance_sec_) {
-    return false;
-  }
-
-  *local_frame_id = best_frame;
-  return true;
+  return false;
 }
 
 void VioBackend::collectExternalBeliefFactors(
@@ -366,14 +749,14 @@ void VioBackend::collectExternalBeliefFactors(
   CHECK_NOTNULL(new_factors_tmp);
   CHECK_NOTNULL(inserted_external_factor_ids);
 
-  const FrameId oldest_active_frame_id = std::max<FrameId>(
-      0, cur_id - static_cast<FrameId>(backend_params_.nr_states_) + 1);
+  const FrameId oldest_active_frame_id =
+      computeOldestActiveFrameId(cur_id, backend_params_);
 
   // Remove tracked factors that are already gone from the graph or outside the active window.
   std::vector<ExternalBeliefFactorSlot> active_slots_kept;
   active_slots_kept.reserve(active_external_belief_factor_slots_.size());
   for (const auto& active_slot : active_external_belief_factor_slots_) {
-    if (!smoother_->getFactors().exists(active_slot.slot)) {
+    if (!mainBackendFactorExists(active_slot.slot)) {
       continue;
     }
     if (active_slot.id.local_frame_id < oldest_active_frame_id) {
@@ -388,15 +771,202 @@ void VioBackend::collectExternalBeliefFactors(
   if (pending_beliefs.empty()) {
     return;
   }
+  const size_t pending_count = pending_beliefs.size();
+
+  auto logMergeRow = [&](const ExternalPoseBelief& belief,
+                         const std::string& sender_key,
+                         const std::string& receiver_pose_key,
+                         const double receiver_local_before_trace,
+                         const double receiver_merged_trace,
+                         const double receiver_posterior_pre_trace,
+                         const double receiver_posterior_post_trace,
+                         const double hellinger_local_incoming,
+                         const double hellinger_local_merged,
+                         const double mahal_local_incoming,
+                         const std::string& status,
+                         const std::string& receiver_local_source,
+                         const double receiver_local_raw_trace,
+                         const double receiver_local_anchored_trace,
+                         const double dmu_local_incoming,
+                         const double dmu_local_merged,
+                         const double step,
+                         const double dxycurr,
+                         const double dxy_target) {
+    const size_t sample_idx =
+        external_merge_diag_sample_idx_.fetch_add(1u, std::memory_order_relaxed);
+    LOG(INFO) << "CBS_MERGE_ROW_L2K,"
+              << sample_idx << ","
+              << sanitizeCsvToken(belief.sender_frame_id) << ","
+              << belief.sender_timestamp_ns << ","
+              << sender_key << ","
+              << receiver_pose_key << ","
+              << belief.sent_trace << ","
+              << belief.received_trace << ","
+              << receiver_local_before_trace << ","
+              << receiver_merged_trace << ","
+              << receiver_posterior_pre_trace << ","
+              << receiver_posterior_post_trace << ","
+              << hellinger_local_incoming << ","
+              << hellinger_local_merged << ","
+              << mahal_local_incoming << ","
+              << sanitizeCsvToken(status) << ","
+              << sanitizeCsvToken(receiver_local_source) << ","
+              << receiver_local_raw_trace << ","
+              << receiver_local_anchored_trace << ","
+              << dmu_local_incoming << ","
+              << dmu_local_merged << ","
+              << step << ","
+              << dxycurr << ","
+              << dxy_target;
+  };
+
+  auto fetchLocalPoseBelief = [&](const FrameId local_frame_id,
+                                  gtsam::Vector6* mu,
+                                  gtsam::Matrix6* cov,
+                                  std::string* source) -> bool {
+    CHECK_NOTNULL(mu);
+    CHECK_NOTNULL(cov);
+    if (source) {
+      *source = "na";
+    }
+    const gtsam::Key pose_key = gtsam::Symbol(kPoseSymbolChar, local_frame_id);
+    try {
+      const gtsam::Values estimate = calculateMainBackendEstimate();
+      if (!estimate.exists(pose_key)) {
+        return false;
+      }
+      *mu = gtsam::Pose3::Logmap(estimate.at<gtsam::Pose3>(pose_key));
+      if (usePersistentBpsamMainBackend()) {
+        const auto pose_cov_opt = main_bpsam_backend_->computePoseCovariance(pose_key);
+        if (!pose_cov_opt.has_value()) {
+          return false;
+        }
+        *cov = sanitizePoseCovariance(*pose_cov_opt);
+        if (source) {
+          *source = "main_bpsam";
+        }
+        return true;
+      }
+      gtsam::Marginals marginals(getMainBackendFactors(), estimate);
+      *cov = sanitizePoseCovariance(marginals.marginalCovariance(pose_key));
+      if (source) {
+        *source = "main_smoother";
+      }
+      return true;
+    } catch (...) {
+      return false;
+    }
+  };
+
+  auto computePoseTraceFromGraph = [&](const gtsam::NonlinearFactorGraph& graph,
+                                       const gtsam::Values& estimate,
+                                       const gtsam::Key pose_key,
+                                       double* trace_out,
+                                       std::string* status_out) -> bool {
+    CHECK_NOTNULL(trace_out);
+    if (status_out) {
+      *status_out = "na";
+    }
+    if (graph.empty()) {
+      if (status_out) {
+        *status_out = "graph_empty";
+      }
+      return false;
+    }
+    if (!estimate.exists(pose_key)) {
+      if (status_out) {
+        *status_out = "missing_pose";
+      }
+      return false;
+    }
+    try {
+      gtsam::Marginals marginals(graph,
+                                 estimate,
+                                 gtsam::Marginals::Factorization::CHOLESKY);
+      const gtsam::Matrix pose_cov = marginals.marginalCovariance(pose_key);
+      const gtsam::Matrix6 pose_cov_6 = sanitizePoseCovariance(pose_cov);
+      *trace_out = pose_cov_6.trace();
+      if (status_out) {
+        *status_out = "ok";
+      }
+      return true;
+    } catch (...) {
+      if (status_out) {
+        *status_out = "marginals_failed";
+      }
+      return false;
+    }
+  };
+
+  auto logLocalSourceAudit = [&](const ExternalPoseBelief& belief,
+                                 const std::string& sender_key,
+                                 const std::string& receiver_pose_key,
+                                 const double main_smoother_trace,
+                                 const double strict_local_only_trace,
+                                 const double strict_local_only_gauge_trace,
+                                 const std::string& main_smoother_status,
+                                 const std::string& strict_local_only_status,
+                                 const std::string& strict_local_only_gauge_status,
+                                 const double gauge_variance) {
+    LOG(INFO) << "CBS_L2K_LOCAL_SOURCE_AUDIT,"
+              << belief.sender_timestamp_ns << ","
+              << sender_key << ","
+              << receiver_pose_key << ","
+              << main_smoother_trace << ","
+              << strict_local_only_trace << ","
+              << strict_local_only_gauge_trace << ","
+              << sanitizeCsvToken(main_smoother_status) << ","
+              << sanitizeCsvToken(strict_local_only_status) << ","
+              << sanitizeCsvToken(strict_local_only_gauge_status) << ","
+              << gauge_variance;
+  };
 
   std::map<std::pair<uint8_t, FrameId>, ExternalPoseBelief> selected_beliefs;
   size_t dropped_unmatched = 0u;
+  size_t resolved_count = 0u;
+  size_t rejected_window = 0u;
+  size_t rejected_timestamp = 0u;
+  size_t rejected_missing_state = 0u;
+  size_t rejected_covariance = 0u;
   for (const auto& belief : pending_beliefs) {
     FrameId local_frame_id = 0;
-    if (!resolveExternalBeliefTargetFrame(belief, cur_id, &local_frame_id)) {
+    ExternalBeliefRejectReason reject_reason = ExternalBeliefRejectReason::kNone;
+    const std::string sender_key =
+        formatPoseKeyToken(belief.source_agent, belief.sender_pose_index);
+    if (!resolveExternalBeliefTargetFrame(
+            belief, cur_id, &local_frame_id, &reject_reason)) {
       ++dropped_unmatched;
+      if (reject_reason == ExternalBeliefRejectReason::kWindow) {
+        ++rejected_window;
+      } else if (reject_reason == ExternalBeliefRejectReason::kTimestamp) {
+        ++rejected_timestamp;
+      }
+      const std::string status =
+          (reject_reason == ExternalBeliefRejectReason::kWindow)
+              ? "dropped_window"
+              : "dropped_timestamp";
+      logMergeRow(belief,
+                  sender_key,
+                  "na",
+                  nanValue(),
+                  nanValue(),
+                  nanValue(),
+                  nanValue(),
+                  nanValue(),
+                  nanValue(),
+                  nanValue(),
+                  status,
+                  "na",
+                  nanValue(),
+                  nanValue(),
+                  nanValue(),
+                  nanValue(),
+                  nanValue(),
+                  nanValue(),
+                  nanValue());
       continue;
     }
+    ++resolved_count;
     ExternalPoseBelief selected = belief;
     selected.pose_index = static_cast<uint32_t>(local_frame_id);
     const auto key = std::make_pair(selected.source_agent, local_frame_id);
@@ -407,12 +977,41 @@ void VioBackend::collectExternalBeliefFactors(
     }
   }
 
+  external_beliefs_resolved_total_.fetch_add(resolved_count,
+                                             std::memory_order_relaxed);
+  external_beliefs_selected_total_.fetch_add(selected_beliefs.size(),
+                                             std::memory_order_relaxed);
+
   size_t inserted_factors = 0u;
   for (const auto& [id_key, belief] : selected_beliefs) {
     const FrameId local_frame_id = id_key.second;
     const gtsam::Key pose_key = gtsam::Symbol(kPoseSymbolChar, local_frame_id);
+    const std::string sender_key =
+        formatPoseKeyToken(belief.source_agent, belief.sender_pose_index);
+    const std::string receiver_pose_key =
+        formatPoseKeyToken(static_cast<uint8_t>('k'), static_cast<uint32_t>(local_frame_id));
     if (!state_.exists(pose_key) && !new_values_.exists(pose_key)) {
       ++dropped_unmatched;
+      ++rejected_missing_state;
+      logMergeRow(belief,
+                  sender_key,
+                  receiver_pose_key,
+                  nanValue(),
+                  nanValue(),
+                  nanValue(),
+                  nanValue(),
+                  nanValue(),
+                  nanValue(),
+                  nanValue(),
+                  "dropped_missing_state",
+                  "na",
+                  nanValue(),
+                  nanValue(),
+                  nanValue(),
+                  nanValue(),
+                  nanValue(),
+                  nanValue(),
+                  nanValue());
       continue;
     }
 
@@ -426,7 +1025,7 @@ void VioBackend::collectExternalBeliefFactors(
                          if (!(active_slot.id == id)) {
                            return false;
                          }
-                         if (smoother_->getFactors().exists(active_slot.slot)) {
+                         if (mainBackendFactorExists(active_slot.slot)) {
                            delete_slots->push_back(active_slot.slot);
                          }
                          return true;
@@ -447,6 +1046,26 @@ void VioBackend::collectExternalBeliefFactors(
     covariance = 0.5 * (covariance + covariance.transpose());
     if (!covariance.allFinite()) {
       ++dropped_unmatched;
+      ++rejected_covariance;
+      logMergeRow(belief,
+                  sender_key,
+                  receiver_pose_key,
+                  nanValue(),
+                  nanValue(),
+                  nanValue(),
+                  nanValue(),
+                  nanValue(),
+                  nanValue(),
+                  nanValue(),
+                  "dropped_invalid_covariance",
+                  "na",
+                  nanValue(),
+                  nanValue(),
+                  nanValue(),
+                  nanValue(),
+                  nanValue(),
+                  nanValue(),
+                  nanValue());
       continue;
     }
     if (belief.relax_factor > 0.0) {
@@ -458,17 +1077,261 @@ void VioBackend::collectExternalBeliefFactors(
       }
     }
 
-    const auto noise = gtsam::noiseModel::Gaussian::Covariance(covariance);
+    const double received_trace = covariance.trace();
+    gtsam::Vector6 local_mu = gtsam::Vector6::Zero();
+    gtsam::Matrix6 local_cov = gtsam::Matrix6::Zero();
+    std::string local_source = "na";
+    const bool has_local_before =
+        fetchLocalPoseBelief(local_frame_id, &local_mu, &local_cov, &local_source);
+    const double local_before_trace = has_local_before ? local_cov.trace() : nanValue();
+    const double hellinger_local_incoming =
+        has_local_before ? safeHellingerDistance(local_mu, local_cov, mu, covariance)
+                         : nanValue();
+    const double mahal_local_incoming =
+        has_local_before ? safeMahalanobisDistance(local_mu, local_cov, mu)
+                         : nanValue();
+    const double dmu_local_incoming =
+        has_local_before ? safeDeltaNorm(local_mu, mu) : nanValue();
+
+    gtsam::Vector6 factor_mu = mu;
+    gtsam::Matrix6 factor_covariance = covariance;
+    double receiver_merged_trace = nanValue();
+    double receiver_posterior_pre_trace =
+        has_local_before ? local_before_trace : nanValue();
+    double receiver_posterior_post_trace = nanValue();
+    double hellinger_local_merged = nanValue();
+    double dmu_local_merged = nanValue();
+    double step = nanValue();
+    double dxycurr = nanValue();
+    double dxy_target = nanValue();
+    std::string status = "bootstrap_no_local_staged_prior";
+    double receiver_local_raw_trace =
+        has_local_before ? local_before_trace : nanValue();
+    double receiver_local_anchored_trace = nanValue();
+
+    // Audit-only diagnostics for receiver local-before source semantics.
+    const double gauge_variance = 1e6;
+    double main_smoother_local_before_trace = nanValue();
+    double strict_local_only_before_trace = nanValue();
+    double strict_local_only_gauge_before_trace = nanValue();
+    std::string main_smoother_status = "na";
+    std::string strict_local_only_status = "na";
+    std::string strict_local_only_gauge_status = "na";
+    try {
+      const gtsam::Values estimate_for_audit = calculateMainBackendEstimate();
+      if (!estimate_for_audit.exists(pose_key)) {
+        main_smoother_status = "missing_pose";
+        strict_local_only_status = "missing_pose";
+        strict_local_only_gauge_status = "missing_pose";
+      } else {
+        if (!smoother_) {
+          main_smoother_status = "smoother_unavailable";
+        } else {
+          (void)computePoseTraceFromGraph(smoother_->getFactors(),
+                                          estimate_for_audit,
+                                          pose_key,
+                                          &main_smoother_local_before_trace,
+                                          &main_smoother_status);
+        }
+
+        const gtsam::NonlinearFactorGraph& full_graph = getMainBackendFactors();
+        std::unordered_set<size_t> external_slots;
+        external_slots.reserve(active_external_belief_factor_slots_.size());
+        for (const auto& active_slot : active_external_belief_factor_slots_) {
+          external_slots.insert(active_slot.slot);
+        }
+        gtsam::NonlinearFactorGraph strict_local_graph;
+        strict_local_graph.reserve(full_graph.size());
+        for (size_t slot = 0u; slot < full_graph.size(); ++slot) {
+          if (!full_graph.exists(slot)) {
+            continue;
+          }
+          if (external_slots.find(slot) != external_slots.end()) {
+            continue;
+          }
+          const auto& factor = full_graph.at(slot);
+          if (!factor) {
+            continue;
+          }
+          strict_local_graph.push_back(factor);
+        }
+
+        const bool strict_ok = computePoseTraceFromGraph(strict_local_graph,
+                                                         estimate_for_audit,
+                                                         pose_key,
+                                                         &strict_local_only_before_trace,
+                                                         &strict_local_only_status);
+        gtsam::NonlinearFactorGraph strict_local_gauge_graph = strict_local_graph;
+        if (estimate_for_audit.exists(pose_key)) {
+          const gtsam::Vector gauge_vars = gtsam::Vector::Constant(6, gauge_variance);
+          auto gauge_noise = gtsam::noiseModel::Diagonal::Variances(gauge_vars);
+          strict_local_gauge_graph.emplace_shared<gtsam::PriorFactor<gtsam::Pose3>>(
+              pose_key,
+              estimate_for_audit.at<gtsam::Pose3>(pose_key),
+              gauge_noise);
+          (void)computePoseTraceFromGraph(strict_local_gauge_graph,
+                                          estimate_for_audit,
+                                          pose_key,
+                                          &strict_local_only_gauge_before_trace,
+                                          &strict_local_only_gauge_status);
+        } else if (strict_ok) {
+          strict_local_only_gauge_status = "missing_pose";
+        }
+      }
+    } catch (...) {
+      if (main_smoother_status == "na") {
+        main_smoother_status = "audit_exception";
+      }
+      if (strict_local_only_status == "na") {
+        strict_local_only_status = "audit_exception";
+      }
+      if (strict_local_only_gauge_status == "na") {
+        strict_local_only_gauge_status = "audit_exception";
+      }
+    }
+    logLocalSourceAudit(belief,
+                        sender_key,
+                        receiver_pose_key,
+                        main_smoother_local_before_trace,
+                        strict_local_only_before_trace,
+                        strict_local_only_gauge_before_trace,
+                        main_smoother_status,
+                        strict_local_only_status,
+                        strict_local_only_gauge_status,
+                        gauge_variance);
+
+    if (has_local_before) {
+      const auto merge_result = runBpsamContractMerge(pose_key,
+                                                      local_mu,
+                                                      local_cov,
+                                                      mu,
+                                                      covariance,
+                                                      belief.relax_factor);
+      if (!merge_result.success) {
+        ++dropped_unmatched;
+        ++rejected_covariance;
+        ExternalPoseBelief belief_row = belief;
+        belief_row.received_trace = received_trace;
+        logMergeRow(belief_row,
+                    sender_key,
+                    receiver_pose_key,
+                    local_before_trace,
+                    nanValue(),
+                    receiver_posterior_pre_trace,
+                    nanValue(),
+                    hellinger_local_incoming,
+                    nanValue(),
+                    mahal_local_incoming,
+                    "bpsam_contract_rejected",
+                    local_source,
+                    receiver_local_raw_trace,
+                    receiver_local_anchored_trace,
+                    dmu_local_incoming,
+                    nanValue(),
+                    nanValue(),
+                    nanValue(),
+                    nanValue());
+        continue;
+      }
+      factor_mu = merge_result.merged_mu;
+      factor_covariance = merge_result.merged_cov;
+      receiver_merged_trace = factor_covariance.trace();
+      receiver_posterior_post_trace = receiver_merged_trace;
+      hellinger_local_merged = merge_result.hellinger_local_merged;
+      dmu_local_merged = merge_result.dmu_local_merged;
+      step = merge_result.step;
+      dxycurr = merge_result.dxycurr;
+      dxy_target = merge_result.dxy_target;
+      status = "bpsam_contract_merged";
+      receiver_local_anchored_trace = receiver_merged_trace;
+    }
+
+    const auto noise = gtsam::noiseModel::Gaussian::Covariance(factor_covariance);
     new_factors_tmp->emplace_shared<gtsam::PriorFactor<gtsam::Pose3>>(
-        pose_key, gtsam::Pose3::Expmap(mu), noise);
+        pose_key, gtsam::Pose3::Expmap(factor_mu), noise);
     inserted_external_factor_ids->push_back(id);
     ++inserted_factors;
+
+    ExternalPoseBelief belief_row = belief;
+    belief_row.received_trace = received_trace;
+    logMergeRow(belief_row,
+                sender_key,
+                receiver_pose_key,
+                local_before_trace,
+                receiver_merged_trace,
+                receiver_posterior_pre_trace,
+                receiver_posterior_post_trace,
+                hellinger_local_incoming,
+                hellinger_local_merged,
+                mahal_local_incoming,
+                status,
+                local_source,
+                receiver_local_raw_trace,
+                receiver_local_anchored_trace,
+                dmu_local_incoming,
+                dmu_local_merged,
+                step,
+                dxycurr,
+                dxy_target);
   }
+
+  external_beliefs_inserted_total_.fetch_add(inserted_factors,
+                                             std::memory_order_relaxed);
+  external_beliefs_rejected_total_.fetch_add(dropped_unmatched,
+                                             std::memory_order_relaxed);
+  external_beliefs_rejected_window_total_.fetch_add(
+      rejected_window, std::memory_order_relaxed);
+  external_beliefs_rejected_timestamp_total_.fetch_add(
+      rejected_timestamp, std::memory_order_relaxed);
+  external_beliefs_rejected_missing_state_total_.fetch_add(
+      rejected_missing_state, std::memory_order_relaxed);
+  external_beliefs_rejected_covariance_total_.fetch_add(
+      rejected_covariance, std::memory_order_relaxed);
 
   if (dropped_unmatched > 0u) {
     LOG(WARNING) << "Dropped " << dropped_unmatched
-                 << " external beliefs (outside active window or invalid).";
+                 << " external beliefs (window=" << rejected_window
+                 << ",timestamp=" << rejected_timestamp
+                 << ",state=" << rejected_missing_state
+                 << ",covariance=" << rejected_covariance << ").";
   }
+  LOG(INFO) << "CBS external belief flow frame=" << cur_id
+            << " pending=" << pending_count
+            << " resolved=" << resolved_count
+            << " selected=" << selected_beliefs.size()
+            << " inserted=" << inserted_factors
+            << " rejected=" << dropped_unmatched
+            << " rejected_by(window=" << rejected_window
+            << ",timestamp=" << rejected_timestamp
+            << ",state=" << rejected_missing_state
+            << ",covariance=" << rejected_covariance << ")"
+            << " active_slots=" << active_external_belief_factor_slots_.size()
+            << " totals(received="
+            << external_beliefs_received_total_.load(std::memory_order_relaxed)
+            << ",queue_dropped="
+            << external_beliefs_queue_dropped_total_.load(
+                   std::memory_order_relaxed)
+            << ",resolved="
+            << external_beliefs_resolved_total_.load(std::memory_order_relaxed)
+            << ",selected="
+            << external_beliefs_selected_total_.load(std::memory_order_relaxed)
+            << ",inserted="
+            << external_beliefs_inserted_total_.load(std::memory_order_relaxed)
+            << ",rejected="
+            << external_beliefs_rejected_total_.load(std::memory_order_relaxed)
+            << ",rejected_window="
+            << external_beliefs_rejected_window_total_.load(
+                   std::memory_order_relaxed)
+            << ",rejected_timestamp="
+            << external_beliefs_rejected_timestamp_total_.load(
+                   std::memory_order_relaxed)
+            << ",rejected_state="
+            << external_beliefs_rejected_missing_state_total_.load(
+                   std::memory_order_relaxed)
+            << ",rejected_covariance="
+            << external_beliefs_rejected_covariance_total_.load(
+                   std::memory_order_relaxed)
+            << ")";
   VLOG(2) << "Injected " << inserted_factors << " external belief factors.";
 }
 
@@ -479,7 +1342,7 @@ void VioBackend::refreshExternalBeliefFactorSlots(
     return;
   }
 
-  const auto& new_factor_indices = smoother_->getISAM2Result().newFactorsIndices;
+  const auto& new_factor_indices = getMainBackendResult().newFactorsIndices;
   const size_t required_size =
       num_factors_before_external + inserted_external_factor_ids.size();
   if (new_factor_indices.size() < required_size) {
@@ -491,7 +1354,7 @@ void VioBackend::refreshExternalBeliefFactorSlots(
 
   for (size_t i = 0u; i < inserted_external_factor_ids.size(); ++i) {
     const size_t slot = new_factor_indices[num_factors_before_external + i];
-    if (!smoother_->getFactors().exists(slot)) {
+    if (!mainBackendFactorExists(slot)) {
       continue;
     }
     active_external_belief_factor_slots_.push_back(
@@ -966,7 +1829,7 @@ PointsWithIdMap VioBackend::getMapLmkIdsTo3dPointsInTimeHorizon(
 /* -------------------------------------------------------------------------- */
 // NOT TESTED (--> There is a UnitTest function in UtilsOpenCV)
 void VioBackend::computeStateCovariance() {
-  gtsam::Marginals marginals(smoother_->getFactors(),
+  gtsam::Marginals marginals(getMainBackendFactors(),
                              state_,
                              gtsam::Marginals::Factorization::CHOLESKY);
 
@@ -980,6 +1843,72 @@ void VioBackend::computeStateCovariance() {
   state_covariance_lkf_ = UtilsOpenCV::Covariance_bvx2xvb(
       marginals.jointMarginalCovariance(keys)
           .fullMatrix());  // 6 + 3 + 6 = 15x15matrix
+}
+
+void VioBackend::logPoseBeliefCovarianceSanityDiff(
+    const FrameId& cur_id) const {
+  if (!FLAGS_cbs_log_covariance_sanity_diff) {
+    return;
+  }
+
+  bool local_valid = pose_belief_local_covariance_valid_;
+  bool fused_valid = false;
+  gtsam::Matrix6 local_cov = gtsam::Matrix6::Zero();
+  gtsam::Matrix6 fused_cov = gtsam::Matrix6::Zero();
+  double trace_local = std::numeric_limits<double>::quiet_NaN();
+  double trace_fused = std::numeric_limits<double>::quiet_NaN();
+  double trace_ratio = std::numeric_limits<double>::quiet_NaN();
+  double frob_delta = std::numeric_limits<double>::quiet_NaN();
+  double max_abs_delta = std::numeric_limits<double>::quiet_NaN();
+
+  if (local_valid) {
+    local_cov = 0.5 * (pose_belief_local_covariance_lkf_ +
+                       pose_belief_local_covariance_lkf_.transpose());
+    local_valid = local_cov.allFinite();
+    if (local_valid) {
+      trace_local = local_cov.trace();
+    }
+  }
+
+  try {
+    gtsam::Marginals marginals(getMainBackendFactors(),
+                               state_,
+                               gtsam::Marginals::Factorization::CHOLESKY);
+    gtsam::KeyVector keys;
+    keys.push_back(gtsam::Symbol(kPoseSymbolChar, cur_id));
+    const gtsam::Matrix fused_cov_dyn =
+        marginals.jointMarginalCovariance(keys).fullMatrix();
+    if (fused_cov_dyn.rows() == 6 && fused_cov_dyn.cols() == 6) {
+      fused_cov = fused_cov_dyn;
+      fused_cov = 0.5 * (fused_cov + fused_cov.transpose());
+      fused_valid = fused_cov.allFinite();
+      if (fused_valid) {
+        trace_fused = fused_cov.trace();
+      }
+    }
+  } catch (const std::exception& e) {
+    LOG(WARNING) << "CBS covariance sanity: failed fused-pose covariance at "
+                 << "frame " << cur_id << " with: " << e.what();
+  }
+
+  if (local_valid && fused_valid) {
+    const gtsam::Matrix6 delta = local_cov - fused_cov;
+    frob_delta = delta.norm();
+    max_abs_delta = delta.cwiseAbs().maxCoeff();
+    if (std::abs(trace_fused) > 1e-12) {
+      trace_ratio = trace_local / trace_fused;
+    }
+  }
+
+  LOG(INFO) << "CBS covariance sanity frame=" << cur_id
+            << " source=" << pose_belief_covariance_source_
+            << " local_valid=" << local_valid
+            << " fused_valid=" << fused_valid
+            << " trace_local=" << trace_local
+            << " trace_fused=" << trace_fused
+            << " trace_ratio=" << trace_ratio
+            << " frob_delta=" << frob_delta
+            << " max_abs_delta=" << max_abs_delta;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1299,9 +2228,8 @@ bool VioBackend::optimize(
     const size_t& max_extra_iterations,
     const gtsam::FactorIndices& extra_factor_slots_to_delete) {
   DCHECK(smoother_) << "Incremental smoother is a null pointer.";
-  const bool use_local_belief_cov_smoother =
-      static_cast<bool>(local_belief_cov_smoother_) &&
-      typeid(*this) == typeid(VioBackend);
+  const bool use_local_belief_cov_sidecar =
+      static_cast<bool>(pose_belief_cov_sidecar_adapter_);
 
   // Only for statistics and debugging.
   // Store start time to calculate absolute total time taken.
@@ -1353,7 +2281,7 @@ bool VioBackend::optimize(
       // Smart factor Slot is different than -1, therefore the factor should be
       // already in the factor graph.
       DCHECK_GE(slot, 0);
-      if (smoother_->getFactors().exists(slot)) {
+      if (mainBackendFactorExists(slot)) {
         // Confirmed, the factor is in the graph.
         // We must delete the old smart factor from the graph.
         // TODO what happens if delete_slots has repeated elements?
@@ -1389,7 +2317,7 @@ bool VioBackend::optimize(
   new_factors_tmp.push_back(new_imu_prior_and_other_factors_.begin(),
                             new_imu_prior_and_other_factors_.end());
 
-  if (use_local_belief_cov_smoother) {
+  if (use_local_belief_cov_sidecar) {
     // Keep local-smart-factor bookkeeping aligned with the main map.
     for (auto it = old_smart_factors_local_belief_cov_.begin();
          it != old_smart_factors_local_belief_cov_.end();) {
@@ -1413,9 +2341,14 @@ bool VioBackend::optimize(
       }
 
       Slot local_slot = it_local->second.second;
-      if (local_slot != -1 &&
-          local_belief_cov_smoother_->getFactors().exists(local_slot)) {
-        local_delete_slots.push_back(local_slot);
+      if (local_slot != -1) {
+        if (local_belief_cov_smoother_) {
+          if (local_belief_cov_smoother_->getFactors().exists(local_slot)) {
+            local_delete_slots.push_back(local_slot);
+          }
+        } else {
+          local_delete_slots.push_back(static_cast<size_t>(local_slot));
+        }
       }
 
       new_factors_local_belief_cov.push_back(new_smart_factor.second);
@@ -1471,14 +2404,14 @@ bool VioBackend::optimize(
 
   // Recreate the graph before marginalization.
   if (VLOG_IS_ON(10) && FLAGS_debug_graph_before_opt) {
-    debug_info_.graphBeforeOpt = smoother_->getFactors();
+    debug_info_.graphBeforeOpt = getMainBackendFactors();
     debug_info_.graphToBeDeleted = gtsam::NonlinearFactorGraph();
     debug_info_.graphToBeDeleted.resize(delete_slots.size());
     for (size_t i = 0u; i < delete_slots.size(); i++) {
       // If the factor is to be deleted, store it as graph to be deleted.
-      CHECK(smoother_->getFactors().exists(delete_slots.at(i)));
+      CHECK(mainBackendFactorExists(delete_slots.at(i)));
       debug_info_.graphToBeDeleted.at(i) =
-          smoother_->getFactors().at(delete_slots.at(i));
+          mainBackendFactorAt(delete_slots.at(i));
     }
   }
 
@@ -1519,8 +2452,9 @@ bool VioBackend::optimize(
   /////////////////////////// BOOKKEEPING //////////////////////////////////////
   if (is_smoother_ok) {
     bool pose_belief_covariance_ok = false;
-    if (use_local_belief_cov_smoother) {
-      const bool local_update_ok = updatePoseBeliefLocalSidecar(
+    std::string pose_belief_covariance_source = "unavailable";
+    if (use_local_belief_cov_sidecar) {
+      const bool local_update_ok = pose_belief_cov_sidecar_adapter_->update(
           new_factors_local_belief_cov,
           new_values_,
           key_frame_count,
@@ -1529,7 +2463,12 @@ bool VioBackend::optimize(
           lmk_ids_of_new_smart_factors_local_belief_cov);
       if (local_update_ok) {
         pose_belief_covariance_ok =
-            computePoseBeliefLocalCovarianceFromSidecar(cur_id);
+            pose_belief_cov_sidecar_adapter_->computePoseBeliefLocalCovariance(
+                cur_id);
+        if (pose_belief_covariance_ok) {
+          pose_belief_covariance_source =
+              pose_belief_cov_sidecar_adapter_->covarianceSourceTag();
+        }
       } else {
         LOG(WARNING) << "CBS local belief covariance smoother update failed.";
       }
@@ -1537,8 +2476,21 @@ bool VioBackend::optimize(
     if (!pose_belief_covariance_ok) {
       pose_belief_covariance_ok =
           computePoseBeliefCovarianceWithoutExternalFactors(cur_id);
+      if (pose_belief_covariance_ok) {
+        pose_belief_covariance_source = "filtered_fallback";
+      }
     }
     pose_belief_local_covariance_valid_ = pose_belief_covariance_ok;
+    if (!pose_belief_local_covariance_valid_) {
+      pose_belief_covariance_source = "unavailable";
+    }
+    if (pose_belief_covariance_source_ != pose_belief_covariance_source ||
+        !pose_belief_local_covariance_valid_) {
+      LOG(INFO) << "CBS local covariance source=" << pose_belief_covariance_source
+                << " frame=" << cur_id
+                << " valid=" << pose_belief_local_covariance_valid_;
+    }
+    pose_belief_covariance_source_ = std::move(pose_belief_covariance_source);
 
     // Reset everything for next round.
     // TODO what about the old_smart_factors_?
@@ -1589,6 +2541,9 @@ bool VioBackend::optimize(
       // TODO: Add Update latest covariance --> move flag
       if (FLAGS_compute_state_covariance) {
         computeStateCovariance();
+      }
+      if (FLAGS_cbs_log_covariance_sanity_diff) {
+        logPoseBeliefCovarianceSanityDiff(cur_id);
       }
 
       // Debug.
@@ -1687,7 +2642,7 @@ void VioBackend::addConstantVelocityFactor(const FrameId& from_id,
 /* -------------------------------- UPDATE ---------------------------------- */
 void VioBackend::updateStates(const FrameId& cur_id) {
   VLOG(10) << "Starting to calculate estimate.";
-  state_ = smoother_->calculateEstimate();
+  state_ = calculateMainBackendEstimate();
   VLOG(10) << "Finished to calculate estimate.";
 
   DCHECK(state_.find(gtsam::Symbol(kPoseSymbolChar, cur_id)) != state_.end());
@@ -1737,6 +2692,147 @@ bool VioBackend::updateSmoother(Smoother::Result* result,
                                 const std::map<Key, double>& timestamps,
                                 const gtsam::FactorIndices& delete_slots) {
   CHECK_NOTNULL(result);
+  if (usePersistentBpsamMainBackend()) {
+    auto try_main_backend_update =
+        [&](const gtsam::NonlinearFactorGraph& factors_to_add,
+            const gtsam::Values& values_to_add) {
+          std::vector<size_t> ignored_smart_slots;
+          return main_bpsam_backend_->update(factors_to_add,
+                                             values_to_add,
+                                             timestamps,
+                                             delete_slots,
+                                             0u,
+                                             &ignored_smart_slots);
+        };
+
+    if (try_main_backend_update(new_factors, new_values)) {
+      return true;
+    }
+
+    LOG(ERROR) << "Persistent BPSAM main-backend update failed.";
+    if (new_values.empty()) {
+      return false;
+    }
+
+    gtsam::Values estimate;
+    try {
+      estimate = main_bpsam_backend_->calculateEstimate();
+    } catch (const std::exception& e) {
+      LOG(ERROR) << "Persistent BPSAM recovery estimate failed: " << e.what();
+      return false;
+    } catch (...) {
+      LOG(ERROR) << "Persistent BPSAM recovery estimate failed with unknown "
+                    "exception.";
+      return false;
+    }
+
+    if (estimate.empty()) {
+      LOG(ERROR) << "Persistent BPSAM recovery skipped: estimate is empty.";
+      return false;
+    }
+
+    // Failure-only recovery: inject soft priors on earliest and latest x/v/b
+    // states available in the current estimate (similar intent to native path).
+    auto min_max_pose_indices =
+        [&estimate]() -> std::optional<std::pair<size_t, size_t>> {
+      bool has_pose = false;
+      size_t min_idx = 0u;
+      size_t max_idx = 0u;
+      for (const auto& kv : estimate) {
+        const gtsam::Symbol key(kv.key);
+        if (key.chr() != kPoseSymbolChar) {
+          continue;
+        }
+        if (!has_pose) {
+          min_idx = key.index();
+          max_idx = key.index();
+          has_pose = true;
+          continue;
+        }
+        min_idx = std::min(min_idx, key.index());
+        max_idx = std::max(max_idx, key.index());
+      }
+      if (!has_pose) {
+        return std::nullopt;
+      }
+      return std::make_pair(min_idx, max_idx);
+    };
+
+    const auto idx_pair = min_max_pose_indices();
+    if (!idx_pair) {
+      LOG(ERROR) << "Persistent BPSAM recovery skipped: no pose keys in "
+                    "estimate.";
+      return false;
+    }
+
+    const std::vector<size_t> frame_indices = (idx_pair->first == idx_pair->second)
+                                                  ? std::vector<size_t>{idx_pair->first}
+                                                  : std::vector<size_t>{idx_pair->first,
+                                                                        idx_pair->second};
+    gtsam::NonlinearFactorGraph recovery_factors;
+    recovery_factors.reserve(new_factors.size() + frame_indices.size() * 3u);
+    recovery_factors.push_back(new_factors.begin(), new_factors.end());
+
+    size_t num_recovery_priors = 0u;
+    for (const size_t idx : frame_indices) {
+      const gtsam::Symbol pose_key(kPoseSymbolChar, idx);
+      const gtsam::Symbol vel_key(kVelocitySymbolChar, idx);
+      const gtsam::Symbol bias_key(kImuBiasSymbolChar, idx);
+
+      if (estimate.exists(pose_key)) {
+        const gtsam::Pose3 pose = estimate.at<gtsam::Pose3>(pose_key);
+        gtsam::Vector6 sigmas;
+        sigmas.head<3>().setConstant(0.01);
+        sigmas.tail<3>().setConstant(0.1);
+        const gtsam::SharedNoiseModel noise =
+            gtsam::noiseModel::Diagonal::Sigmas(sigmas);
+        recovery_factors.emplace_shared<gtsam::PriorFactor<gtsam::Pose3>>(
+            pose_key, pose, noise);
+        ++num_recovery_priors;
+      }
+
+      if (estimate.exists(vel_key)) {
+        const gtsam::Vector3 vel = estimate.at<gtsam::Vector3>(vel_key);
+        const gtsam::SharedNoiseModel noise =
+            gtsam::noiseModel::Diagonal::Sigmas(
+                (gtsam::Vector3() << 0.1, 0.1, 0.1).finished());
+        recovery_factors.emplace_shared<gtsam::PriorFactor<gtsam::Vector3>>(
+            vel_key, vel, noise);
+        ++num_recovery_priors;
+      }
+
+      if (estimate.exists(bias_key)) {
+        const gtsam::imuBias::ConstantBias bias =
+            estimate.at<gtsam::imuBias::ConstantBias>(bias_key);
+        gtsam::Vector6 sigmas;
+        sigmas.head<3>().setConstant(backend_params_.initialAccBiasSigma_);
+        sigmas.tail<3>().setConstant(backend_params_.initialGyroBiasSigma_);
+        const gtsam::SharedNoiseModel noise =
+            gtsam::noiseModel::Diagonal::Sigmas(sigmas);
+        recovery_factors
+            .emplace_shared<gtsam::PriorFactor<gtsam::imuBias::ConstantBias>>(
+                bias_key, bias, noise);
+        ++num_recovery_priors;
+      }
+    }
+
+    if (num_recovery_priors == 0u) {
+      LOG(ERROR) << "Persistent BPSAM recovery skipped: no eligible x/v/b keys "
+                    "for priors.";
+      return false;
+    }
+
+    LOG(WARNING) << "Persistent BPSAM recovery retry with "
+                 << num_recovery_priors << " temporary priors.";
+    const bool recovered = try_main_backend_update(recovery_factors, new_values);
+    if (!recovered) {
+      LOG(ERROR) << "Persistent BPSAM recovery retry failed.";
+      return false;
+    }
+    LOG(WARNING) << "Persistent BPSAM recovery retry succeeded.";
+    return true;
+  }
+
   // Store smoother as backup.
   CHECK(smoother_);
   // This is not doing a full deep copy: it is keeping same shared_ptrs for
@@ -2070,7 +3166,7 @@ void VioBackend::updateNewSmartFactorsSlots(
   CHECK_NOTNULL(old_smart_factors);
 
   // Get result.
-  const gtsam::ISAM2Result& result = smoother_->getISAM2Result();
+  const gtsam::ISAM2Result& result = getMainBackendResult();
 
   // Simple version of find smart factors.
   for (size_t i = 0u; i < lmk_ids_of_new_smart_factors.size(); ++i) {
@@ -2079,6 +3175,9 @@ void VioBackend::updateNewSmartFactorsSlots(
            "graph.";
     // Get new slot in the graph for the newly added smart factor.
     const size_t& slot = result.newFactorsIndices.at(i);
+    if (!mainBackendFactorExists(slot)) {
+      continue;
+    }
 
     // TODO this will not work if there are non-smart factors!!!
     // Update slot using isam2 indices.
@@ -2096,8 +3195,8 @@ void VioBackend::updateNewSmartFactorsSlots(
         << "Trying to access unavailable factor.";
     // CHECK that the factor in the graph at slot position is a smart
     // factor.
-    const auto sptr = dynamic_cast<const SmartStereoFactor*>(
-        smoother_->getFactors().at(slot).get());
+    const auto sptr =
+        dynamic_cast<const SmartStereoFactor*>(mainBackendFactorAt(slot).get());
     DCHECK(sptr);
     // CHECK that shared ptrs point to the same smart factor.
     // make sure no one is cloning SmartSteroFactors.
@@ -2281,13 +3380,12 @@ bool VioBackend::computePoseBeliefLocalCovarianceFromSidecar(
 
 bool VioBackend::computePoseBeliefCovarianceWithoutExternalFactors(
     const FrameId& cur_id) {
-  DCHECK(smoother_) << "Incremental smoother is a null pointer.";
   const gtsam::Key pose_key = gtsam::Symbol(kPoseSymbolChar, cur_id);
   if (!state_.exists(pose_key)) {
     return false;
   }
 
-  const gtsam::NonlinearFactorGraph& full_graph = smoother_->getFactors();
+  const gtsam::NonlinearFactorGraph& full_graph = getMainBackendFactors();
   std::unordered_set<size_t> external_slots;
   external_slots.reserve(active_external_belief_factor_slots_.size());
   for (const auto& active_slot : active_external_belief_factor_slots_) {
@@ -2411,6 +3509,11 @@ void VioBackend::setNoMotionFactorsParams(
 /// Printers.
 void VioBackend::print() const {
   backend_params_.print();
+  if (usePersistentBpsamMainBackend()) {
+    LOG(INFO) << "Main backend optimizer mode: persistent BPSAM.";
+  } else {
+    LOG(INFO) << "Main backend optimizer mode: native fixed-lag smoother.";
+  }
 
   smoother_->params().print(std::string(10, '.') + "** ISAM2 Parameters **" +
                             std::string(10, '.'));
@@ -2455,13 +3558,13 @@ void VioBackend::printSmootherInfo(
   // shouldn't we print the graph before optimization instead?
   // Yes if available, but if not, then just ask the smoother.
   static const std::string graph_before_opt = "(graph before optimization)";
-  static const std::string smoother_get_factors = "(smoother getFactors)";
+  static const std::string backend_factors = "(main backend factors)";
   if (debug_info_.graphBeforeOpt.size() != 0) {
     which_graph = &graph_before_opt;
     graph = &(debug_info_.graphBeforeOpt);
   } else {
-    which_graph = &smoother_get_factors;
-    graph = &(smoother_->getFactors());
+    which_graph = &backend_factors;
+    graph = &(getMainBackendFactors());
   }
   CHECK_NOTNULL(which_graph);
   CHECK_NOTNULL(graph);
@@ -2629,7 +3732,7 @@ void VioBackend::printSelectedGraph(
 void VioBackend::computeSmartFactorStatistics() {
   // Compute number of valid/degenerate
   debug_info_.resetSmartFactorsStatistics();
-  gtsam::NonlinearFactorGraph graph = smoother_->getFactors();
+  gtsam::NonlinearFactorGraph graph = getMainBackendFactors();
   for (const auto& g : graph) {
     if (g) {
       const auto gsf = dynamic_cast<const SmartStereoFactor*>(g.get());
@@ -2689,7 +3792,7 @@ void VioBackend::computeSmartFactorStatistics() {
 }
 
 void VioBackend::computeSparsityStatistics() {
-  gtsam::NonlinearFactorGraph graph = smoother_->getFactors();
+  gtsam::NonlinearFactorGraph graph = getMainBackendFactors();
   gtsam::GaussianFactorGraph::shared_ptr gfg = graph.linearize(state_);
   gtsam::Matrix Hessian = gfg->hessian().first;
   debug_info_.nrElementsInMatrix_ = Hessian.rows() * Hessian.cols();
@@ -2745,8 +3848,8 @@ void VioBackend::postDebug(
            "The sum of the parts is not equal to the total.";
 
     // Print error.
-    gtsam::NonlinearFactorGraph graph = gtsam::NonlinearFactorGraph(
-        smoother_->getFactors());  // clone, expensive but safer!
+    gtsam::NonlinearFactorGraph graph =
+        gtsam::NonlinearFactorGraph(getMainBackendFactors());
     VLOG(10) << "Optimization Errors:\n"
              << " - Error before :" << graph.error(debug_info_.stateBeforeOpt)
              << '\n'

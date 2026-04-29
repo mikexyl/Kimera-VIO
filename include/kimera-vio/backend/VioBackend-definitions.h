@@ -22,6 +22,8 @@
 
 #include <array>
 #include <cstdint>
+#include <limits>
+#include <string>
 #include <vector>
 
 #include "kimera-vio/common/VioNavState.h"
@@ -113,9 +115,14 @@ using FeatureTracks = std::unordered_map<LandmarkId, FeatureTrack>;
 struct ExternalPoseBelief {
   uint8_t source_agent = 0u;
   uint32_t pose_index = 0u;
+  uint32_t sender_pose_index = 0u;
   double stamp_sec = 0.0;
+  uint64_t sender_timestamp_ns = 0u;
+  std::string sender_frame_id = "na";
   std::array<double, 6> mu{};
   std::array<double, 36> covariance{};
+  double sent_trace = std::numeric_limits<double>::quiet_NaN();
+  double received_trace = std::numeric_limits<double>::quiet_NaN();
   double relax_factor = 0.0;
 };
 
@@ -313,7 +320,9 @@ struct BackendOutput : public PipelinePayload {
                 const LmkIdToLmkTypeMap& lmk_id_to_lmk_type_map,
                 const gtsam::Matrix& pose_belief_local_covariance_lkf =
                     gtsam::Matrix(),
-                bool pose_belief_local_covariance_valid = false)
+                bool pose_belief_local_covariance_valid = false,
+                const std::string& pose_belief_covariance_source =
+                    "unavailable")
       : PipelinePayload(timestamp_kf),
         W_State_Blkf_(timestamp_kf, W_Pose_Blkf, W_Vel_Blkf, imu_bias_lkf),
         state_(state),
@@ -326,7 +335,8 @@ struct BackendOutput : public PipelinePayload {
         lmk_id_to_lmk_type_map_(lmk_id_to_lmk_type_map),
         pose_belief_local_covariance_lkf_(pose_belief_local_covariance_lkf),
         pose_belief_local_covariance_valid_(
-            pose_belief_local_covariance_valid) {}
+            pose_belief_local_covariance_valid),
+        pose_belief_covariance_source_(pose_belief_covariance_source) {}
 
   BackendOutput(const VioNavStateTimestamped& vio_navstate_timestamped,
                 const gtsam::Values& state,
@@ -339,7 +349,9 @@ struct BackendOutput : public PipelinePayload {
                 const LmkIdToLmkTypeMap& lmk_id_to_lmk_type_map,
                 const gtsam::Matrix& pose_belief_local_covariance_lkf =
                     gtsam::Matrix(),
-                bool pose_belief_local_covariance_valid = false)
+                bool pose_belief_local_covariance_valid = false,
+                const std::string& pose_belief_covariance_source =
+                    "unavailable")
       : PipelinePayload(vio_navstate_timestamped.timestamp_),
         W_State_Blkf_(vio_navstate_timestamped),
         state_(state),
@@ -352,7 +364,8 @@ struct BackendOutput : public PipelinePayload {
         lmk_id_to_lmk_type_map_(lmk_id_to_lmk_type_map),
         pose_belief_local_covariance_lkf_(pose_belief_local_covariance_lkf),
         pose_belief_local_covariance_valid_(
-            pose_belief_local_covariance_valid) {}
+            pose_belief_local_covariance_valid),
+        pose_belief_covariance_source_(pose_belief_covariance_source) {}
 
   const VioNavStateTimestamped W_State_Blkf_;
   const gtsam::Values state_;
@@ -365,6 +378,7 @@ struct BackendOutput : public PipelinePayload {
   const LmkIdToLmkTypeMap lmk_id_to_lmk_type_map_;
   const gtsam::Matrix pose_belief_local_covariance_lkf_;
   const bool pose_belief_local_covariance_valid_;
+  const std::string pose_belief_covariance_source_;
 };
 
 ////////////////////////////////////////////////////////////////////////////////

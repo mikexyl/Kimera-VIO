@@ -38,6 +38,9 @@ class BackendFactory {
       const BackendOutputParams& backend_output_params,
       bool log_output,
       std::optional<OdometryParams> odom_params) {
+    LOG(INFO) << "BackendFactory selecting backend_type="
+              << static_cast<int>(backend_type)
+              << " (0=VioBackend, 1=RegularVioBackend)";
     switch (backend_type) {
       case BackendType::kStereoImu: {
         return std::make_unique<VioBackend>(B_Pose_leftCamRect,

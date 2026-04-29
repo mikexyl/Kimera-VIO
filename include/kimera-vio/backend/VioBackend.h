@@ -46,10 +46,12 @@
 
 #include <fstream>
 #include <iostream>
+#include <atomic>
 #include <deque>
 #include <map>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <unordered_map>
 
 #include "kimera-vio/backend/VioBackend-definitions.h"
@@ -69,6 +71,7 @@ namespace VIO {
 
 // Forward-declarations
 class VioNavState;
+class PersistentBpsamLocalCovarianceSidecar;
 
 class VioBackend {
  public:
@@ -93,7 +96,7 @@ class VioBackend {
              const BackendOutputParams& backend_output_params,
              bool log_output,
              std::optional<OdometryParams> odom_params = std::nullopt);
-  virtual ~VioBackend() { LOG(INFO) << "Backend destructor called."; }
+  virtual ~VioBackend();
 
  public:
   BackendOutput::UniquePtr spinOnce(const BackendInput& input);
@@ -200,9 +203,7 @@ class VioBackend {
         VioNavStateTimestamped(input.timestamp_, initial_state_estimate));
   }
 
-  inline void saveGraph(const std::string& filepath) const {
-    smoother_->getFactors().saveGraph(filepath);
-  }
+  void saveGraph(const std::string& filepath) const;
 
  protected:
   enum class BackendState {
@@ -301,8 +302,46 @@ class VioBackend {
   bool deleteLmkFromFeatureTracks(const LandmarkId& lmk_id);
 
  private:
+  class PoseBeliefCovarianceSidecarAdapter {
+   public:
+    virtual ~PoseBeliefCovarianceSidecarAdapter() = default;
+
+    virtual bool update(
+        const gtsam::NonlinearFactorGraph& new_factors_tmp,
+        const gtsam::Values& new_values,
+        const std::map<Key, double>& timestamps,
+        const gtsam::FactorIndices& delete_slots,
+        size_t max_extra_iterations,
+        const std::vector<LandmarkId>& lmk_ids_of_new_smart_factors_tmp) = 0;
+
+    virtual bool computePoseBeliefLocalCovariance(
+        const FrameId& cur_id) = 0;
+
+    virtual const char* covarianceSourceTag() const = 0;
+  };
+
+  class LocalSmootherPoseBeliefCovarianceSidecarAdapter;
+  class PersistentBpsamPoseBeliefCovarianceSidecarAdapter;
+
+  void initializePoseBeliefCovarianceSidecarAdapter();
+
   bool addVisualInertialStateAndOptimize(const BackendInput& input);
 
+ protected:
+  bool usePersistentBpsamMainBackend() const;
+
+  const gtsam::NonlinearFactorGraph& getMainBackendFactors() const;
+
+  bool mainBackendFactorExists(size_t slot) const;
+
+  const gtsam::NonlinearFactor::shared_ptr mainBackendFactorAt(
+      size_t slot) const;
+
+  const gtsam::ISAM2Result& getMainBackendResult() const;
+
+  gtsam::Values calculateMainBackendEstimate() const;
+
+ private:
   // Add initial prior factors.
   void addInitialPriorFactors(const FrameId& frame_id);
 
@@ -392,6 +431,7 @@ class VioBackend {
       const FrameId& cur_id);
 
   bool computePoseBeliefCovarianceWithoutExternalFactors(const FrameId& cur_id);
+  void logPoseBeliefCovarianceSanityDiff(const FrameId& cur_id) const;
 
   struct ExternalBeliefFactorId {
     uint8_t source_agent = 0u;
@@ -407,6 +447,14 @@ class VioBackend {
     size_t slot = 0u;
   };
 
+  enum class ExternalBeliefRejectReason {
+    kNone = 0,
+    kWindow = 1,
+    kTimestamp = 2,
+    kMissingState = 3,
+    kCovariance = 4,
+  };
+
   std::vector<ExternalPoseBelief> popPendingExternalPoseBeliefs();
 
   void updateKeyframeTimestampIndex(const FrameId& frame_id,
@@ -414,7 +462,9 @@ class VioBackend {
 
   bool resolveExternalBeliefTargetFrame(const ExternalPoseBelief& belief,
                                         const FrameId& cur_id,
-                                        FrameId* local_frame_id) const;
+                                        FrameId* local_frame_id,
+                                        ExternalBeliefRejectReason* reject_reason)
+      const;
 
   void collectExternalBeliefFactors(
       const FrameId& cur_id,
@@ -546,6 +596,7 @@ class VioBackend {
   gtsam::Matrix pose_belief_local_covariance_lkf_ =
       Eigen::MatrixXd::Zero(6, 6);
   bool pose_belief_local_covariance_valid_ = false;
+  std::string pose_belief_covariance_source_ = "unavailable";
 
   // Vision params.
   gtsam::SmartStereoProjectionParams smart_factors_params_;
@@ -561,7 +612,10 @@ class VioBackend {
 
   // ISAM2 smoother
   std::unique_ptr<Smoother> smoother_;
+  std::unique_ptr<PersistentBpsamLocalCovarianceSidecar> main_bpsam_backend_;
   std::unique_ptr<Smoother> local_belief_cov_smoother_;
+  std::unique_ptr<PoseBeliefCovarianceSidecarAdapter>
+      pose_belief_cov_sidecar_adapter_;
   gtsam::Values local_belief_cov_state_;
 
   // Values
@@ -620,7 +674,19 @@ class VioBackend {
   std::vector<ExternalBeliefFactorSlot> active_external_belief_factor_slots_;
   std::map<FrameId, double> keyframe_timestamp_sec_;
   size_t max_pending_external_pose_beliefs_ = 800u;
-  double external_belief_timestamp_tolerance_sec_ = 0.05;
+  double external_belief_timestamp_tolerance_sec_ = 0.2;
+  // External-belief flow diagnostics (monotonic counters).
+  std::atomic<size_t> external_beliefs_received_total_{0u};
+  std::atomic<size_t> external_beliefs_queue_dropped_total_{0u};
+  std::atomic<size_t> external_beliefs_resolved_total_{0u};
+  std::atomic<size_t> external_beliefs_selected_total_{0u};
+  std::atomic<size_t> external_beliefs_inserted_total_{0u};
+  std::atomic<size_t> external_beliefs_rejected_total_{0u};
+  std::atomic<size_t> external_beliefs_rejected_window_total_{0u};
+  std::atomic<size_t> external_beliefs_rejected_timestamp_total_{0u};
+  std::atomic<size_t> external_beliefs_rejected_missing_state_total_{0u};
+  std::atomic<size_t> external_beliefs_rejected_covariance_total_{0u};
+  std::atomic<size_t> external_merge_diag_sample_idx_{0u};
 
   //! Logger.
   const bool log_output_ = {false};
