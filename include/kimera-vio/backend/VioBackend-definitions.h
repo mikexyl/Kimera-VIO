@@ -17,13 +17,13 @@
 #include <glog/logging.h>
 #include <gtsam/geometry/Cal3_S2.h>
 #include <gtsam/geometry/StereoPoint2.h>
-#include <gtsam_unstable/nonlinear/IncrementalFixedLagSmoother.h>
 #include <gtsam_unstable/slam/SmartStereoProjectionPoseFactor.h>
 
 #include <array>
 #include <cstdint>
 #include <limits>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "kimera-vio/common/VioNavState.h"
@@ -35,6 +35,10 @@
 #include "kimera-vio/pipeline/PipelinePayload.h"
 #include "kimera-vio/utils/Macros.h"
 #include "kimera-vio/utils/UtilsOpenCV.h"
+
+namespace cbs {
+class IncrementalFixedLagBpsamSmoother;
+}  // namespace cbs
 
 namespace VIO {
 
@@ -56,7 +60,7 @@ static constexpr SymbolChar kLandmarkSymbolChar = 'l';
 
 #define INCREMENTAL_SMOOTHER
 #ifdef INCREMENTAL_SMOOTHER
-typedef gtsam::IncrementalFixedLagSmoother Smoother;
+typedef cbs::IncrementalFixedLagBpsamSmoother Smoother;
 #else
 typedef gtsam::BatchFixedLagSmoother Smoother;
 #endif
@@ -322,7 +326,12 @@ struct BackendOutput : public PipelinePayload {
                     gtsam::Matrix(),
                 bool pose_belief_local_covariance_valid = false,
                 const std::string& pose_belief_covariance_source =
-                    "unavailable")
+                    "unavailable",
+                size_t external_beliefs_added_per_update = 0u,
+                double optimization_time_sec = 0.0,
+                double cbs_belief_generation_time_sec = 0.0,
+                size_t cbs_marginalization_graph_factor_count = 0u,
+                std::vector<ExternalPoseBelief> cbs_outgoing_pose_beliefs = {})
       : PipelinePayload(timestamp_kf),
         W_State_Blkf_(timestamp_kf, W_Pose_Blkf, W_Vel_Blkf, imu_bias_lkf),
         state_(state),
@@ -336,7 +345,14 @@ struct BackendOutput : public PipelinePayload {
         pose_belief_local_covariance_lkf_(pose_belief_local_covariance_lkf),
         pose_belief_local_covariance_valid_(
             pose_belief_local_covariance_valid),
-        pose_belief_covariance_source_(pose_belief_covariance_source) {}
+        pose_belief_covariance_source_(pose_belief_covariance_source),
+        external_beliefs_added_per_update_(
+            external_beliefs_added_per_update),
+        optimization_time_sec_(optimization_time_sec),
+        cbs_belief_generation_time_sec_(cbs_belief_generation_time_sec),
+        cbs_marginalization_graph_factor_count_(
+            cbs_marginalization_graph_factor_count),
+        cbs_outgoing_pose_beliefs_(std::move(cbs_outgoing_pose_beliefs)) {}
 
   BackendOutput(const VioNavStateTimestamped& vio_navstate_timestamped,
                 const gtsam::Values& state,
@@ -351,7 +367,12 @@ struct BackendOutput : public PipelinePayload {
                     gtsam::Matrix(),
                 bool pose_belief_local_covariance_valid = false,
                 const std::string& pose_belief_covariance_source =
-                    "unavailable")
+                    "unavailable",
+                size_t external_beliefs_added_per_update = 0u,
+                double optimization_time_sec = 0.0,
+                double cbs_belief_generation_time_sec = 0.0,
+                size_t cbs_marginalization_graph_factor_count = 0u,
+                std::vector<ExternalPoseBelief> cbs_outgoing_pose_beliefs = {})
       : PipelinePayload(vio_navstate_timestamped.timestamp_),
         W_State_Blkf_(vio_navstate_timestamped),
         state_(state),
@@ -365,7 +386,14 @@ struct BackendOutput : public PipelinePayload {
         pose_belief_local_covariance_lkf_(pose_belief_local_covariance_lkf),
         pose_belief_local_covariance_valid_(
             pose_belief_local_covariance_valid),
-        pose_belief_covariance_source_(pose_belief_covariance_source) {}
+        pose_belief_covariance_source_(pose_belief_covariance_source),
+        external_beliefs_added_per_update_(
+            external_beliefs_added_per_update),
+        optimization_time_sec_(optimization_time_sec),
+        cbs_belief_generation_time_sec_(cbs_belief_generation_time_sec),
+        cbs_marginalization_graph_factor_count_(
+            cbs_marginalization_graph_factor_count),
+        cbs_outgoing_pose_beliefs_(std::move(cbs_outgoing_pose_beliefs)) {}
 
   const VioNavStateTimestamped W_State_Blkf_;
   const gtsam::Values state_;
@@ -379,6 +407,11 @@ struct BackendOutput : public PipelinePayload {
   const gtsam::Matrix pose_belief_local_covariance_lkf_;
   const bool pose_belief_local_covariance_valid_;
   const std::string pose_belief_covariance_source_;
+  const size_t external_beliefs_added_per_update_;
+  const double optimization_time_sec_;
+  const double cbs_belief_generation_time_sec_;
+  const size_t cbs_marginalization_graph_factor_count_;
+  const std::vector<ExternalPoseBelief> cbs_outgoing_pose_beliefs_;
 };
 
 ////////////////////////////////////////////////////////////////////////////////

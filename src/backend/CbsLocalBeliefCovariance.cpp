@@ -60,7 +60,6 @@ std::optional<gtsam::Matrix> computePoseBeliefCovarianceWithBpsamSnapshot(
   cbs::BPSAM::Params bpsam_params;
   bpsam_params.robot_id = static_cast<cbs::AgentId>(robot_id);
   bpsam_params.sam_params_ = isam2_params;
-  bpsam_params.enable_gkcm = false;
   bpsam_params.enable_belief_dcs = false;
 
   try {
@@ -98,7 +97,6 @@ struct PersistentBpsamLocalCovarianceSidecar::Impl {
           cbs::BPSAM::Params params;
           params.robot_id = static_cast<cbs::AgentId>(robot_id);
           params.sam_params_ = isam2_params;
-          params.enable_gkcm = false;
           params.enable_belief_dcs = false;
           params.belief_similarity_threshold = 0.0;
           return params;

@@ -360,7 +360,7 @@ class VioBackend {
    * @return False if the update failed, true otw.
    */
   bool updateSmoother(
-      Smoother::Result* result,
+      gtsam::FixedLagSmoother::Result* result,
       const gtsam::NonlinearFactorGraph& new_factors_tmp =
           gtsam::NonlinearFactorGraph(),
       const gtsam::Values& new_values = gtsam::Values(),
@@ -471,6 +471,8 @@ class VioBackend {
       gtsam::FactorIndices* delete_slots,
       gtsam::NonlinearFactorGraph* new_factors_tmp,
       std::vector<ExternalBeliefFactorId>* inserted_external_factor_ids);
+
+  void refreshCbsOutgoingBeliefs(const FrameId& cur_id);
 
   void refreshExternalBeliefFactorSlots(
       const size_t num_factors_before_external,
@@ -597,6 +599,11 @@ class VioBackend {
       Eigen::MatrixXd::Zero(6, 6);
   bool pose_belief_local_covariance_valid_ = false;
   std::string pose_belief_covariance_source_ = "unavailable";
+  size_t external_beliefs_added_per_update_ = 0u;
+  double optimization_time_sec_per_update_ = 0.0;
+  double cbs_belief_generation_time_sec_per_update_ = 0.0;
+  size_t cbs_marginalization_graph_factor_count_ = 0u;
+  std::vector<ExternalPoseBelief> cbs_outgoing_pose_beliefs_;
 
   // Vision params.
   gtsam::SmartStereoProjectionParams smart_factors_params_;
