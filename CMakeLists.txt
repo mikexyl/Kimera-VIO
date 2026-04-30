@@ -31,6 +31,7 @@ find_package(opengv REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(DBoW2 REQUIRED)
 find_package(KimeraRPGO REQUIRED)
+find_package(Eigen3 REQUIRED)
 find_package(cbs REQUIRED)
 # Pangolin is optional
 find_package(Pangolin QUIET)

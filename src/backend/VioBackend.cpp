@@ -30,6 +30,7 @@
 #include "kimera-vio/backend/VioBackend.h"
 
 #include <cbs/gbp/belief.h>
+#include <cbs/utils/gtsam_compat.h>
 #include <gflags/gflags.h>
 #include <glog/logging.h>
 
@@ -3355,9 +3356,9 @@ bool VioBackend::computePoseBeliefLocalCovarianceFromSidecar(
   gtsam::Values local_values;
   for (const gtsam::Key& key : local_graph.keys()) {
     if (local_belief_cov_state_.exists(key)) {
-      local_values.insert_or_assign(key, local_belief_cov_state_.at(key));
+      cbs::insertOrAssign(local_values, key, local_belief_cov_state_.at(key));
     } else if (state_.exists(key)) {
-      local_values.insert_or_assign(key, state_.at(key));
+      cbs::insertOrAssign(local_values, key, state_.at(key));
     } else {
       LOG(WARNING) << "BPSAM local covariance snapshot missing value for key "
                    << gtsam::DefaultKeyFormatter(key) << ".";
