@@ -44,10 +44,10 @@
 #endif
 #include <gtsam_unstable/slam/SmartStereoProjectionPoseFactor.h>
 
-#include <fstream>
-#include <iostream>
 #include <atomic>
 #include <deque>
+#include <fstream>
+#include <iostream>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -314,8 +314,7 @@ class VioBackend {
         size_t max_extra_iterations,
         const std::vector<LandmarkId>& lmk_ids_of_new_smart_factors_tmp) = 0;
 
-    virtual bool computePoseBeliefLocalCovariance(
-        const FrameId& cur_id) = 0;
+    virtual bool computePoseBeliefLocalCovariance(const FrameId& cur_id) = 0;
 
     virtual const char* covarianceSourceTag() const = 0;
   };
@@ -460,11 +459,11 @@ class VioBackend {
   void updateKeyframeTimestampIndex(const FrameId& frame_id,
                                     const Timestamp& timestamp_kf_nsec);
 
-  bool resolveExternalBeliefTargetFrame(const ExternalPoseBelief& belief,
-                                        const FrameId& cur_id,
-                                        FrameId* local_frame_id,
-                                        ExternalBeliefRejectReason* reject_reason)
-      const;
+  bool resolveExternalBeliefTargetFrame(
+      const ExternalPoseBelief& belief,
+      const FrameId& cur_id,
+      FrameId* local_frame_id,
+      ExternalBeliefRejectReason* reject_reason) const;
 
   void collectExternalBeliefFactors(
       const FrameId& cur_id,
@@ -476,8 +475,7 @@ class VioBackend {
 
   void refreshExternalBeliefFactorSlots(
       const size_t num_factors_before_external,
-      const std::vector<ExternalBeliefFactorId>&
-          inserted_external_factor_ids);
+      const std::vector<ExternalBeliefFactorId>& inserted_external_factor_ids);
 
   // Set parameters for all types of factors.
   void setFactorsParams(
@@ -595,11 +593,15 @@ class VioBackend {
 
   // State covariance. (initialize to zero)
   gtsam::Matrix state_covariance_lkf_ = Eigen::MatrixXd::Zero(15, 15);
-  gtsam::Matrix pose_belief_local_covariance_lkf_ =
-      Eigen::MatrixXd::Zero(6, 6);
+  gtsam::Matrix pose_belief_local_covariance_lkf_ = Eigen::MatrixXd::Zero(6, 6);
   bool pose_belief_local_covariance_valid_ = false;
   std::string pose_belief_covariance_source_ = "unavailable";
   size_t external_beliefs_added_per_update_ = 0u;
+  size_t external_beliefs_rejected_first_message_per_update_ = 0u;
+  size_t external_beliefs_rejected_update_status_per_update_ = 0u;
+  size_t external_beliefs_rejected_inactive_window_per_update_ = 0u;
+  size_t external_beliefs_rejected_shape_per_update_ = 0u;
+  size_t external_beliefs_rejected_exception_per_update_ = 0u;
   double optimization_time_sec_per_update_ = 0.0;
   double cbs_belief_generation_time_sec_per_update_ = 0.0;
   size_t cbs_marginalization_graph_factor_count_ = 0u;
@@ -693,6 +695,11 @@ class VioBackend {
   std::atomic<size_t> external_beliefs_rejected_timestamp_total_{0u};
   std::atomic<size_t> external_beliefs_rejected_missing_state_total_{0u};
   std::atomic<size_t> external_beliefs_rejected_covariance_total_{0u};
+  std::atomic<size_t> external_beliefs_rejected_first_message_total_{0u};
+  std::atomic<size_t> external_beliefs_rejected_update_status_total_{0u};
+  std::atomic<size_t> external_beliefs_rejected_inactive_window_total_{0u};
+  std::atomic<size_t> external_beliefs_rejected_shape_total_{0u};
+  std::atomic<size_t> external_beliefs_rejected_exception_total_{0u};
   std::atomic<size_t> external_merge_diag_sample_idx_{0u};
 
   //! Logger.

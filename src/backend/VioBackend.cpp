@@ -90,6 +90,9 @@ DEFINE_bool(cbs_use_persistent_bpsam_for_main_backend,
 DEFINE_bool(cbs_log_covariance_sanity_diff,
             false,
             "Log debug-only local-vs-fused pose covariance sanity metrics.");
+DEFINE_bool(cbs_enable_soft_reset,
+            true,
+            "Enable GBP soft reset for incoming CBS external belief updates.");
 DEFINE_double(cbs_external_belief_timestamp_tolerance_sec,
               0.2,
               "Max allowed absolute timestamp mismatch (seconds) when matching "
@@ -108,8 +111,8 @@ inline FrameId saturatingSubFrameId(const FrameId value, const FrameId delta) {
 
 inline FrameId computeOldestActiveFrameId(const FrameId cur_id,
                                           const BackendParams& backend_params) {
-  const FrameId window_size = std::max<FrameId>(
-      1u, static_cast<FrameId>(backend_params.nr_states_));
+  const FrameId window_size =
+      std::max<FrameId>(1u, static_cast<FrameId>(backend_params.nr_states_));
   return saturatingSubFrameId(cur_id, window_size - 1u);
 }
 
@@ -119,7 +122,16 @@ inline std::string formatPoseKeyToken(const uint8_t source_agent,
   return std::string("p:") + agent_char + ":" + std::to_string(pose_index);
 }
 
-inline gtsam::Matrix6 sanitizePoseCovariance(const gtsam::Matrix& state_covariance) {
+inline std::string sanitizeLogToken(std::string token) {
+  std::replace(token.begin(), token.end(), ',', '_');
+  std::replace(token.begin(), token.end(), ' ', '_');
+  std::replace(token.begin(), token.end(), '\n', '_');
+  std::replace(token.begin(), token.end(), '\r', '_');
+  return token.empty() ? "na" : token;
+}
+
+inline gtsam::Matrix6 sanitizePoseCovariance(
+    const gtsam::Matrix& state_covariance) {
   gtsam::Matrix6 pose_cov = gtsam::Matrix6::Identity() * 1e-3;
   if (state_covariance.rows() >= 6 && state_covariance.cols() >= 6) {
     pose_cov = gtsam::sub(state_covariance, 0, 6, 0, 6);
@@ -138,24 +150,23 @@ inline gtsam::Matrix6 sanitizePoseCovariance(const gtsam::Matrix& state_covarian
 class VioBackend::LocalSmootherPoseBeliefCovarianceSidecarAdapter final
     : public VioBackend::PoseBeliefCovarianceSidecarAdapter {
  public:
-  explicit LocalSmootherPoseBeliefCovarianceSidecarAdapter(
-      VioBackend* backend)
+  explicit LocalSmootherPoseBeliefCovarianceSidecarAdapter(VioBackend* backend)
       : backend_(CHECK_NOTNULL(backend)) {}
 
-  bool update(
-      const gtsam::NonlinearFactorGraph& new_factors_tmp,
-      const gtsam::Values& new_values,
-      const std::map<Key, double>& timestamps,
-      const gtsam::FactorIndices& delete_slots,
-      size_t max_extra_iterations,
-      const std::vector<LandmarkId>& lmk_ids_of_new_smart_factors_tmp)
+  bool update(const gtsam::NonlinearFactorGraph& new_factors_tmp,
+              const gtsam::Values& new_values,
+              const std::map<Key, double>& timestamps,
+              const gtsam::FactorIndices& delete_slots,
+              size_t max_extra_iterations,
+              const std::vector<LandmarkId>& lmk_ids_of_new_smart_factors_tmp)
       override {
-    return backend_->updatePoseBeliefLocalSidecar(new_factors_tmp,
-                                                  new_values,
-                                                  timestamps,
-                                                  delete_slots,
-                                                  max_extra_iterations,
-                                                  lmk_ids_of_new_smart_factors_tmp);
+    return backend_->updatePoseBeliefLocalSidecar(
+        new_factors_tmp,
+        new_values,
+        timestamps,
+        delete_slots,
+        max_extra_iterations,
+        lmk_ids_of_new_smart_factors_tmp);
   }
 
   bool computePoseBeliefLocalCovariance(const FrameId& cur_id) override {
@@ -178,41 +189,39 @@ class VioBackend::PersistentBpsamPoseBeliefCovarianceSidecarAdapter final
     gtsam::ISAM2Params isam2_params;
     BackendParams::setIsam2Params(backend_params, &isam2_params);
     sidecar_ = std::make_unique<PersistentBpsamLocalCovarianceSidecar>(
-        isam2_params,
-        'k',
-        std::max<size_t>(1u, backend_params.nr_states_));
+        isam2_params, 'k', std::max<size_t>(1u, backend_params.nr_states_));
   }
 
-  bool update(
-      const gtsam::NonlinearFactorGraph& new_factors_tmp,
-      const gtsam::Values& new_values,
-      const std::map<Key, double>& timestamps,
-      const gtsam::FactorIndices& delete_slots,
-      size_t /*max_extra_iterations*/,
-      const std::vector<LandmarkId>& lmk_ids_of_new_smart_factors_tmp)
+  bool update(const gtsam::NonlinearFactorGraph& new_factors_tmp,
+              const gtsam::Values& new_values,
+              const std::map<Key, double>& timestamps,
+              const gtsam::FactorIndices& delete_slots,
+              size_t /*max_extra_iterations*/,
+              const std::vector<LandmarkId>& lmk_ids_of_new_smart_factors_tmp)
       override {
     if (!sidecar_) {
       return false;
     }
 
     std::vector<size_t> smart_factor_slots;
-    const bool update_ok = sidecar_->update(new_factors_tmp,
-                                            new_values,
-                                            timestamps,
-                                            delete_slots,
-                                            lmk_ids_of_new_smart_factors_tmp.size(),
-                                            &smart_factor_slots);
+    const bool update_ok =
+        sidecar_->update(new_factors_tmp,
+                         new_values,
+                         timestamps,
+                         delete_slots,
+                         lmk_ids_of_new_smart_factors_tmp.size(),
+                         &smart_factor_slots);
     if (!update_ok) {
       LOG(WARNING) << "Persistent BPSAM sidecar update failed.";
       return false;
     }
 
-    const size_t n_smart_factors =
-        std::min(lmk_ids_of_new_smart_factors_tmp.size(),
-                 smart_factor_slots.size());
+    const size_t n_smart_factors = std::min(
+        lmk_ids_of_new_smart_factors_tmp.size(), smart_factor_slots.size());
     for (size_t i = 0u; i < n_smart_factors; ++i) {
       const LandmarkId lmk_id = lmk_ids_of_new_smart_factors_tmp.at(i);
-      auto it_local = backend_->old_smart_factors_local_belief_cov_.find(lmk_id);
+      auto it_local =
+          backend_->old_smart_factors_local_belief_cov_.find(lmk_id);
       if (it_local == backend_->old_smart_factors_local_belief_cov_.end()) {
         continue;
       }
@@ -284,7 +293,14 @@ VioBackend::VioBackend(const gtsam::Pose3& B_Pose_leftCamRect,
   gtsam::ISAM2Params isam_param;
   BackendParams::setIsam2Params(backend_params, &isam_param);
 
-  smoother_ = std::make_unique<Smoother>(backend_params.nr_states_, isam_param);
+  cbs::BPSAM::Params bpsam_params;
+  bpsam_params.robot_id = static_cast<cbs::AgentId>('k');
+  bpsam_params.sam_params_ = isam_param;
+  bpsam_params.gbp_update_params.enable_soft_reset =
+      FLAGS_cbs_enable_soft_reset;
+
+  smoother_ =
+      std::make_unique<Smoother>(backend_params.nr_states_, bpsam_params);
   if (FLAGS_cbs_use_persistent_bpsam_for_main_backend) {
     main_bpsam_backend_ =
         std::make_unique<PersistentBpsamLocalCovarianceSidecar>(
@@ -293,7 +309,7 @@ VioBackend::VioBackend(const gtsam::Pose3& B_Pose_leftCamRect,
   if (FLAGS_cbs_use_local_smoother_for_belief_covariance &&
       !FLAGS_cbs_use_persistent_bpsam_sidecar_for_belief_covariance) {
     local_belief_cov_smoother_ =
-        std::make_unique<Smoother>(backend_params.nr_states_, isam_param);
+        std::make_unique<Smoother>(backend_params.nr_states_, bpsam_params);
   }
 #else  // BATCH SMOOTHER
   gtsam::LevenbergMarquardtParams lmParams;
@@ -320,6 +336,8 @@ VioBackend::VioBackend(const gtsam::Pose3& B_Pose_leftCamRect,
   }
   LOG(INFO) << "CBS external belief matcher tolerance: "
             << external_belief_timestamp_tolerance_sec_ << " s";
+  LOG(INFO) << "CBS external belief soft reset: "
+            << (FLAGS_cbs_enable_soft_reset ? "enabled" : "disabled");
 
   initializePoseBeliefCovarianceSidecarAdapter();
 
@@ -523,16 +541,23 @@ BackendOutput::UniquePtr VioBackend::spinOnce(const BackendInput& input) {
           pose_belief_local_covariance_valid_,
           pose_belief_covariance_source_,
           external_beliefs_added_per_update_,
+          external_beliefs_rejected_first_message_per_update_,
+          external_beliefs_rejected_update_status_per_update_,
+          external_beliefs_rejected_inactive_window_per_update_,
+          external_beliefs_rejected_shape_per_update_,
+          external_beliefs_rejected_exception_per_update_,
           optimization_time_sec_per_update_,
           cbs_belief_generation_time_sec_per_update_,
           cbs_marginalization_graph_factor_count_,
           cbs_outgoing_pose_beliefs_);
     } catch (const std::exception& e) {
-      LOG(ERROR) << "VioBackend::spinOnce failed while creating backend output: "
-                 << e.what();
+      LOG(ERROR)
+          << "VioBackend::spinOnce failed while creating backend output: "
+          << e.what();
       throw;
     } catch (...) {
-      LOG(ERROR) << "VioBackend::spinOnce failed while creating backend output.";
+      LOG(ERROR)
+          << "VioBackend::spinOnce failed while creating backend output.";
       throw;
     }
 
@@ -540,11 +565,13 @@ BackendOutput::UniquePtr VioBackend::spinOnce(const BackendInput& input) {
       try {
         logger_->logBackendOutput(*output_payload);
       } catch (const std::exception& e) {
-        LOG(ERROR) << "VioBackend::spinOnce failed while logging backend output: "
-                   << e.what();
+        LOG(ERROR)
+            << "VioBackend::spinOnce failed while logging backend output: "
+            << e.what();
         throw;
       } catch (...) {
-        LOG(ERROR) << "VioBackend::spinOnce failed while logging backend output.";
+        LOG(ERROR)
+            << "VioBackend::spinOnce failed while logging backend output.";
         throw;
       }
     }
@@ -590,7 +617,8 @@ void VioBackend::enqueueExternalPoseBeliefs(
     pending_external_pose_beliefs_.push_back(belief);
   }
   size_t queue_dropped_now = 0u;
-  while (pending_external_pose_beliefs_.size() > max_pending_external_pose_beliefs_) {
+  while (pending_external_pose_beliefs_.size() >
+         max_pending_external_pose_beliefs_) {
     pending_external_pose_beliefs_.pop_front();
     ++queue_dropped_now;
   }
@@ -611,8 +639,9 @@ std::vector<ExternalPoseBelief> VioBackend::popPendingExternalPoseBeliefs() {
   return beliefs;
 }
 
-void VioBackend::updateKeyframeTimestampIndex(const FrameId& frame_id,
-                                              const Timestamp& timestamp_kf_nsec) {
+void VioBackend::updateKeyframeTimestampIndex(
+    const FrameId& frame_id,
+    const Timestamp& timestamp_kf_nsec) {
   const double stamp_sec = static_cast<double>(timestamp_kf_nsec) * 1e-9;
   keyframe_timestamp_sec_[frame_id] = stamp_sec;
 
@@ -699,6 +728,11 @@ void VioBackend::collectExternalBeliefFactors(
   (void)new_factors_tmp;
   (void)inserted_external_factor_ids;
   external_beliefs_added_per_update_ = 0u;
+  external_beliefs_rejected_first_message_per_update_ = 0u;
+  external_beliefs_rejected_update_status_per_update_ = 0u;
+  external_beliefs_rejected_inactive_window_per_update_ = 0u;
+  external_beliefs_rejected_shape_per_update_ = 0u;
+  external_beliefs_rejected_exception_per_update_ = 0u;
 
   const auto pending_beliefs = popPendingExternalPoseBeliefs();
   if (pending_beliefs.empty()) {
@@ -712,6 +746,11 @@ void VioBackend::collectExternalBeliefFactors(
   size_t rejected_missing_state = 0u;
   size_t rejected_covariance = 0u;
   size_t rejected_by_bpsam = 0u;
+  size_t rejected_bpsam_first_message = 0u;
+  size_t rejected_bpsam_update_status = 0u;
+  size_t rejected_bpsam_inactive_window = 0u;
+  size_t rejected_bpsam_shape = 0u;
+  size_t rejected_bpsam_exception = 0u;
   std::map<std::pair<uint8_t, FrameId>, ExternalPoseBelief> selected_beliefs;
 
   for (const auto& belief : pending_beliefs) {
@@ -775,21 +814,42 @@ void VioBackend::collectExternalBeliefFactors(
     gbp::Gaussian gaussian(pose_key, mu, covariance, 1u);
     gaussian.relax_factor() = belief.relax_factor;
 
-    std::map<gtsam::Key,
-             std::vector<std::pair<cbs::AgentId, gbp::Gaussian>>>
+    std::map<gtsam::Key, std::vector<std::pair<cbs::AgentId, gbp::Gaussian>>>
         single_belief;
     single_belief[pose_key].emplace_back(
         static_cast<cbs::AgentId>(belief.source_agent), gaussian);
 
     try {
-      const int rejected = smoother_->addBeliefs(std::move(single_belief));
-      if (rejected == 0) {
-        ++external_beliefs_added_per_update_;
-      } else {
-        ++rejected_by_bpsam;
+      const auto add_result =
+          smoother_->addBeliefsDetailed(std::move(single_belief));
+      external_beliefs_added_per_update_ += add_result.accepted;
+      rejected_by_bpsam += add_result.rejected();
+      rejected_bpsam_first_message += add_result.rejected_first_message;
+      rejected_bpsam_update_status += add_result.rejected_update_status;
+      rejected_bpsam_inactive_window += add_result.rejected_inactive_window;
+      rejected_bpsam_shape += add_result.rejected_shape;
+      rejected_bpsam_exception += add_result.rejected_exception;
+
+      for (const auto& detail : add_result.details) {
+        LOG(INFO) << "CBS_BPSAM_ADD_ROW_L2K,"
+                  << formatPoseKeyToken(belief.source_agent,
+                                        belief.sender_pose_index)
+                  << ","
+                  << formatPoseKeyToken(static_cast<uint8_t>('k'),
+                                        local_frame_id)
+                  << "," << cbs::BPSAM::addBeliefStatusName(detail.status)
+                  << "," << (detail.enable_soft_reset ? "true" : "false") << ","
+                  << cbs::BPSAM::metricTypeName(detail.metric_type) << ","
+                  << detail.d_reset << "," << detail.contract_alpha << ","
+                  << (detail.existing_gbp_var ? "true" : "false") << ","
+                  << (detail.is_first_message ? "true" : "false") << ","
+                  << detail.dxycurr << "," << detail.dxy << ","
+                  << detail.contraction_step_size << ","
+                  << sanitizeLogToken(detail.message);
       }
     } catch (const std::exception& e) {
       ++rejected_by_bpsam;
+      ++rejected_bpsam_exception;
       LOG(WARNING) << "BPSAM rejected external CBS belief "
                    << formatPoseKeyToken(belief.source_agent,
                                          belief.sender_pose_index)
@@ -801,22 +861,41 @@ void VioBackend::collectExternalBeliefFactors(
                    << formatPoseKeyToken(belief.source_agent,
                                          belief.sender_pose_index)
                    << " for Kimera frame " << local_frame_id << ".";
+      ++rejected_bpsam_exception;
     }
   }
 
   dropped_unmatched += rejected_by_bpsam;
-  external_beliefs_inserted_total_.fetch_add(
-      external_beliefs_added_per_update_, std::memory_order_relaxed);
+  external_beliefs_rejected_first_message_per_update_ =
+      rejected_bpsam_first_message;
+  external_beliefs_rejected_update_status_per_update_ =
+      rejected_bpsam_update_status;
+  external_beliefs_rejected_inactive_window_per_update_ =
+      rejected_bpsam_inactive_window;
+  external_beliefs_rejected_shape_per_update_ = rejected_bpsam_shape;
+  external_beliefs_rejected_exception_per_update_ = rejected_bpsam_exception;
+  external_beliefs_inserted_total_.fetch_add(external_beliefs_added_per_update_,
+                                             std::memory_order_relaxed);
   external_beliefs_rejected_total_.fetch_add(dropped_unmatched,
                                              std::memory_order_relaxed);
-  external_beliefs_rejected_window_total_.fetch_add(
-      rejected_window, std::memory_order_relaxed);
+  external_beliefs_rejected_window_total_.fetch_add(rejected_window,
+                                                    std::memory_order_relaxed);
   external_beliefs_rejected_timestamp_total_.fetch_add(
       rejected_timestamp, std::memory_order_relaxed);
   external_beliefs_rejected_missing_state_total_.fetch_add(
       rejected_missing_state, std::memory_order_relaxed);
   external_beliefs_rejected_covariance_total_.fetch_add(
       rejected_covariance, std::memory_order_relaxed);
+  external_beliefs_rejected_first_message_total_.fetch_add(
+      rejected_bpsam_first_message, std::memory_order_relaxed);
+  external_beliefs_rejected_update_status_total_.fetch_add(
+      rejected_bpsam_update_status, std::memory_order_relaxed);
+  external_beliefs_rejected_inactive_window_total_.fetch_add(
+      rejected_bpsam_inactive_window, std::memory_order_relaxed);
+  external_beliefs_rejected_shape_total_.fetch_add(rejected_bpsam_shape,
+                                                   std::memory_order_relaxed);
+  external_beliefs_rejected_exception_total_.fetch_add(
+      rejected_bpsam_exception, std::memory_order_relaxed);
 
   LOG(INFO) << "Kimera CBS incoming flow: pending=" << pending_beliefs.size()
             << " resolved=" << resolved_count
@@ -827,10 +906,15 @@ void VioBackend::collectExternalBeliefFactors(
             << ",timestamp=" << rejected_timestamp
             << ",state=" << rejected_missing_state
             << ",covariance=" << rejected_covariance
-            << ",bpsam=" << rejected_by_bpsam << ")";
+            << ",bpsam=" << rejected_by_bpsam
+            << ",bpsam_first_message=" << rejected_bpsam_first_message
+            << ",bpsam_update_status=" << rejected_bpsam_update_status
+            << ",bpsam_inactive_window=" << rejected_bpsam_inactive_window
+            << ",bpsam_shape=" << rejected_bpsam_shape
+            << ",bpsam_exception=" << rejected_bpsam_exception << ",soft_reset="
+            << (FLAGS_cbs_enable_soft_reset ? "true" : "false") << ")";
   return;
 }
-
 
 void VioBackend::refreshCbsOutgoingBeliefs(const FrameId& cur_id) {
   cbs_outgoing_pose_beliefs_.clear();
@@ -892,8 +976,8 @@ void VioBackend::refreshCbsOutgoingBeliefs(const FrameId& cur_id) {
         stamped_belief.pose_index = static_cast<uint32_t>(frame_id);
         stamped_belief.sender_pose_index = stamped_belief.pose_index;
         stamped_belief.stamp_sec = stamp_it->second;
-        stamped_belief.sender_timestamp_ns = static_cast<uint64_t>(
-            std::llround(stamped_belief.stamp_sec * 1e9));
+        stamped_belief.sender_timestamp_ns =
+            static_cast<uint64_t>(std::llround(stamped_belief.stamp_sec * 1e9));
         stamped_belief.sender_frame_id = "odom";
         stamped_belief.relax_factor = belief.relax_factor();
 
@@ -1502,12 +1586,9 @@ void VioBackend::logPoseBeliefCovarianceSanityDiff(
 
   LOG(INFO) << "CBS covariance sanity frame=" << cur_id
             << " source=" << pose_belief_covariance_source_
-            << " local_valid=" << local_valid
-            << " fused_valid=" << fused_valid
-            << " trace_local=" << trace_local
-            << " trace_fused=" << trace_fused
-            << " trace_ratio=" << trace_ratio
-            << " frob_delta=" << frob_delta
+            << " local_valid=" << local_valid << " fused_valid=" << fused_valid
+            << " trace_local=" << trace_local << " trace_fused=" << trace_fused
+            << " trace_ratio=" << trace_ratio << " frob_delta=" << frob_delta
             << " max_abs_delta=" << max_abs_delta;
 }
 
@@ -1830,6 +1911,11 @@ bool VioBackend::optimize(
   DCHECK(smoother_) << "Incremental smoother is a null pointer.";
   const bool use_local_belief_cov_sidecar = false;
   external_beliefs_added_per_update_ = 0u;
+  external_beliefs_rejected_first_message_per_update_ = 0u;
+  external_beliefs_rejected_update_status_per_update_ = 0u;
+  external_beliefs_rejected_inactive_window_per_update_ = 0u;
+  external_beliefs_rejected_shape_per_update_ = 0u;
+  external_beliefs_rejected_exception_per_update_ = 0u;
   optimization_time_sec_per_update_ = 0.0;
   cbs_belief_generation_time_sec_per_update_ = 0.0;
   cbs_marginalization_graph_factor_count_ = 0u;
@@ -1939,8 +2025,9 @@ bool VioBackend::optimize(
       const LandmarkId lmk_id = new_smart_factor.first;
       auto it_local = old_smart_factors_local_belief_cov_.find(lmk_id);
       if (it_local == old_smart_factors_local_belief_cov_.end()) {
-        it_local = old_smart_factors_local_belief_cov_.insert(
-            std::make_pair(lmk_id, std::make_pair(new_smart_factor.second, -1)))
+        it_local = old_smart_factors_local_belief_cov_
+                       .insert(std::make_pair(
+                           lmk_id, std::make_pair(new_smart_factor.second, -1)))
                        .first;
       }
 
@@ -1973,10 +2060,8 @@ bool VioBackend::optimize(
   const size_t num_factors_before_external = new_factors_tmp.size();
   std::vector<ExternalBeliefFactorId> inserted_external_factor_ids;
   try {
-    collectExternalBeliefFactors(cur_id,
-                                 &delete_slots,
-                                 &new_factors_tmp,
-                                 &inserted_external_factor_ids);
+    collectExternalBeliefFactors(
+        cur_id, &delete_slots, &new_factors_tmp, &inserted_external_factor_ids);
   } catch (const std::exception& e) {
     LOG(ERROR) << "VioBackend::optimize failed in collectExternalBeliefFactors "
                << "for frame " << cur_id << ": " << e.what();
@@ -2121,8 +2206,8 @@ bool VioBackend::optimize(
         is_smoother_ok = updateSmoother(&result);
       } catch (const std::exception& e) {
         LOG(ERROR) << "VioBackend::optimize failed in extra updateSmoother "
-                   << "iteration " << n_iter << " for frame " << cur_id
-                   << ": " << e.what();
+                   << "iteration " << n_iter << " for frame " << cur_id << ": "
+                   << e.what();
         throw;
       } catch (...) {
         LOG(ERROR) << "VioBackend::optimize failed in extra updateSmoother "
@@ -2158,12 +2243,14 @@ bool VioBackend::optimize(
       try {
         refreshCbsOutgoingBeliefs(cur_id);
       } catch (const std::exception& e) {
-        LOG(ERROR) << "VioBackend::optimize failed in refreshCbsOutgoingBeliefs "
-                   << "for frame " << cur_id << ": " << e.what();
+        LOG(ERROR)
+            << "VioBackend::optimize failed in refreshCbsOutgoingBeliefs "
+            << "for frame " << cur_id << ": " << e.what();
         throw;
       } catch (...) {
-        LOG(ERROR) << "VioBackend::optimize failed in refreshCbsOutgoingBeliefs "
-                   << "for frame " << cur_id << ".";
+        LOG(ERROR)
+            << "VioBackend::optimize failed in refreshCbsOutgoingBeliefs "
+            << "for frame " << cur_id << ".";
         throw;
       }
 
@@ -2394,10 +2481,10 @@ bool VioBackend::updateSmoother(gtsam::FixedLagSmoother::Result* result,
       return false;
     }
 
-    const std::vector<size_t> frame_indices = (idx_pair->first == idx_pair->second)
-                                                  ? std::vector<size_t>{idx_pair->first}
-                                                  : std::vector<size_t>{idx_pair->first,
-                                                                        idx_pair->second};
+    const std::vector<size_t> frame_indices =
+        (idx_pair->first == idx_pair->second)
+            ? std::vector<size_t>{idx_pair->first}
+            : std::vector<size_t>{idx_pair->first, idx_pair->second};
     gtsam::NonlinearFactorGraph recovery_factors;
     recovery_factors.reserve(new_factors.size() + frame_indices.size() * 3u);
     recovery_factors.push_back(new_factors.begin(), new_factors.end());
@@ -2453,7 +2540,8 @@ bool VioBackend::updateSmoother(gtsam::FixedLagSmoother::Result* result,
 
     LOG(WARNING) << "Persistent BPSAM recovery retry with "
                  << num_recovery_priors << " temporary priors.";
-    const bool recovered = try_main_backend_update(recovery_factors, new_values);
+    const bool recovered =
+        try_main_backend_update(recovery_factors, new_values);
     if (!recovered) {
       LOG(ERROR) << "Persistent BPSAM recovery retry failed.";
       return false;
@@ -2846,7 +2934,8 @@ void VioBackend::updateLocalSmartFactorsSlots(
     return;
   }
 
-  const gtsam::ISAM2Result& result = local_belief_cov_smoother_->getISAM2Result();
+  const gtsam::ISAM2Result& result =
+      local_belief_cov_smoother_->getISAM2Result();
   for (size_t i = 0u; i < lmk_ids_of_new_smart_factors.size(); ++i) {
     if (i >= result.newFactorsIndices.size()) {
       break;
@@ -2912,8 +3001,12 @@ bool VioBackend::updatePoseBeliefLocalSidecar(
     const gtsam::FactorIndices& delete_slots,
     size_t max_extra_iterations,
     const std::vector<LandmarkId>& lmk_ids_of_new_smart_factors) {
-  const bool local_update_ok = updateLocalBeliefCovarianceSmoother(
-      new_factors_tmp, new_values, timestamps, delete_slots, max_extra_iterations);
+  const bool local_update_ok =
+      updateLocalBeliefCovarianceSmoother(new_factors_tmp,
+                                          new_values,
+                                          timestamps,
+                                          delete_slots,
+                                          max_extra_iterations);
   if (!local_update_ok) {
     return false;
   }
@@ -3038,9 +3131,8 @@ bool VioBackend::computePoseBeliefCovarianceWithoutExternalFactors(
   }
 
   try {
-    gtsam::Marginals marginals(local_only_graph,
-                               state_,
-                               gtsam::Marginals::Factorization::CHOLESKY);
+    gtsam::Marginals marginals(
+        local_only_graph, state_, gtsam::Marginals::Factorization::CHOLESKY);
     const gtsam::Matrix pose_cov = marginals.marginalCovariance(pose_key);
     if (pose_cov.rows() != 6 || pose_cov.cols() != 6 || !pose_cov.allFinite()) {
       return false;
@@ -3048,7 +3140,8 @@ bool VioBackend::computePoseBeliefCovarianceWithoutExternalFactors(
     pose_belief_local_covariance_lkf_ = pose_cov;
     return true;
   } catch (const std::exception& e) {
-    LOG(WARNING) << "Failed local-only pose covariance extraction: " << e.what();
+    LOG(WARNING) << "Failed local-only pose covariance extraction: "
+                 << e.what();
   } catch (...) {
     LOG(WARNING) << "Failed local-only pose covariance extraction.";
   }

@@ -310,28 +310,32 @@ struct BackendOutput : public PipelinePayload {
   KIMERA_POINTER_TYPEDEFS(BackendOutput);
   KIMERA_DELETE_COPY_CONSTRUCTORS(BackendOutput);
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
-  BackendOutput(const Timestamp& timestamp_kf,
-                const gtsam::Values& state,
-                const gtsam::NonlinearFactorGraph& factor_graph,
-                const gtsam::Pose3& W_Pose_Blkf,
-                const Vector3& W_Vel_Blkf,
-                const ImuBias& imu_bias_lkf,
-                const gtsam::Matrix& state_covariance_lkf,
-                const FrameId& cur_kf_id,
-                const int& landmark_count,
-                const DebugVioInfo& debug_info,
-                const PointsWithIdMap& landmarks_with_id_map,
-                const LmkIdToLmkTypeMap& lmk_id_to_lmk_type_map,
-                const gtsam::Matrix& pose_belief_local_covariance_lkf =
-                    gtsam::Matrix(),
-                bool pose_belief_local_covariance_valid = false,
-                const std::string& pose_belief_covariance_source =
-                    "unavailable",
-                size_t external_beliefs_added_per_update = 0u,
-                double optimization_time_sec = 0.0,
-                double cbs_belief_generation_time_sec = 0.0,
-                size_t cbs_marginalization_graph_factor_count = 0u,
-                std::vector<ExternalPoseBelief> cbs_outgoing_pose_beliefs = {})
+  BackendOutput(
+      const Timestamp& timestamp_kf,
+      const gtsam::Values& state,
+      const gtsam::NonlinearFactorGraph& factor_graph,
+      const gtsam::Pose3& W_Pose_Blkf,
+      const Vector3& W_Vel_Blkf,
+      const ImuBias& imu_bias_lkf,
+      const gtsam::Matrix& state_covariance_lkf,
+      const FrameId& cur_kf_id,
+      const int& landmark_count,
+      const DebugVioInfo& debug_info,
+      const PointsWithIdMap& landmarks_with_id_map,
+      const LmkIdToLmkTypeMap& lmk_id_to_lmk_type_map,
+      const gtsam::Matrix& pose_belief_local_covariance_lkf = gtsam::Matrix(),
+      bool pose_belief_local_covariance_valid = false,
+      const std::string& pose_belief_covariance_source = "unavailable",
+      size_t external_beliefs_added_per_update = 0u,
+      size_t external_beliefs_rejected_first_message_per_update = 0u,
+      size_t external_beliefs_rejected_update_status_per_update = 0u,
+      size_t external_beliefs_rejected_inactive_window_per_update = 0u,
+      size_t external_beliefs_rejected_shape_per_update = 0u,
+      size_t external_beliefs_rejected_exception_per_update = 0u,
+      double optimization_time_sec = 0.0,
+      double cbs_belief_generation_time_sec = 0.0,
+      size_t cbs_marginalization_graph_factor_count = 0u,
+      std::vector<ExternalPoseBelief> cbs_outgoing_pose_beliefs = {})
       : PipelinePayload(timestamp_kf),
         W_State_Blkf_(timestamp_kf, W_Pose_Blkf, W_Vel_Blkf, imu_bias_lkf),
         state_(state),
@@ -343,36 +347,48 @@ struct BackendOutput : public PipelinePayload {
         landmarks_with_id_map_(landmarks_with_id_map),
         lmk_id_to_lmk_type_map_(lmk_id_to_lmk_type_map),
         pose_belief_local_covariance_lkf_(pose_belief_local_covariance_lkf),
-        pose_belief_local_covariance_valid_(
-            pose_belief_local_covariance_valid),
+        pose_belief_local_covariance_valid_(pose_belief_local_covariance_valid),
         pose_belief_covariance_source_(pose_belief_covariance_source),
-        external_beliefs_added_per_update_(
-            external_beliefs_added_per_update),
+        external_beliefs_added_per_update_(external_beliefs_added_per_update),
+        external_beliefs_rejected_first_message_per_update_(
+            external_beliefs_rejected_first_message_per_update),
+        external_beliefs_rejected_update_status_per_update_(
+            external_beliefs_rejected_update_status_per_update),
+        external_beliefs_rejected_inactive_window_per_update_(
+            external_beliefs_rejected_inactive_window_per_update),
+        external_beliefs_rejected_shape_per_update_(
+            external_beliefs_rejected_shape_per_update),
+        external_beliefs_rejected_exception_per_update_(
+            external_beliefs_rejected_exception_per_update),
         optimization_time_sec_(optimization_time_sec),
         cbs_belief_generation_time_sec_(cbs_belief_generation_time_sec),
         cbs_marginalization_graph_factor_count_(
             cbs_marginalization_graph_factor_count),
         cbs_outgoing_pose_beliefs_(std::move(cbs_outgoing_pose_beliefs)) {}
 
-  BackendOutput(const VioNavStateTimestamped& vio_navstate_timestamped,
-                const gtsam::Values& state,
-                const gtsam::NonlinearFactorGraph& factor_graph,
-                const gtsam::Matrix& state_covariance_lkf,
-                const FrameId& cur_kf_id,
-                const int& landmark_count,
-                const DebugVioInfo& debug_info,
-                const PointsWithIdMap& landmarks_with_id_map,
-                const LmkIdToLmkTypeMap& lmk_id_to_lmk_type_map,
-                const gtsam::Matrix& pose_belief_local_covariance_lkf =
-                    gtsam::Matrix(),
-                bool pose_belief_local_covariance_valid = false,
-                const std::string& pose_belief_covariance_source =
-                    "unavailable",
-                size_t external_beliefs_added_per_update = 0u,
-                double optimization_time_sec = 0.0,
-                double cbs_belief_generation_time_sec = 0.0,
-                size_t cbs_marginalization_graph_factor_count = 0u,
-                std::vector<ExternalPoseBelief> cbs_outgoing_pose_beliefs = {})
+  BackendOutput(
+      const VioNavStateTimestamped& vio_navstate_timestamped,
+      const gtsam::Values& state,
+      const gtsam::NonlinearFactorGraph& factor_graph,
+      const gtsam::Matrix& state_covariance_lkf,
+      const FrameId& cur_kf_id,
+      const int& landmark_count,
+      const DebugVioInfo& debug_info,
+      const PointsWithIdMap& landmarks_with_id_map,
+      const LmkIdToLmkTypeMap& lmk_id_to_lmk_type_map,
+      const gtsam::Matrix& pose_belief_local_covariance_lkf = gtsam::Matrix(),
+      bool pose_belief_local_covariance_valid = false,
+      const std::string& pose_belief_covariance_source = "unavailable",
+      size_t external_beliefs_added_per_update = 0u,
+      size_t external_beliefs_rejected_first_message_per_update = 0u,
+      size_t external_beliefs_rejected_update_status_per_update = 0u,
+      size_t external_beliefs_rejected_inactive_window_per_update = 0u,
+      size_t external_beliefs_rejected_shape_per_update = 0u,
+      size_t external_beliefs_rejected_exception_per_update = 0u,
+      double optimization_time_sec = 0.0,
+      double cbs_belief_generation_time_sec = 0.0,
+      size_t cbs_marginalization_graph_factor_count = 0u,
+      std::vector<ExternalPoseBelief> cbs_outgoing_pose_beliefs = {})
       : PipelinePayload(vio_navstate_timestamped.timestamp_),
         W_State_Blkf_(vio_navstate_timestamped),
         state_(state),
@@ -384,11 +400,19 @@ struct BackendOutput : public PipelinePayload {
         landmarks_with_id_map_(landmarks_with_id_map),
         lmk_id_to_lmk_type_map_(lmk_id_to_lmk_type_map),
         pose_belief_local_covariance_lkf_(pose_belief_local_covariance_lkf),
-        pose_belief_local_covariance_valid_(
-            pose_belief_local_covariance_valid),
+        pose_belief_local_covariance_valid_(pose_belief_local_covariance_valid),
         pose_belief_covariance_source_(pose_belief_covariance_source),
-        external_beliefs_added_per_update_(
-            external_beliefs_added_per_update),
+        external_beliefs_added_per_update_(external_beliefs_added_per_update),
+        external_beliefs_rejected_first_message_per_update_(
+            external_beliefs_rejected_first_message_per_update),
+        external_beliefs_rejected_update_status_per_update_(
+            external_beliefs_rejected_update_status_per_update),
+        external_beliefs_rejected_inactive_window_per_update_(
+            external_beliefs_rejected_inactive_window_per_update),
+        external_beliefs_rejected_shape_per_update_(
+            external_beliefs_rejected_shape_per_update),
+        external_beliefs_rejected_exception_per_update_(
+            external_beliefs_rejected_exception_per_update),
         optimization_time_sec_(optimization_time_sec),
         cbs_belief_generation_time_sec_(cbs_belief_generation_time_sec),
         cbs_marginalization_graph_factor_count_(
@@ -408,6 +432,11 @@ struct BackendOutput : public PipelinePayload {
   const bool pose_belief_local_covariance_valid_;
   const std::string pose_belief_covariance_source_;
   const size_t external_beliefs_added_per_update_;
+  const size_t external_beliefs_rejected_first_message_per_update_;
+  const size_t external_beliefs_rejected_update_status_per_update_;
+  const size_t external_beliefs_rejected_inactive_window_per_update_;
+  const size_t external_beliefs_rejected_shape_per_update_;
+  const size_t external_beliefs_rejected_exception_per_update_;
   const double optimization_time_sec_;
   const double cbs_belief_generation_time_sec_;
   const size_t cbs_marginalization_graph_factor_count_;
