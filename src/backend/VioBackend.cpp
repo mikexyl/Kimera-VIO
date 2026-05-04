@@ -91,6 +91,33 @@ DEFINE_bool(cbs_use_persistent_bpsam_for_main_backend,
 DEFINE_bool(cbs_log_covariance_sanity_diff,
             false,
             "Log debug-only local-vs-fused pose covariance sanity metrics.");
+DEFINE_bool(cbs_use_temporary_cbs_prior_factors,
+            false,
+            "Inject accepted CBS beliefs as temporary PriorFactors for the "
+            "current iSAM2 solve, then remove them before fixed-lag "
+            "marginalization. Keeps the legacy persistent-prior path disabled "
+            "only when this flag is true.");
+DEFINE_bool(cbs_use_temporary_cbs_linear_priors,
+            true,
+            "Linearize accepted CBS beliefs inside the current iSAM2 update "
+            "and use them only in a temporary augmented linear delta solve. "
+            "They are never inserted into the persistent factor graph.");
+DEFINE_bool(cbs_temporary_linear_already_applied_gate_enable,
+            true,
+            "In temporary-linear CBS mode, skip near-identical beliefs from "
+            "the same sender/key that were already applied.");
+DEFINE_double(cbs_temporary_linear_already_applied_metric_threshold,
+              0.01,
+              "Receiver-side Hellinger threshold for skipping already-applied "
+              "temporary-linear CBS beliefs.");
+DEFINE_double(cbs_temporary_linear_already_applied_dmu_threshold,
+              1e-3,
+              "Receiver-side pose delta threshold for skipping already-applied "
+              "temporary-linear CBS beliefs.");
+DEFINE_double(cbs_temporary_linear_already_applied_cov_rel_threshold,
+              1e-3,
+              "Receiver-side relative covariance Frobenius threshold for "
+              "skipping already-applied temporary-linear CBS beliefs.");
 DEFINE_bool(cbs_enable_soft_reset,
             true,
             "Enable GBP soft reset for incoming CBS external belief updates.");
@@ -99,6 +126,11 @@ DEFINE_bool(cbs_use_raw_previous_belief_gate,
             "Use the previous raw incoming belief from the same sender/key for "
             "CBS receiver-side hard reset gating. GBP is still used for "
             "contraction after the raw gate accepts the belief.");
+DEFINE_bool(cbs_reject_first_message,
+            true,
+            "Use the first incoming CBS belief for a sender/key only to "
+            "initialize receiver-side GBP state. Disable for one-way "
+            "experiments where a sender may publish each key only once.");
 DEFINE_double(cbs_d_reset,
               0.1,
               "CBS GBP hard reset Hellinger threshold.");
@@ -350,6 +382,19 @@ VioBackend::VioBackend(const gtsam::Pose3& B_Pose_leftCamRect,
   bpsam_params.gbp_update_params.d_reset = FLAGS_cbs_d_reset;
   bpsam_params.use_raw_previous_belief_gate =
       FLAGS_cbs_use_raw_previous_belief_gate;
+  bpsam_params.reject_first_message = FLAGS_cbs_reject_first_message;
+  bpsam_params.use_temporary_cbs_prior_factors =
+      FLAGS_cbs_use_temporary_cbs_prior_factors;
+  bpsam_params.use_temporary_cbs_linear_priors =
+      FLAGS_cbs_use_temporary_cbs_linear_priors;
+  bpsam_params.temporary_linear_already_applied_gate_enable =
+      FLAGS_cbs_temporary_linear_already_applied_gate_enable;
+  bpsam_params.temporary_linear_already_applied_metric_threshold =
+      FLAGS_cbs_temporary_linear_already_applied_metric_threshold;
+  bpsam_params.temporary_linear_already_applied_dmu_threshold =
+      FLAGS_cbs_temporary_linear_already_applied_dmu_threshold;
+  bpsam_params.temporary_linear_already_applied_cov_rel_threshold =
+      FLAGS_cbs_temporary_linear_already_applied_cov_rel_threshold;
   if (std::isfinite(FLAGS_cbs_l2k_prior_factor_covariance_scale) &&
       FLAGS_cbs_l2k_prior_factor_covariance_scale > 0.0) {
     bpsam_params.prior_factor_covariance_scale_by_source
@@ -396,6 +441,14 @@ VioBackend::VioBackend(const gtsam::Pose3& B_Pose_leftCamRect,
             << external_belief_timestamp_tolerance_sec_ << " s";
   LOG(INFO) << "CBS external belief soft reset: "
             << (FLAGS_cbs_enable_soft_reset ? "enabled" : "disabled");
+  LOG(INFO) << "CBS reject first message: "
+            << (FLAGS_cbs_reject_first_message ? "enabled" : "disabled");
+  LOG(INFO) << "CBS temporary prior factors: "
+            << (FLAGS_cbs_use_temporary_cbs_prior_factors ? "enabled"
+                                                          : "disabled");
+  LOG(INFO) << "CBS temporary linear priors: "
+            << (FLAGS_cbs_use_temporary_cbs_linear_priors ? "enabled"
+                                                          : "disabled");
 
   initializePoseBeliefCovarianceSidecarAdapter();
 
@@ -842,6 +895,8 @@ void VioBackend::collectExternalBeliefFactors(
     switch (status) {
       case cbs::BPSAM::AddBeliefStatus::Accepted:
         return "bpsam_added";
+      case cbs::BPSAM::AddBeliefStatus::AcceptedButSkippedAlreadyApplied:
+        return "bpsam_accepted_but_skipped_already_applied";
       case cbs::BPSAM::AddBeliefStatus::RejectedFirstMessage:
         return "bpsam_rejected_first_message";
       case cbs::BPSAM::AddBeliefStatus::RejectedUpdateStatus:
