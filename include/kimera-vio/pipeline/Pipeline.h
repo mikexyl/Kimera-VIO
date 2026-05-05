@@ -99,6 +99,15 @@ class Pipeline {
     vio_backend_module_->enqueueExternalPoseBeliefs(beliefs);
   }
 
+  inline void enqueueExternalOdometryBeliefs(
+      const std::vector<ExternalOdometryBelief>& beliefs) {
+    if (beliefs.empty()) {
+      return;
+    }
+    CHECK(vio_backend_module_);
+    vio_backend_module_->enqueueExternalOdometryBeliefs(beliefs);
+  }
+
   inline LcdModule* getLcdModule() const { return lcd_module_.get(); }
 
  public:
@@ -192,6 +201,11 @@ class Pipeline {
       LOG(WARNING) << "Attempt to register LCD/PGO callback, but no "
                    << "LoopClosureDetector member is active in pipeline.";
     }
+  }
+
+  inline void registerExternalBackendOutputCallback(
+      const VioBackendModule::OutputCallback& callback) {
+    registerBackendOutputCallback(callback);
   }
 
  protected:

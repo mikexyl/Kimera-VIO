@@ -102,6 +102,15 @@ DEFINE_bool(cbs_use_temporary_cbs_linear_priors,
             "Linearize accepted CBS beliefs inside the current iSAM2 update "
             "and use them only in a temporary augmented linear delta solve. "
             "They are never inserted into the persistent factor graph.");
+DEFINE_string(cbs_belief_factor_mode,
+              "prior",
+              "How accepted CBS pose beliefs become GTSAM factors. Supported "
+              "values: 'prior' and 'odom_between'.");
+DEFINE_bool(cbs_use_sender_conditional_odom_factors,
+            true,
+            "In odom_between temporary-linear mode, inject sender-computed "
+            "posterior conditional odometry residuals using A and Q instead "
+            "of plain BetweenFactor<Pose3> constraints.");
 DEFINE_bool(cbs_temporary_linear_already_applied_gate_enable,
             true,
             "In temporary-linear CBS mode, skip near-identical beliefs from "
@@ -192,6 +201,43 @@ inline gtsam::Matrix6 sanitizePoseCovariance(
 
 inline double beliefTraceFromMatrix(const Eigen::MatrixXd& covariance) {
   return covariance.trace();
+}
+
+inline gtsam::Vector6 vector6FromArray(const std::array<double, 6>& values) {
+  gtsam::Vector6 vector = gtsam::Vector6::Zero();
+  for (size_t i = 0u; i < 6u; ++i) {
+    vector(i) = values[i];
+  }
+  return vector;
+}
+
+inline gtsam::Matrix6 matrix6FromArray(
+    const std::array<double, 36>& values) {
+  gtsam::Matrix6 matrix = gtsam::Matrix6::Zero();
+  for (size_t r = 0u; r < 6u; ++r) {
+    for (size_t c = 0u; c < 6u; ++c) {
+      matrix(r, c) = values[r * 6u + c];
+    }
+  }
+  return matrix;
+}
+
+inline void vector6ToArray(const gtsam::Vector6& vector,
+                           std::array<double, 6>* values) {
+  CHECK_NOTNULL(values);
+  for (size_t i = 0u; i < 6u; ++i) {
+    (*values)[i] = vector(i);
+  }
+}
+
+inline void matrix6ToArray(const gtsam::Matrix6& matrix,
+                           std::array<double, 36>* values) {
+  CHECK_NOTNULL(values);
+  for (size_t r = 0u; r < 6u; ++r) {
+    for (size_t c = 0u; c < 6u; ++c) {
+      (*values)[r * 6u + c] = matrix(r, c);
+    }
+  }
 }
 
 inline double safeHellingerDistance(const gtsam::Vector6& mu_a,
@@ -387,6 +433,18 @@ VioBackend::VioBackend(const gtsam::Pose3& B_Pose_leftCamRect,
       FLAGS_cbs_use_temporary_cbs_prior_factors;
   bpsam_params.use_temporary_cbs_linear_priors =
       FLAGS_cbs_use_temporary_cbs_linear_priors;
+  try {
+    bpsam_params.belief_factor_mode =
+        cbs::BPSAM::beliefFactorModeFromString(FLAGS_cbs_belief_factor_mode);
+  } catch (const std::exception& e) {
+    LOG(WARNING) << "Invalid --cbs_belief_factor_mode="
+                 << FLAGS_cbs_belief_factor_mode << ": " << e.what()
+                 << ". Falling back to prior.";
+    bpsam_params.belief_factor_mode =
+        cbs::BPSAM::CbsBeliefFactorMode::Prior;
+  }
+  bpsam_params.use_sender_conditional_odom_factors =
+      FLAGS_cbs_use_sender_conditional_odom_factors;
   bpsam_params.temporary_linear_already_applied_gate_enable =
       FLAGS_cbs_temporary_linear_already_applied_gate_enable;
   bpsam_params.temporary_linear_already_applied_metric_threshold =
@@ -449,6 +507,12 @@ VioBackend::VioBackend(const gtsam::Pose3& B_Pose_leftCamRect,
   LOG(INFO) << "CBS temporary linear priors: "
             << (FLAGS_cbs_use_temporary_cbs_linear_priors ? "enabled"
                                                           : "disabled");
+  LOG(INFO) << "CBS belief factor mode: "
+            << cbs::BPSAM::beliefFactorModeName(
+                   bpsam_params.belief_factor_mode);
+  LOG(INFO) << "CBS sender conditional odometry factors: "
+            << (FLAGS_cbs_use_sender_conditional_odom_factors ? "enabled"
+                                                              : "disabled");
 
   initializePoseBeliefCovarianceSidecarAdapter();
 
@@ -660,7 +724,8 @@ BackendOutput::UniquePtr VioBackend::spinOnce(const BackendInput& input) {
           optimization_time_sec_per_update_,
           cbs_belief_generation_time_sec_per_update_,
           cbs_marginalization_graph_factor_count_,
-          cbs_outgoing_pose_beliefs_);
+          cbs_outgoing_pose_beliefs_,
+          cbs_outgoing_odom_beliefs_);
     } catch (const std::exception& e) {
       LOG(ERROR)
           << "VioBackend::spinOnce failed while creating backend output: "
@@ -739,6 +804,30 @@ void VioBackend::enqueueExternalPoseBeliefs(
   }
 }
 
+void VioBackend::enqueueExternalOdometryBeliefs(
+    const std::vector<ExternalOdometryBelief>& beliefs) {
+  if (beliefs.empty()) {
+    return;
+  }
+  external_beliefs_received_total_.fetch_add(beliefs.size(),
+                                             std::memory_order_relaxed);
+
+  std::lock_guard<std::mutex> lock(external_beliefs_mutex_);
+  for (const auto& belief : beliefs) {
+    pending_external_odom_beliefs_.push_back(belief);
+  }
+  size_t queue_dropped_now = 0u;
+  while (pending_external_odom_beliefs_.size() >
+         max_pending_external_pose_beliefs_) {
+    pending_external_odom_beliefs_.pop_front();
+    ++queue_dropped_now;
+  }
+  if (queue_dropped_now > 0u) {
+    external_beliefs_queue_dropped_total_.fetch_add(queue_dropped_now,
+                                                    std::memory_order_relaxed);
+  }
+}
+
 std::vector<ExternalPoseBelief> VioBackend::popPendingExternalPoseBeliefs() {
   std::vector<ExternalPoseBelief> beliefs;
   std::lock_guard<std::mutex> lock(external_beliefs_mutex_);
@@ -746,6 +835,18 @@ std::vector<ExternalPoseBelief> VioBackend::popPendingExternalPoseBeliefs() {
   while (!pending_external_pose_beliefs_.empty()) {
     beliefs.push_back(pending_external_pose_beliefs_.front());
     pending_external_pose_beliefs_.pop_front();
+  }
+  return beliefs;
+}
+
+std::vector<ExternalOdometryBelief>
+VioBackend::popPendingExternalOdometryBeliefs() {
+  std::vector<ExternalOdometryBelief> beliefs;
+  std::lock_guard<std::mutex> lock(external_beliefs_mutex_);
+  beliefs.reserve(pending_external_odom_beliefs_.size());
+  while (!pending_external_odom_beliefs_.empty()) {
+    beliefs.push_back(pending_external_odom_beliefs_.front());
+    pending_external_odom_beliefs_.pop_front();
   }
   return beliefs;
 }
@@ -770,6 +871,15 @@ bool VioBackend::resolveExternalBeliefTargetFrame(
     const FrameId& cur_id,
     FrameId* local_frame_id,
     ExternalBeliefRejectReason* reject_reason) const {
+  return resolveExternalBeliefStamp(
+      belief.stamp_sec, cur_id, local_frame_id, reject_reason);
+}
+
+bool VioBackend::resolveExternalBeliefStamp(
+    double stamp_sec,
+    const FrameId& cur_id,
+    FrameId* local_frame_id,
+    ExternalBeliefRejectReason* reject_reason) const {
   CHECK_NOTNULL(local_frame_id);
   if (reject_reason) {
     *reject_reason = ExternalBeliefRejectReason::kNone;
@@ -778,7 +888,7 @@ bool VioBackend::resolveExternalBeliefTargetFrame(
   const FrameId oldest_active_frame_id =
       computeOldestActiveFrameId(cur_id, backend_params_);
   const bool has_valid_stamp =
-      std::isfinite(belief.stamp_sec) && belief.stamp_sec > 0.0;
+      std::isfinite(stamp_sec) && stamp_sec > 0.0;
 
   if (has_valid_stamp) {
     if (keyframe_timestamp_sec_.empty()) {
@@ -795,7 +905,7 @@ bool VioBackend::resolveExternalBeliefTargetFrame(
       if (frame_id < oldest_active_frame_id || frame_id > cur_id) {
         continue;
       }
-      const double dt = std::abs(frame_stamp_sec - belief.stamp_sec);
+      const double dt = std::abs(frame_stamp_sec - stamp_sec);
       if (dt < best_dt) {
         best_dt = dt;
         best_frame = frame_id;
@@ -846,7 +956,8 @@ void VioBackend::collectExternalBeliefFactors(
   external_beliefs_rejected_exception_per_update_ = 0u;
 
   const auto pending_beliefs = popPendingExternalPoseBeliefs();
-  if (pending_beliefs.empty()) {
+  const auto pending_odom_beliefs = popPendingExternalOdometryBeliefs();
+  if (pending_beliefs.empty() && pending_odom_beliefs.empty()) {
     return;
   }
 
@@ -1256,6 +1367,109 @@ void VioBackend::collectExternalBeliefFactors(
     }
   }
 
+  for (const auto& belief : pending_odom_beliefs) {
+    FrameId from_frame_id = 0u;
+    FrameId to_frame_id = 0u;
+    ExternalBeliefRejectReason from_reject_reason =
+        ExternalBeliefRejectReason::kNone;
+    ExternalBeliefRejectReason to_reject_reason =
+        ExternalBeliefRejectReason::kNone;
+    const bool from_resolved =
+        resolveExternalBeliefStamp(belief.from_stamp_sec,
+                                   cur_id,
+                                   &from_frame_id,
+                                   &from_reject_reason);
+    const bool to_resolved =
+        resolveExternalBeliefStamp(belief.to_stamp_sec,
+                                   cur_id,
+                                   &to_frame_id,
+                                   &to_reject_reason);
+    if (!from_resolved || !to_resolved || from_frame_id >= to_frame_id) {
+      ++dropped_unmatched;
+      if (from_reject_reason == ExternalBeliefRejectReason::kWindow ||
+          to_reject_reason == ExternalBeliefRejectReason::kWindow) {
+        ++rejected_window;
+      } else {
+        ++rejected_timestamp;
+      }
+      continue;
+    }
+
+    const gtsam::Key from_pose_key =
+        gtsam::Symbol(kPoseSymbolChar, from_frame_id);
+    const gtsam::Key to_pose_key =
+        gtsam::Symbol(kPoseSymbolChar, to_frame_id);
+    if (!smoother_->valueExists(from_pose_key) ||
+        !smoother_->valueExists(to_pose_key)) {
+      ++dropped_unmatched;
+      ++rejected_missing_state;
+      continue;
+    }
+
+    cbs::BPSAM::CbsOdometryBelief odom_belief;
+    odom_belief.source_agent = static_cast<cbs::AgentId>(belief.source_agent);
+    odom_belief.from_pose_key = from_pose_key;
+    odom_belief.to_pose_key = to_pose_key;
+    odom_belief.measured_from_to =
+        gtsam::Pose3::Expmap(vector6FromArray(belief.relative_mu));
+    odom_belief.covariance =
+        sanitizePoseCovariance(matrix6FromArray(belief.covariance));
+    odom_belief.conditional_A = matrix6FromArray(belief.conditional_A);
+    odom_belief.relax_factor = belief.relax_factor;
+
+    try {
+      std::vector<cbs::BPSAM::CbsOdometryBelief> single_belief;
+      single_belief.push_back(std::move(odom_belief));
+      const auto add_result =
+          smoother_->addOdometryBeliefsDetailed(std::move(single_belief));
+      external_beliefs_added_per_update_ += add_result.accepted;
+      rejected_by_bpsam += add_result.rejected();
+      rejected_bpsam_inactive_window += add_result.rejected_inactive_window;
+      rejected_bpsam_shape += add_result.rejected_shape;
+      rejected_bpsam_exception += add_result.rejected_exception;
+      for (const auto& detail : add_result.details) {
+        LOG(INFO) << "CBS_BPSAM_ODOM_ADD_ROW_L2K,"
+                  << formatPoseKeyToken(belief.source_agent,
+                                        belief.sender_from_pose_index)
+                  << "->"
+                  << formatPoseKeyToken(belief.source_agent,
+                                        belief.sender_to_pose_index)
+                  << ","
+                  << formatPoseKeyToken(static_cast<uint8_t>('k'),
+                                        from_frame_id)
+                  << "->"
+                  << formatPoseKeyToken(static_cast<uint8_t>('k'),
+                                        to_frame_id)
+                  << "," << static_cast<int>(detail.status) << ","
+                  << detail.covariance_trace << ","
+                  << detail.conditional_A_frobenius << ","
+                  << sanitizeLogToken(detail.message);
+      }
+    } catch (const std::exception& e) {
+      ++rejected_by_bpsam;
+      ++rejected_bpsam_exception;
+      LOG(WARNING) << "BPSAM rejected external CBS odometry "
+                   << formatPoseKeyToken(belief.source_agent,
+                                         belief.sender_from_pose_index)
+                   << "->"
+                   << formatPoseKeyToken(belief.source_agent,
+                                         belief.sender_to_pose_index)
+                   << " for Kimera frames " << from_frame_id << "->"
+                   << to_frame_id << ": " << e.what();
+    } catch (...) {
+      ++rejected_by_bpsam;
+      ++rejected_bpsam_exception;
+      LOG(WARNING) << "BPSAM rejected external CBS odometry "
+                   << formatPoseKeyToken(belief.source_agent,
+                                         belief.sender_from_pose_index)
+                   << "->"
+                   << formatPoseKeyToken(belief.source_agent,
+                                         belief.sender_to_pose_index)
+                   << " for Kimera frames " << from_frame_id << "->"
+                   << to_frame_id << ".";
+    }
+  }
+
   dropped_unmatched += rejected_by_bpsam;
   external_beliefs_rejected_first_message_per_update_ =
       rejected_bpsam_first_message;
@@ -1289,6 +1503,7 @@ void VioBackend::collectExternalBeliefFactors(
       rejected_bpsam_exception, std::memory_order_relaxed);
 
   LOG(INFO) << "Kimera CBS incoming flow: pending=" << pending_beliefs.size()
+            << " pending_odom=" << pending_odom_beliefs.size()
             << " resolved=" << resolved_count
             << " selected=" << selected_beliefs.size()
             << " bpsam_added=" << external_beliefs_added_per_update_
@@ -1309,6 +1524,7 @@ void VioBackend::collectExternalBeliefFactors(
 
 void VioBackend::refreshCbsOutgoingBeliefs(const FrameId& cur_id) {
   cbs_outgoing_pose_beliefs_.clear();
+  cbs_outgoing_odom_beliefs_.clear();
   cbs_belief_generation_time_sec_per_update_ = 0.0;
   cbs_marginalization_graph_factor_count_ = 0u;
 
@@ -1340,6 +1556,60 @@ void VioBackend::refreshCbsOutgoingBeliefs(const FrameId& cur_id) {
         smoother_->marginalizationGraphFactorCount();
 
     const auto get_beliefs_start = utils::Timer::tic();
+    const auto belief_factor_mode =
+        cbs::BPSAM::beliefFactorModeFromString(FLAGS_cbs_belief_factor_mode);
+    if (belief_factor_mode == cbs::BPSAM::CbsBeliefFactorMode::OdometryBetween) {
+      const auto outgoing =
+          smoother_->getOdometryBeliefs(request_keys, static_cast<cbs::AgentId>('l'));
+      cbs_belief_generation_time_sec_per_update_ =
+          utils::Timer::toc<std::chrono::duration<double>>(get_beliefs_start)
+              .count();
+
+      for (const auto& odom : outgoing) {
+        const gtsam::Symbol from_symbol(odom.from_pose_key);
+        const gtsam::Symbol to_symbol(odom.to_pose_key);
+        if (from_symbol.chr() != kPoseSymbolChar ||
+            to_symbol.chr() != kPoseSymbolChar) {
+          continue;
+        }
+        const FrameId from_frame_id =
+            static_cast<FrameId>(from_symbol.index());
+        const FrameId to_frame_id = static_cast<FrameId>(to_symbol.index());
+        const auto from_stamp_it = keyframe_timestamp_sec_.find(from_frame_id);
+        const auto to_stamp_it = keyframe_timestamp_sec_.find(to_frame_id);
+        if (from_stamp_it == keyframe_timestamp_sec_.end() ||
+            to_stamp_it == keyframe_timestamp_sec_.end()) {
+          continue;
+        }
+
+        ExternalOdometryBelief stamped_belief;
+        stamped_belief.source_agent = static_cast<uint8_t>('k');
+        stamped_belief.from_pose_index = static_cast<uint32_t>(from_frame_id);
+        stamped_belief.to_pose_index = static_cast<uint32_t>(to_frame_id);
+        stamped_belief.sender_from_pose_index =
+            stamped_belief.from_pose_index;
+        stamped_belief.sender_to_pose_index = stamped_belief.to_pose_index;
+        stamped_belief.from_stamp_sec = from_stamp_it->second;
+        stamped_belief.to_stamp_sec = to_stamp_it->second;
+        stamped_belief.sender_timestamp_ns =
+            static_cast<uint64_t>(
+                std::llround(stamped_belief.to_stamp_sec * 1e9));
+        stamped_belief.sender_frame_id = "odom";
+        stamped_belief.relax_factor = odom.relax_factor;
+        vector6ToArray(gtsam::Pose3::Logmap(odom.measured_from_to),
+                       &stamped_belief.relative_mu);
+        matrix6ToArray(sanitizePoseCovariance(odom.covariance),
+                       &stamped_belief.covariance);
+        gtsam::Matrix6 conditional_A = gtsam::Matrix6::Identity();
+        if (odom.conditional_A.rows() == 6 && odom.conditional_A.cols() == 6) {
+          conditional_A = odom.conditional_A;
+        }
+        matrix6ToArray(conditional_A, &stamped_belief.conditional_A);
+        cbs_outgoing_odom_beliefs_.push_back(stamped_belief);
+      }
+      return;
+    }
+
     const auto outgoing =
         smoother_->getBeliefs(request_keys, static_cast<cbs::AgentId>('l'), false);
     cbs_belief_generation_time_sec_per_update_ =
@@ -2312,6 +2582,7 @@ bool VioBackend::optimize(
   cbs_belief_generation_time_sec_per_update_ = 0.0;
   cbs_marginalization_graph_factor_count_ = 0u;
   cbs_outgoing_pose_beliefs_.clear();
+  cbs_outgoing_odom_beliefs_.clear();
 
   // Only for statistics and debugging.
   // Store start time to calculate absolute total time taken.

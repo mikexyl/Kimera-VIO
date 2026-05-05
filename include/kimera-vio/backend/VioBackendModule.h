@@ -80,6 +80,8 @@ class VioBackendModule
 
   void enqueueExternalPoseBeliefs(
       const std::vector<ExternalPoseBelief>& beliefs);
+  void enqueueExternalOdometryBeliefs(
+      const std::vector<ExternalOdometryBelief>& beliefs);
 
  protected:
   const VioBackend::UniquePtr vio_backend_;

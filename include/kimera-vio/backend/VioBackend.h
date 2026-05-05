@@ -127,6 +127,8 @@ class VioBackend {
   // Thread-safe ingestion of external pose beliefs (e.g., from LiDAR backend).
   void enqueueExternalPoseBeliefs(
       const std::vector<ExternalPoseBelief>& beliefs);
+  void enqueueExternalOdometryBeliefs(
+      const std::vector<ExternalOdometryBelief>& beliefs);
 
   // Get valid 3D points - TODO: this copies the graph.
   void get3DPoints(std::vector<gtsam::Point3>* points_3d) const;
@@ -464,6 +466,12 @@ class VioBackend {
       const FrameId& cur_id,
       FrameId* local_frame_id,
       ExternalBeliefRejectReason* reject_reason) const;
+  bool resolveExternalBeliefStamp(
+      double stamp_sec,
+      const FrameId& cur_id,
+      FrameId* local_frame_id,
+      ExternalBeliefRejectReason* reject_reason) const;
+  std::vector<ExternalOdometryBelief> popPendingExternalOdometryBeliefs();
 
   void collectExternalBeliefFactors(
       const FrameId& cur_id,
@@ -606,6 +614,7 @@ class VioBackend {
   double cbs_belief_generation_time_sec_per_update_ = 0.0;
   size_t cbs_marginalization_graph_factor_count_ = 0u;
   std::vector<ExternalPoseBelief> cbs_outgoing_pose_beliefs_;
+  std::vector<ExternalOdometryBelief> cbs_outgoing_odom_beliefs_;
 
   // Vision params.
   gtsam::SmartStereoProjectionParams smart_factors_params_;
@@ -680,6 +689,7 @@ class VioBackend {
   // External belief bridge state.
   mutable std::mutex external_beliefs_mutex_;
   std::deque<ExternalPoseBelief> pending_external_pose_beliefs_;
+  std::deque<ExternalOdometryBelief> pending_external_odom_beliefs_;
   std::vector<ExternalBeliefFactorSlot> active_external_belief_factor_slots_;
   std::map<FrameId, double> keyframe_timestamp_sec_;
   size_t max_pending_external_pose_beliefs_ = 800u;

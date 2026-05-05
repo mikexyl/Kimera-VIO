@@ -130,6 +130,22 @@ struct ExternalPoseBelief {
   double relax_factor = 0.0;
 };
 
+struct ExternalOdometryBelief {
+  uint8_t source_agent = 0u;
+  uint32_t from_pose_index = 0u;
+  uint32_t to_pose_index = 0u;
+  uint32_t sender_from_pose_index = 0u;
+  uint32_t sender_to_pose_index = 0u;
+  double from_stamp_sec = 0.0;
+  double to_stamp_sec = 0.0;
+  uint64_t sender_timestamp_ns = 0u;
+  std::string sender_frame_id = "na";
+  std::array<double, 6> relative_mu{};
+  std::array<double, 36> covariance{};
+  std::array<double, 36> conditional_A{};
+  double relax_factor = 0.0;
+};
+
 ////////////////////////////////////////////////////////////////////////////////
 class DebugVioInfo {
  public:
@@ -335,7 +351,8 @@ struct BackendOutput : public PipelinePayload {
       double optimization_time_sec = 0.0,
       double cbs_belief_generation_time_sec = 0.0,
       size_t cbs_marginalization_graph_factor_count = 0u,
-      std::vector<ExternalPoseBelief> cbs_outgoing_pose_beliefs = {})
+      std::vector<ExternalPoseBelief> cbs_outgoing_pose_beliefs = {},
+      std::vector<ExternalOdometryBelief> cbs_outgoing_odom_beliefs = {})
       : PipelinePayload(timestamp_kf),
         W_State_Blkf_(timestamp_kf, W_Pose_Blkf, W_Vel_Blkf, imu_bias_lkf),
         state_(state),
@@ -364,7 +381,8 @@ struct BackendOutput : public PipelinePayload {
         cbs_belief_generation_time_sec_(cbs_belief_generation_time_sec),
         cbs_marginalization_graph_factor_count_(
             cbs_marginalization_graph_factor_count),
-        cbs_outgoing_pose_beliefs_(std::move(cbs_outgoing_pose_beliefs)) {}
+        cbs_outgoing_pose_beliefs_(std::move(cbs_outgoing_pose_beliefs)),
+        cbs_outgoing_odom_beliefs_(std::move(cbs_outgoing_odom_beliefs)) {}
 
   BackendOutput(
       const VioNavStateTimestamped& vio_navstate_timestamped,
@@ -388,7 +406,8 @@ struct BackendOutput : public PipelinePayload {
       double optimization_time_sec = 0.0,
       double cbs_belief_generation_time_sec = 0.0,
       size_t cbs_marginalization_graph_factor_count = 0u,
-      std::vector<ExternalPoseBelief> cbs_outgoing_pose_beliefs = {})
+      std::vector<ExternalPoseBelief> cbs_outgoing_pose_beliefs = {},
+      std::vector<ExternalOdometryBelief> cbs_outgoing_odom_beliefs = {})
       : PipelinePayload(vio_navstate_timestamped.timestamp_),
         W_State_Blkf_(vio_navstate_timestamped),
         state_(state),
@@ -417,7 +436,8 @@ struct BackendOutput : public PipelinePayload {
         cbs_belief_generation_time_sec_(cbs_belief_generation_time_sec),
         cbs_marginalization_graph_factor_count_(
             cbs_marginalization_graph_factor_count),
-        cbs_outgoing_pose_beliefs_(std::move(cbs_outgoing_pose_beliefs)) {}
+        cbs_outgoing_pose_beliefs_(std::move(cbs_outgoing_pose_beliefs)),
+        cbs_outgoing_odom_beliefs_(std::move(cbs_outgoing_odom_beliefs)) {}
 
   const VioNavStateTimestamped W_State_Blkf_;
   const gtsam::Values state_;
@@ -441,6 +461,7 @@ struct BackendOutput : public PipelinePayload {
   const double cbs_belief_generation_time_sec_;
   const size_t cbs_marginalization_graph_factor_count_;
   const std::vector<ExternalPoseBelief> cbs_outgoing_pose_beliefs_;
+  const std::vector<ExternalOdometryBelief> cbs_outgoing_odom_beliefs_;
 };
 
 ////////////////////////////////////////////////////////////////////////////////

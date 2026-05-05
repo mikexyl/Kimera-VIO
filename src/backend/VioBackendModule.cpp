@@ -55,4 +55,10 @@ void VioBackendModule::enqueueExternalPoseBeliefs(
   vio_backend_->enqueueExternalPoseBeliefs(beliefs);
 }
 
+void VioBackendModule::enqueueExternalOdometryBeliefs(
+    const std::vector<ExternalOdometryBelief>& beliefs) {
+  CHECK(vio_backend_);
+  vio_backend_->enqueueExternalOdometryBeliefs(beliefs);
+}
+
 }  // namespace VIO
