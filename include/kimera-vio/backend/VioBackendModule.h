@@ -78,8 +78,6 @@ class VioBackendModule
   void registerMapUpdateCallback(
       const VioBackend::MapCallback& map_update_callback);
 
-  void enqueueExternalPoseBeliefs(
-      const std::vector<ExternalPoseBelief>& beliefs);
   void enqueueExternalOdometryBeliefs(
       const std::vector<ExternalOdometryBelief>& beliefs);
 
