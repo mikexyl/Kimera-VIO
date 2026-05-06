@@ -170,17 +170,11 @@ inline std::string sanitizeLogToken(std::string token) {
   return token.empty() ? "na" : token;
 }
 
-inline gtsam::Matrix6 sanitizePoseCovariance(
+inline gtsam::Matrix6 poseCovarianceFromMatrix(
     const gtsam::Matrix& state_covariance) {
   gtsam::Matrix6 pose_cov = gtsam::Matrix6::Identity() * 1e-3;
   if (state_covariance.rows() >= 6 && state_covariance.cols() >= 6) {
     pose_cov = gtsam::sub(state_covariance, 0, 6, 0, 6);
-  }
-  pose_cov = 0.5 * (pose_cov + pose_cov.transpose());
-  for (size_t i = 0u; i < 6u; ++i) {
-    if (!std::isfinite(pose_cov(i, i)) || pose_cov(i, i) <= 1e-9) {
-      pose_cov(i, i) = 1e-3;
-    }
   }
   return pose_cov;
 }
@@ -938,7 +932,7 @@ void VioBackend::collectExternalBeliefFactors(
     odom_belief.measured_from_to =
         gtsam::Pose3::Expmap(vector6FromArray(belief.relative_mu));
     odom_belief.covariance =
-        sanitizePoseCovariance(matrix6FromArray(belief.covariance));
+        poseCovarianceFromMatrix(matrix6FromArray(belief.covariance));
     odom_belief.relax_factor = belief.relax_factor;
 
     try {
@@ -1120,7 +1114,7 @@ void VioBackend::refreshCbsOutgoingBeliefs(const FrameId& cur_id) {
       stamped_belief.relax_factor = odom.relax_factor;
       vector6ToArray(gtsam::Pose3::Logmap(odom.measured_from_to),
                      &stamped_belief.relative_mu);
-      matrix6ToArray(sanitizePoseCovariance(odom.covariance),
+      matrix6ToArray(poseCovarianceFromMatrix(odom.covariance),
                      &stamped_belief.covariance);
       cbs_outgoing_odom_beliefs_.push_back(stamped_belief);
     }
