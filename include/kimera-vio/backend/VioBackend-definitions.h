@@ -125,6 +125,7 @@ struct ExternalOdometryBelief {
   double to_stamp_sec = 0.0;
   uint64_t sender_timestamp_ns = 0u;
   std::string sender_frame_id = "na";
+  double received_wall_time_sec = 0.0;
   std::array<double, 6> relative_mu{};
   std::array<double, 36> covariance{};
   double relax_factor = 0.0;

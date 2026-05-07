@@ -51,8 +51,10 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include "kimera-vio/backend/VioBackend-definitions.h"
 #include "kimera-vio/backend/VioBackendParams.h"
@@ -446,6 +448,17 @@ class VioBackend {
     size_t slot = 0u;
   };
 
+  struct OutgoingOdomPair {
+    gtsam::Key from_key = 0u;
+    gtsam::Key to_key = 0u;
+    FrameId from_frame_id = 0u;
+    FrameId to_frame_id = 0u;
+    double from_stamp_sec = 0.0;
+    double to_stamp_sec = 0.0;
+    std::string source = "adjacent";
+    double horizon_sec = 0.0;
+  };
+
   enum class ExternalBeliefRejectReason {
     kNone = 0,
     kWindow = 1,
@@ -461,8 +474,27 @@ class VioBackend {
       double stamp_sec,
       const FrameId& cur_id,
       FrameId* local_frame_id,
-      ExternalBeliefRejectReason* reject_reason) const;
+      ExternalBeliefRejectReason* reject_reason,
+      FrameId* best_frame_id = nullptr,
+      double* best_stamp_sec = nullptr,
+      double* best_abs_dt = nullptr) const;
   std::vector<ExternalOdometryBelief> popPendingExternalOdometryBeliefs();
+  void requeuePendingExternalOdometryBeliefs(
+      const std::vector<ExternalOdometryBelief>& beliefs);
+  void capPendingExternalOdometryBeliefsLocked();
+  double latestKeyframeTimestampSec(const FrameId& cur_id) const;
+  double externalOdomBeliefRetryAgeSec(
+      const ExternalOdometryBelief& belief,
+      const FrameId& cur_id) const;
+  bool shouldRetryExternalOdometryBelief(
+      const ExternalOdometryBelief& belief,
+      const FrameId& cur_id,
+      const std::string& reason) const;
+  std::vector<OutgoingOdomPair> buildCbsOutgoingOdomPairs(
+      const FrameId& cur_id) const;
+  void logCbsOutgoingIntervalRow(const OutgoingOdomPair& pair,
+                                 double covariance_trace,
+                                 const std::string& status) const;
 
   void collectExternalBeliefFactors(
       const FrameId& cur_id,
@@ -683,6 +715,13 @@ class VioBackend {
   std::map<FrameId, double> keyframe_timestamp_sec_;
   size_t max_pending_external_odom_beliefs_ = 800u;
   double external_belief_timestamp_tolerance_sec_ = 0.2;
+  std::string cbs_odom_interval_mode_ = "adjacent";
+  std::vector<double> cbs_odom_interval_horizons_sec_{
+      0.3, 0.5, 1.0, 1.5, 2.0};
+  double cbs_odom_interval_horizon_tolerance_sec_ = 0.15;
+  size_t max_cbs_outgoing_odom_beliefs_ = 80u;
+  double external_odom_unmatched_retry_max_age_sec_ = 5.0;
+  size_t max_unmatched_external_odom_retry_beliefs_ = 500u;
   // External-belief flow diagnostics (monotonic counters).
   std::atomic<size_t> external_beliefs_received_total_{0u};
   std::atomic<size_t> external_beliefs_queue_dropped_total_{0u};
