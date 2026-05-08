@@ -53,6 +53,7 @@
 #include <mutex>
 #include <string>
 #include <unordered_map>
+#include <vector>
 
 #include "kimera-vio/backend/VioBackend-definitions.h"
 #include "kimera-vio/backend/VioBackendParams.h"
@@ -124,9 +125,7 @@ class VioBackend {
    */
   void registerMapUpdateCallback(const MapCallback& map_update_callback);
 
-  // Thread-safe ingestion of external pose beliefs (e.g., from LiDAR backend).
-  void enqueueExternalPoseBeliefs(
-      const std::vector<ExternalPoseBelief>& beliefs);
+  // Thread-safe ingestion of external odometry beliefs (e.g., from LiDAR backend).
   void enqueueExternalOdometryBeliefs(
       const std::vector<ExternalOdometryBelief>& beliefs);
 
@@ -456,23 +455,29 @@ class VioBackend {
     kCovariance = 4,
   };
 
-  std::vector<ExternalPoseBelief> popPendingExternalPoseBeliefs();
-
   void updateKeyframeTimestampIndex(const FrameId& frame_id,
                                     const Timestamp& timestamp_kf_nsec);
 
-  bool resolveExternalBeliefTargetFrame(
-      const ExternalPoseBelief& belief,
-      const FrameId& cur_id,
-      FrameId* local_frame_id,
-      ExternalBeliefRejectReason* reject_reason) const;
   bool resolveExternalBeliefStamp(
       double stamp_sec,
       const FrameId& cur_id,
       FrameId* local_frame_id,
-      ExternalBeliefRejectReason* reject_reason) const;
+      ExternalBeliefRejectReason* reject_reason,
+      FrameId* best_frame_id = nullptr,
+      double* best_stamp_sec = nullptr,
+      double* best_abs_dt = nullptr) const;
   std::vector<ExternalOdometryBelief> popPendingExternalOdometryBeliefs();
-
+  void requeuePendingExternalOdometryBeliefs(
+      const std::vector<ExternalOdometryBelief>& beliefs);
+  void capPendingExternalOdometryBeliefsLocked();
+  double latestKeyframeTimestampSec(const FrameId& cur_id) const;
+  double externalOdomBeliefRetryAgeSec(
+      const ExternalOdometryBelief& belief,
+      const FrameId& cur_id) const;
+  bool shouldRetryExternalOdometryBelief(
+      const ExternalOdometryBelief& belief,
+      const FrameId& cur_id,
+      const std::string& reason) const;
   void collectExternalBeliefFactors(
       const FrameId& cur_id,
       gtsam::FactorIndices* delete_slots,
@@ -613,7 +618,6 @@ class VioBackend {
   double optimization_time_sec_per_update_ = 0.0;
   double cbs_belief_generation_time_sec_per_update_ = 0.0;
   size_t cbs_marginalization_graph_factor_count_ = 0u;
-  std::vector<ExternalPoseBelief> cbs_outgoing_pose_beliefs_;
   std::vector<ExternalOdometryBelief> cbs_outgoing_odom_beliefs_;
 
   // Vision params.
@@ -688,12 +692,13 @@ class VioBackend {
 
   // External belief bridge state.
   mutable std::mutex external_beliefs_mutex_;
-  std::deque<ExternalPoseBelief> pending_external_pose_beliefs_;
   std::deque<ExternalOdometryBelief> pending_external_odom_beliefs_;
   std::vector<ExternalBeliefFactorSlot> active_external_belief_factor_slots_;
   std::map<FrameId, double> keyframe_timestamp_sec_;
-  size_t max_pending_external_pose_beliefs_ = 800u;
+  size_t max_pending_external_odom_beliefs_ = 800u;
   double external_belief_timestamp_tolerance_sec_ = 0.2;
+  double external_odom_unmatched_retry_max_age_sec_ = 5.0;
+  size_t max_unmatched_external_odom_retry_beliefs_ = 500u;
   // External-belief flow diagnostics (monotonic counters).
   std::atomic<size_t> external_beliefs_received_total_{0u};
   std::atomic<size_t> external_beliefs_queue_dropped_total_{0u};

@@ -37,10 +37,13 @@
 #include <glog/logging.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <exception>
+#include <iomanip>
 #include <limits>  // for numeric_limits<>
 #include <map>
+#include <sstream>
 #include <string>
 #include <unordered_set>
 #include <utility>  // for make_pair
@@ -91,26 +94,12 @@ DEFINE_bool(cbs_use_persistent_bpsam_for_main_backend,
 DEFINE_bool(cbs_log_covariance_sanity_diff,
             false,
             "Log debug-only local-vs-fused pose covariance sanity metrics.");
-DEFINE_bool(cbs_use_temporary_cbs_prior_factors,
-            false,
-            "Inject accepted CBS beliefs as temporary PriorFactors for the "
-            "current iSAM2 solve, then remove them before fixed-lag "
-            "marginalization. Keeps the legacy persistent-prior path disabled "
-            "only when this flag is true.");
-DEFINE_bool(cbs_use_temporary_cbs_linear_priors,
+DEFINE_bool(cbs_use_temporary_cbs_linear_factors,
             true,
-            "Linearize accepted CBS beliefs inside the current iSAM2 update "
-            "and use them only in a temporary augmented linear delta solve. "
-            "They are never inserted into the persistent factor graph.");
-DEFINE_string(cbs_belief_factor_mode,
-              "prior",
-              "How accepted CBS pose beliefs become GTSAM factors. Supported "
-              "values: 'prior' and 'odom_between'.");
-DEFINE_bool(cbs_use_sender_conditional_odom_factors,
-            true,
-            "In odom_between temporary-linear mode, inject sender-computed "
-            "posterior conditional odometry residuals using A and Q instead "
-            "of plain BetweenFactor<Pose3> constraints.");
+            "Linearize accepted CBS odometry factors inside the current "
+            "iSAM2 update and use them only in a temporary augmented linear "
+            "delta solve. They are never inserted into the persistent factor "
+            "graph.");
 DEFINE_bool(cbs_temporary_linear_already_applied_gate_enable,
             true,
             "In temporary-linear CBS mode, skip near-identical beliefs from "
@@ -143,14 +132,22 @@ DEFINE_bool(cbs_reject_first_message,
 DEFINE_double(cbs_d_reset,
               0.1,
               "CBS GBP hard reset Hellinger threshold.");
-DEFINE_double(cbs_l2k_prior_factor_covariance_scale,
+DEFINE_double(cbs_l2k_odom_factor_covariance_scale,
               1.0,
-              "Scale applied only to LiORF-to-Kimera CBS PriorFactor "
+              "Scale applied only to LiORF-to-Kimera CBS odometry factor "
               "covariance after receiver gating/contraction.");
 DEFINE_double(cbs_external_belief_timestamp_tolerance_sec,
               0.2,
               "Max allowed absolute timestamp mismatch (seconds) when matching "
               "incoming external pose beliefs to local keyframes.");
+DEFINE_double(cbs_odom_unmatched_retry_max_age_sec,
+              5.0,
+              "Maximum receiver-local timestamp age for retrying unmatched "
+              "incoming CBS odometry beliefs.");
+DEFINE_int32(cbs_odom_unmatched_retry_max_beliefs,
+             500,
+             "Maximum number of unmatched incoming CBS odometry beliefs kept "
+             "for retry.");
 DEFINE_bool(no_incremental_pose,
             false,
             "Flag to disable incremental pose usage in backend");
@@ -170,6 +167,12 @@ inline FrameId computeOldestActiveFrameId(const FrameId cur_id,
   return saturatingSubFrameId(cur_id, window_size - 1u);
 }
 
+inline double wallTimeNowSec() {
+  return std::chrono::duration<double>(
+             std::chrono::system_clock::now().time_since_epoch())
+      .count();
+}
+
 inline std::string formatPoseKeyToken(const uint8_t source_agent,
                                       const uint32_t pose_index) {
   const char agent_char = static_cast<char>(source_agent);
@@ -184,17 +187,27 @@ inline std::string sanitizeLogToken(std::string token) {
   return token.empty() ? "na" : token;
 }
 
-inline gtsam::Matrix6 sanitizePoseCovariance(
+inline const char* externalBeliefRejectReasonToken(const int reason) {
+  switch (reason) {
+    case 0:
+      return "none";
+    case 1:
+      return "window";
+    case 2:
+      return "timestamp";
+    case 3:
+      return "missing_state";
+    case 4:
+      return "covariance";
+  }
+  return "unknown";
+}
+
+inline gtsam::Matrix6 poseCovarianceFromMatrix(
     const gtsam::Matrix& state_covariance) {
   gtsam::Matrix6 pose_cov = gtsam::Matrix6::Identity() * 1e-3;
   if (state_covariance.rows() >= 6 && state_covariance.cols() >= 6) {
     pose_cov = gtsam::sub(state_covariance, 0, 6, 0, 6);
-  }
-  pose_cov = 0.5 * (pose_cov + pose_cov.transpose());
-  for (size_t i = 0u; i < 6u; ++i) {
-    if (!std::isfinite(pose_cov(i, i)) || pose_cov(i, i) <= 1e-9) {
-      pose_cov(i, i) = 1e-3;
-    }
   }
   return pose_cov;
 }
@@ -429,22 +442,8 @@ VioBackend::VioBackend(const gtsam::Pose3& B_Pose_leftCamRect,
   bpsam_params.use_raw_previous_belief_gate =
       FLAGS_cbs_use_raw_previous_belief_gate;
   bpsam_params.reject_first_message = FLAGS_cbs_reject_first_message;
-  bpsam_params.use_temporary_cbs_prior_factors =
-      FLAGS_cbs_use_temporary_cbs_prior_factors;
-  bpsam_params.use_temporary_cbs_linear_priors =
-      FLAGS_cbs_use_temporary_cbs_linear_priors;
-  try {
-    bpsam_params.belief_factor_mode =
-        cbs::BPSAM::beliefFactorModeFromString(FLAGS_cbs_belief_factor_mode);
-  } catch (const std::exception& e) {
-    LOG(WARNING) << "Invalid --cbs_belief_factor_mode="
-                 << FLAGS_cbs_belief_factor_mode << ": " << e.what()
-                 << ". Falling back to prior.";
-    bpsam_params.belief_factor_mode =
-        cbs::BPSAM::CbsBeliefFactorMode::Prior;
-  }
-  bpsam_params.use_sender_conditional_odom_factors =
-      FLAGS_cbs_use_sender_conditional_odom_factors;
+  bpsam_params.use_temporary_cbs_linear_factors =
+      FLAGS_cbs_use_temporary_cbs_linear_factors;
   bpsam_params.temporary_linear_already_applied_gate_enable =
       FLAGS_cbs_temporary_linear_already_applied_gate_enable;
   bpsam_params.temporary_linear_already_applied_metric_threshold =
@@ -453,11 +452,11 @@ VioBackend::VioBackend(const gtsam::Pose3& B_Pose_leftCamRect,
       FLAGS_cbs_temporary_linear_already_applied_dmu_threshold;
   bpsam_params.temporary_linear_already_applied_cov_rel_threshold =
       FLAGS_cbs_temporary_linear_already_applied_cov_rel_threshold;
-  if (std::isfinite(FLAGS_cbs_l2k_prior_factor_covariance_scale) &&
-      FLAGS_cbs_l2k_prior_factor_covariance_scale > 0.0) {
-    bpsam_params.prior_factor_covariance_scale_by_source
+  if (std::isfinite(FLAGS_cbs_l2k_odom_factor_covariance_scale) &&
+      FLAGS_cbs_l2k_odom_factor_covariance_scale > 0.0) {
+    bpsam_params.external_factor_covariance_scale_by_source
         [static_cast<cbs::AgentId>('l')] =
-            FLAGS_cbs_l2k_prior_factor_covariance_scale;
+            FLAGS_cbs_l2k_odom_factor_covariance_scale;
   }
 
   smoother_ =
@@ -497,22 +496,25 @@ VioBackend::VioBackend(const gtsam::Pose3& B_Pose_leftCamRect,
   }
   LOG(INFO) << "CBS external belief matcher tolerance: "
             << external_belief_timestamp_tolerance_sec_ << " s";
+  if (std::isfinite(FLAGS_cbs_odom_unmatched_retry_max_age_sec) &&
+      FLAGS_cbs_odom_unmatched_retry_max_age_sec >= 0.0) {
+    external_odom_unmatched_retry_max_age_sec_ =
+        FLAGS_cbs_odom_unmatched_retry_max_age_sec;
+  }
+  max_unmatched_external_odom_retry_beliefs_ = static_cast<size_t>(
+      std::max(0, FLAGS_cbs_odom_unmatched_retry_max_beliefs));
+  LOG(INFO) << "CBS outgoing odometry mode: adjacent-only"
+            << " retry_max_age="
+            << external_odom_unmatched_retry_max_age_sec_
+            << " retry_max_beliefs="
+            << max_unmatched_external_odom_retry_beliefs_;
   LOG(INFO) << "CBS external belief soft reset: "
             << (FLAGS_cbs_enable_soft_reset ? "enabled" : "disabled");
   LOG(INFO) << "CBS reject first message: "
             << (FLAGS_cbs_reject_first_message ? "enabled" : "disabled");
-  LOG(INFO) << "CBS temporary prior factors: "
-            << (FLAGS_cbs_use_temporary_cbs_prior_factors ? "enabled"
-                                                          : "disabled");
-  LOG(INFO) << "CBS temporary linear priors: "
-            << (FLAGS_cbs_use_temporary_cbs_linear_priors ? "enabled"
-                                                          : "disabled");
-  LOG(INFO) << "CBS belief factor mode: "
-            << cbs::BPSAM::beliefFactorModeName(
-                   bpsam_params.belief_factor_mode);
-  LOG(INFO) << "CBS sender conditional odometry factors: "
-            << (FLAGS_cbs_use_sender_conditional_odom_factors ? "enabled"
-                                                              : "disabled");
+  LOG(INFO) << "CBS temporary linear odometry factors: "
+            << (FLAGS_cbs_use_temporary_cbs_linear_factors ? "enabled"
+                                                           : "disabled");
 
   initializePoseBeliefCovarianceSidecarAdapter();
 
@@ -724,7 +726,6 @@ BackendOutput::UniquePtr VioBackend::spinOnce(const BackendInput& input) {
           optimization_time_sec_per_update_,
           cbs_belief_generation_time_sec_per_update_,
           cbs_marginalization_graph_factor_count_,
-          cbs_outgoing_pose_beliefs_,
           cbs_outgoing_odom_beliefs_);
     } catch (const std::exception& e) {
       LOG(ERROR)
@@ -780,30 +781,6 @@ void VioBackend::registerMapUpdateCallback(
   map_update_callback_ = map_update_callback;
 }
 
-void VioBackend::enqueueExternalPoseBeliefs(
-    const std::vector<ExternalPoseBelief>& beliefs) {
-  if (beliefs.empty()) {
-    return;
-  }
-  external_beliefs_received_total_.fetch_add(beliefs.size(),
-                                             std::memory_order_relaxed);
-
-  std::lock_guard<std::mutex> lock(external_beliefs_mutex_);
-  for (const auto& belief : beliefs) {
-    pending_external_pose_beliefs_.push_back(belief);
-  }
-  size_t queue_dropped_now = 0u;
-  while (pending_external_pose_beliefs_.size() >
-         max_pending_external_pose_beliefs_) {
-    pending_external_pose_beliefs_.pop_front();
-    ++queue_dropped_now;
-  }
-  if (queue_dropped_now > 0u) {
-    external_beliefs_queue_dropped_total_.fetch_add(queue_dropped_now,
-                                                    std::memory_order_relaxed);
-  }
-}
-
 void VioBackend::enqueueExternalOdometryBeliefs(
     const std::vector<ExternalOdometryBelief>& beliefs) {
   if (beliefs.empty()) {
@@ -814,29 +791,23 @@ void VioBackend::enqueueExternalOdometryBeliefs(
 
   std::lock_guard<std::mutex> lock(external_beliefs_mutex_);
   for (const auto& belief : beliefs) {
-    pending_external_odom_beliefs_.push_back(belief);
+    ExternalOdometryBelief queued_belief = belief;
+    if (!std::isfinite(queued_belief.received_wall_time_sec) ||
+        queued_belief.received_wall_time_sec <= 0.0) {
+      queued_belief.received_wall_time_sec = wallTimeNowSec();
+    }
+    pending_external_odom_beliefs_.push_back(queued_belief);
   }
-  size_t queue_dropped_now = 0u;
-  while (pending_external_odom_beliefs_.size() >
-         max_pending_external_pose_beliefs_) {
-    pending_external_odom_beliefs_.pop_front();
-    ++queue_dropped_now;
-  }
+  const size_t size_before_cap = pending_external_odom_beliefs_.size();
+  capPendingExternalOdometryBeliefsLocked();
+  const size_t queue_dropped_now =
+      size_before_cap > pending_external_odom_beliefs_.size()
+          ? size_before_cap - pending_external_odom_beliefs_.size()
+          : 0u;
   if (queue_dropped_now > 0u) {
     external_beliefs_queue_dropped_total_.fetch_add(queue_dropped_now,
                                                     std::memory_order_relaxed);
   }
-}
-
-std::vector<ExternalPoseBelief> VioBackend::popPendingExternalPoseBeliefs() {
-  std::vector<ExternalPoseBelief> beliefs;
-  std::lock_guard<std::mutex> lock(external_beliefs_mutex_);
-  beliefs.reserve(pending_external_pose_beliefs_.size());
-  while (!pending_external_pose_beliefs_.empty()) {
-    beliefs.push_back(pending_external_pose_beliefs_.front());
-    pending_external_pose_beliefs_.pop_front();
-  }
-  return beliefs;
 }
 
 std::vector<ExternalOdometryBelief>
@@ -849,6 +820,35 @@ VioBackend::popPendingExternalOdometryBeliefs() {
     pending_external_odom_beliefs_.pop_front();
   }
   return beliefs;
+}
+
+void VioBackend::capPendingExternalOdometryBeliefsLocked() {
+  while (pending_external_odom_beliefs_.size() >
+         max_pending_external_odom_beliefs_) {
+    pending_external_odom_beliefs_.pop_front();
+  }
+}
+
+void VioBackend::requeuePendingExternalOdometryBeliefs(
+    const std::vector<ExternalOdometryBelief>& beliefs) {
+  if (beliefs.empty() || max_unmatched_external_odom_retry_beliefs_ == 0u) {
+    return;
+  }
+
+  std::lock_guard<std::mutex> lock(external_beliefs_mutex_);
+  size_t remaining_retry_slots =
+      max_unmatched_external_odom_retry_beliefs_ >
+              pending_external_odom_beliefs_.size()
+          ? max_unmatched_external_odom_retry_beliefs_ -
+                pending_external_odom_beliefs_.size()
+          : 0u;
+  for (const auto& belief : beliefs) {
+    if (remaining_retry_slots == 0u) {
+      break;
+    }
+    pending_external_odom_beliefs_.push_back(belief);
+    --remaining_retry_slots;
+  }
 }
 
 void VioBackend::updateKeyframeTimestampIndex(
@@ -866,23 +866,26 @@ void VioBackend::updateKeyframeTimestampIndex(
   }
 }
 
-bool VioBackend::resolveExternalBeliefTargetFrame(
-    const ExternalPoseBelief& belief,
-    const FrameId& cur_id,
-    FrameId* local_frame_id,
-    ExternalBeliefRejectReason* reject_reason) const {
-  return resolveExternalBeliefStamp(
-      belief.stamp_sec, cur_id, local_frame_id, reject_reason);
-}
-
 bool VioBackend::resolveExternalBeliefStamp(
     double stamp_sec,
     const FrameId& cur_id,
     FrameId* local_frame_id,
-    ExternalBeliefRejectReason* reject_reason) const {
+    ExternalBeliefRejectReason* reject_reason,
+    FrameId* best_frame_id,
+    double* best_stamp_sec,
+    double* best_abs_dt) const {
   CHECK_NOTNULL(local_frame_id);
   if (reject_reason) {
     *reject_reason = ExternalBeliefRejectReason::kNone;
+  }
+  if (best_frame_id) {
+    *best_frame_id = 0u;
+  }
+  if (best_stamp_sec) {
+    *best_stamp_sec = std::numeric_limits<double>::quiet_NaN();
+  }
+  if (best_abs_dt) {
+    *best_abs_dt = std::numeric_limits<double>::quiet_NaN();
   }
 
   const FrameId oldest_active_frame_id =
@@ -920,6 +923,19 @@ bool VioBackend::resolveExternalBeliefStamp(
       return false;
     }
 
+    const auto best_stamp_it = keyframe_timestamp_sec_.find(best_frame);
+    if (best_frame_id) {
+      *best_frame_id = best_frame;
+    }
+    if (best_stamp_sec) {
+      *best_stamp_sec = best_stamp_it != keyframe_timestamp_sec_.end()
+                            ? best_stamp_it->second
+                            : std::numeric_limits<double>::quiet_NaN();
+    }
+    if (best_abs_dt) {
+      *best_abs_dt = best_dt;
+    }
+
     if (best_dt > external_belief_timestamp_tolerance_sec_) {
       if (reject_reason) {
         *reject_reason = ExternalBeliefRejectReason::kTimestamp;
@@ -935,6 +951,68 @@ bool VioBackend::resolveExternalBeliefStamp(
     *reject_reason = ExternalBeliefRejectReason::kTimestamp;
   }
   return false;
+}
+
+double VioBackend::latestKeyframeTimestampSec(const FrameId& cur_id) const {
+  double latest = std::numeric_limits<double>::quiet_NaN();
+  for (const auto& [frame_id, stamp_sec] : keyframe_timestamp_sec_) {
+    if (frame_id > cur_id || !std::isfinite(stamp_sec) || stamp_sec <= 0.0) {
+      continue;
+    }
+    if (!std::isfinite(latest) || stamp_sec > latest) {
+      latest = stamp_sec;
+    }
+  }
+  return latest;
+}
+
+double VioBackend::externalOdomBeliefRetryAgeSec(
+    const ExternalOdometryBelief& belief,
+    const FrameId& cur_id) const {
+  double event_stamp_sec =
+      belief.to_stamp_sec > 0.0 ? belief.to_stamp_sec : belief.from_stamp_sec;
+  if (!std::isfinite(event_stamp_sec) || event_stamp_sec <= 0.0) {
+    event_stamp_sec = belief.sender_timestamp_ns > 0u
+                          ? static_cast<double>(belief.sender_timestamp_ns) *
+                                1e-9
+                          : std::numeric_limits<double>::quiet_NaN();
+  }
+
+  const double latest_stamp_sec = latestKeyframeTimestampSec(cur_id);
+  if (std::isfinite(latest_stamp_sec) && std::isfinite(event_stamp_sec) &&
+      event_stamp_sec > 0.0) {
+    return std::max(0.0, latest_stamp_sec - event_stamp_sec);
+  }
+
+  if (std::isfinite(belief.received_wall_time_sec) &&
+      belief.received_wall_time_sec > 0.0) {
+    return std::max(0.0,
+                    wallTimeNowSec() - belief.received_wall_time_sec);
+  }
+  return 0.0;
+}
+
+bool VioBackend::shouldRetryExternalOdometryBelief(
+    const ExternalOdometryBelief& belief,
+    const FrameId& cur_id,
+    const std::string& reason) const {
+  const double age_sec = externalOdomBeliefRetryAgeSec(belief, cur_id);
+  const bool keep = max_unmatched_external_odom_retry_beliefs_ > 0u &&
+                    (!std::isfinite(age_sec) ||
+                     age_sec <= external_odom_unmatched_retry_max_age_sec_);
+  LOG(INFO) << std::fixed << std::setprecision(9)
+            << "CBS_ODOM_RETRY_ROW_L2K,"
+            << formatPoseKeyToken(belief.source_agent,
+                                  belief.sender_from_pose_index)
+            << "->"
+            << formatPoseKeyToken(belief.source_agent,
+                                  belief.sender_to_pose_index)
+            << "," << belief.from_stamp_sec << "," << belief.to_stamp_sec
+            << "," << age_sec << ","
+            << external_odom_unmatched_retry_max_age_sec_ << ","
+            << sanitizeLogToken(reason) << ","
+            << (keep ? "retry" : "drop_old_unmatched");
+  return keep;
 }
 
 void VioBackend::collectExternalBeliefFactors(
@@ -955,9 +1033,8 @@ void VioBackend::collectExternalBeliefFactors(
   external_beliefs_rejected_shape_per_update_ = 0u;
   external_beliefs_rejected_exception_per_update_ = 0u;
 
-  const auto pending_beliefs = popPendingExternalPoseBeliefs();
   const auto pending_odom_beliefs = popPendingExternalOdometryBeliefs();
-  if (pending_beliefs.empty() && pending_odom_beliefs.empty()) {
+  if (pending_odom_beliefs.empty()) {
     return;
   }
 
@@ -973,403 +1050,59 @@ void VioBackend::collectExternalBeliefFactors(
   size_t rejected_bpsam_inactive_window = 0u;
   size_t rejected_bpsam_shape = 0u;
   size_t rejected_bpsam_exception = 0u;
-  std::map<std::pair<uint8_t, FrameId>, ExternalPoseBelief> selected_beliefs;
-
-  auto fetchAgentLocalBelief = [&](const cbs::AgentId source_agent,
-                                   const gtsam::Key local_key,
-                                   gbp::Gaussian* belief_out) -> bool {
-    if (!belief_out || !smoother_) {
-      return false;
-    }
-    try {
-      const auto belief_graph = smoother_->bpsam().beliefGraph();
-      const auto agent_it = belief_graph.find(source_agent);
-      if (agent_it == belief_graph.end()) {
-        return false;
-      }
-      if (agent_it->second.contains(local_key) == 0) {
-        return false;
-      }
-      const auto belief_var = agent_it->second.getVar(local_key);
-      if (!belief_var) {
-        return false;
-      }
-      *belief_out = *belief_var;
-      return true;
-    } catch (...) {
-      return false;
-    }
-  };
-
-  auto statusForBpsamDetail =
-      [](const cbs::BPSAM::AddBeliefStatus status) -> std::string {
-    switch (status) {
-      case cbs::BPSAM::AddBeliefStatus::Accepted:
-        return "bpsam_added";
-      case cbs::BPSAM::AddBeliefStatus::AcceptedButSkippedAlreadyApplied:
-        return "bpsam_accepted_but_skipped_already_applied";
-      case cbs::BPSAM::AddBeliefStatus::RejectedFirstMessage:
-        return "bpsam_rejected_first_message";
-      case cbs::BPSAM::AddBeliefStatus::RejectedUpdateStatus:
-        return "bpsam_rejected_update_status";
-      case cbs::BPSAM::AddBeliefStatus::RejectedShape:
-        return "bpsam_rejected_shape";
-      case cbs::BPSAM::AddBeliefStatus::RejectedInactiveWindow:
-        return "bpsam_rejected_inactive_window";
-      case cbs::BPSAM::AddBeliefStatus::Exception:
-        return "bpsam_rejected_exception";
-    }
-    return "bpsam_rejected";
-  };
-
-  auto finiteOrFallback = [](const double value, const double fallback) {
-    return std::isfinite(value) ? value : fallback;
-  };
-
-  auto logMergeRowL2K = [&](const ExternalPoseBelief& belief,
-                            const std::string& sender_key_token,
-                            const std::string& receiver_pose_key_token,
-                            double receiver_local_before_trace,
-                            double receiver_merged_trace,
-                            double receiver_posterior_pre_trace,
-                            double receiver_posterior_post_trace,
-                            double hellinger_local_incoming,
-                            double hellinger_local_merged,
-                            double mahal_local_incoming,
-                            const std::string& status,
-                            const std::string& receiver_local_source,
-                            double receiver_local_raw_trace,
-                            double receiver_local_anchored_trace,
-                            double dmu_local_incoming,
-                            double dmu_local_merged,
-                            double step,
-                            double dxycurr,
-                            double dxy_target) {
-    const size_t sample_idx =
-        external_merge_diag_sample_idx_.fetch_add(1u, std::memory_order_relaxed);
-    const double nan = std::numeric_limits<double>::quiet_NaN();
-    const double sent_trace = finiteOrFallback(belief.sent_trace, nan);
-    const double received_trace = finiteOrFallback(belief.received_trace, nan);
-    LOG(INFO) << "CBS_MERGE_ROW_L2K," << sample_idx << ","
-              << sanitizeLogToken(belief.sender_frame_id) << ","
-              << belief.sender_timestamp_ns << "," << sender_key_token << ","
-              << receiver_pose_key_token << "," << sent_trace << ","
-              << received_trace << "," << receiver_local_before_trace << ","
-              << receiver_merged_trace << "," << receiver_posterior_pre_trace
-              << "," << receiver_posterior_post_trace << ","
-              << hellinger_local_incoming << "," << hellinger_local_merged
-              << "," << mahal_local_incoming << ","
-              << sanitizeLogToken(status) << ","
-              << sanitizeLogToken(receiver_local_source) << ","
-              << receiver_local_raw_trace << ","
-              << receiver_local_anchored_trace << "," << dmu_local_incoming
-              << "," << dmu_local_merged << "," << step << "," << dxycurr
-              << "," << dxy_target;
-  };
-
-  for (const auto& belief : pending_beliefs) {
-    FrameId local_frame_id = 0;
-    ExternalBeliefRejectReason reject_reason =
-        ExternalBeliefRejectReason::kNone;
-    if (!resolveExternalBeliefTargetFrame(
-            belief, cur_id, &local_frame_id, &reject_reason)) {
-      ++dropped_unmatched;
-      if (reject_reason == ExternalBeliefRejectReason::kWindow) {
-        ++rejected_window;
-      } else if (reject_reason == ExternalBeliefRejectReason::kTimestamp) {
-        ++rejected_timestamp;
-      }
-      const double nan = std::numeric_limits<double>::quiet_NaN();
-      const std::string status =
-          reject_reason == ExternalBeliefRejectReason::kWindow
-              ? "dropped_window"
-              : "dropped_timestamp_mismatch";
-      logMergeRowL2K(belief,
-                     formatPoseKeyToken(belief.source_agent,
-                                        belief.sender_pose_index),
-                     "na",
-                     nan,
-                     nan,
-                     nan,
-                     nan,
-                     nan,
-                     nan,
-                     nan,
-                     status,
-                     "na",
-                     nan,
-                     nan,
-                     nan,
-                     nan,
-                     nan,
-                     nan,
-                     nan);
-      continue;
-    }
-
-    ++resolved_count;
-    ExternalPoseBelief selected = belief;
-    selected.pose_index = static_cast<uint32_t>(local_frame_id);
-    const auto key = std::make_pair(selected.source_agent, local_frame_id);
-    auto selected_it = selected_beliefs.find(key);
-    if (selected_it == selected_beliefs.end() ||
-        selected.stamp_sec >= selected_it->second.stamp_sec) {
-      selected_beliefs[key] = selected;
-    }
-  }
-
-  external_beliefs_resolved_total_.fetch_add(resolved_count,
-                                             std::memory_order_relaxed);
-  external_beliefs_selected_total_.fetch_add(selected_beliefs.size(),
-                                             std::memory_order_relaxed);
-
-  for (const auto& [id_key, belief] : selected_beliefs) {
-    const FrameId local_frame_id = id_key.second;
-    const gtsam::Key pose_key = gtsam::Symbol(kPoseSymbolChar, local_frame_id);
-
-    if (!smoother_->valueExists(pose_key)) {
-      ++dropped_unmatched;
-      ++rejected_missing_state;
-      const double nan = std::numeric_limits<double>::quiet_NaN();
-      logMergeRowL2K(belief,
-                     formatPoseKeyToken(belief.source_agent,
-                                        belief.sender_pose_index),
-                     formatPoseKeyToken(static_cast<uint8_t>('k'),
-                                        local_frame_id),
-                     nan,
-                     nan,
-                     nan,
-                     nan,
-                     nan,
-                     nan,
-                     nan,
-                     "dropped_missing_state",
-                     "na",
-                     nan,
-                     nan,
-                     nan,
-                     nan,
-                     nan,
-                     nan,
-                     nan);
-      continue;
-    }
-
-    gtsam::Vector6 mu = gtsam::Vector6::Zero();
-    gtsam::Matrix6 covariance = gtsam::Matrix6::Zero();
-    for (size_t i = 0u; i < 6u; ++i) {
-      mu(i) = belief.mu[i];
-    }
-    for (size_t r = 0u; r < 6u; ++r) {
-      for (size_t c = 0u; c < 6u; ++c) {
-        covariance(r, c) = belief.covariance[r * 6u + c];
-      }
-    }
-    covariance = sanitizePoseCovariance(covariance);
-    if (!covariance.allFinite()) {
-      ++dropped_unmatched;
-      ++rejected_covariance;
-      const double nan = std::numeric_limits<double>::quiet_NaN();
-      logMergeRowL2K(belief,
-                     formatPoseKeyToken(belief.source_agent,
-                                        belief.sender_pose_index),
-                     formatPoseKeyToken(static_cast<uint8_t>('k'),
-                                        local_frame_id),
-                     nan,
-                     nan,
-                     nan,
-                     nan,
-                     nan,
-                     nan,
-                     nan,
-                     "dropped_bad_covariance",
-                     "na",
-                     nan,
-                     nan,
-                     nan,
-                     nan,
-                     nan,
-                     nan,
-                     nan);
-      continue;
-    }
-
-    gbp::Gaussian gaussian(pose_key, mu, covariance, 1u);
-    gaussian.relax_factor() = belief.relax_factor;
-    gbp::Gaussian local_before(
-        pose_key, gtsam::Vector6::Zero(), gtsam::Matrix6::Identity(), 1u);
-    const bool has_local_before =
-        fetchAgentLocalBelief(belief.source_agent, pose_key, &local_before);
-    const double receiver_local_before_trace =
-        has_local_before ? beliefTraceFromMatrix(local_before.Sigma())
-                         : std::numeric_limits<double>::quiet_NaN();
-    const double hellinger_local_incoming =
-        has_local_before
-            ? safeHellingerDistance(
-                  local_before.mu(), local_before.Sigma(), mu, covariance)
-            : std::numeric_limits<double>::quiet_NaN();
-    const double mahal_local_incoming =
-        has_local_before
-            ? safeMahalanobisDistance(local_before.mu(), local_before.Sigma(), mu)
-            : std::numeric_limits<double>::quiet_NaN();
-    const double dmu_local_incoming =
-        has_local_before ? safeDeltaNorm(local_before.mu(), mu)
-                         : std::numeric_limits<double>::quiet_NaN();
-
-    std::map<gtsam::Key, std::vector<std::pair<cbs::AgentId, gbp::Gaussian>>>
-        single_belief;
-    single_belief[pose_key].emplace_back(
-        static_cast<cbs::AgentId>(belief.source_agent), gaussian);
-
-    try {
-      const auto add_result =
-          smoother_->addBeliefsDetailed(std::move(single_belief));
-      external_beliefs_added_per_update_ += add_result.accepted;
-      rejected_by_bpsam += add_result.rejected();
-      rejected_bpsam_first_message += add_result.rejected_first_message;
-      rejected_bpsam_update_status += add_result.rejected_update_status;
-      rejected_bpsam_inactive_window += add_result.rejected_inactive_window;
-      rejected_bpsam_shape += add_result.rejected_shape;
-      rejected_bpsam_exception += add_result.rejected_exception;
-
-      const cbs::BPSAM::AddBeliefDetail* add_detail =
-          add_result.details.empty() ? nullptr : &add_result.details.front();
-      for (const auto& detail : add_result.details) {
-        LOG(INFO) << "CBS_BPSAM_ADD_ROW_L2K,"
+  size_t retried_unmatched = 0u;
+  std::vector<ExternalOdometryBelief> retry_beliefs;
+  const auto log_match_decision =
+      [this](const ExternalOdometryBelief& belief,
+             const FrameId from_best_frame_id,
+             const double from_best_stamp_sec,
+             const double from_best_abs_dt,
+             const ExternalBeliefRejectReason from_reject_reason,
+             const FrameId to_best_frame_id,
+             const double to_best_stamp_sec,
+             const double to_best_abs_dt,
+             const ExternalBeliefRejectReason to_reject_reason,
+             const std::string& decision) {
+        const bool has_from_candidate = std::isfinite(from_best_abs_dt);
+        const bool has_to_candidate = std::isfinite(to_best_abs_dt);
+        const std::string from_token =
+            has_from_candidate
+                ? formatPoseKeyToken(static_cast<uint8_t>('k'), from_best_frame_id)
+                : std::string("na");
+        const std::string to_token =
+            has_to_candidate
+                ? formatPoseKeyToken(static_cast<uint8_t>('k'), to_best_frame_id)
+                : std::string("na");
+        LOG(INFO) << std::fixed << std::setprecision(9)
+                  << "CBS_ODOM_MATCH_ROW_L2K,"
                   << formatPoseKeyToken(belief.source_agent,
-                                        belief.sender_pose_index)
+                                        belief.sender_from_pose_index)
+                  << "->"
+                  << formatPoseKeyToken(belief.source_agent,
+                                        belief.sender_to_pose_index)
+                  << "," << belief.from_stamp_sec << "," << belief.to_stamp_sec
+                  << "," << from_token << "->" << to_token << ","
+                  << from_best_stamp_sec << "," << to_best_stamp_sec << ","
+                  << from_best_abs_dt << "," << to_best_abs_dt << ","
+                  << external_belief_timestamp_tolerance_sec_ << ","
+                  << externalBeliefRejectReasonToken(
+                         static_cast<int>(from_reject_reason))
                   << ","
-                  << formatPoseKeyToken(static_cast<uint8_t>('k'),
-                                        local_frame_id)
-                  << "," << cbs::BPSAM::addBeliefStatusName(detail.status)
-                  << "," << (detail.enable_soft_reset ? "true" : "false") << ","
-                  << cbs::BPSAM::metricTypeName(detail.metric_type) << ","
-                  << detail.d_reset << "," << detail.contract_alpha << ","
-                  << (detail.existing_gbp_var ? "true" : "false") << ","
-                  << (detail.is_first_message ? "true" : "false") << ","
-                  << detail.dxycurr << "," << detail.dxy << ","
-                  << detail.contraction_step_size << ","
-                  << sanitizeLogToken(detail.message);
-      }
-
-      gbp::Gaussian local_after(
-          pose_key, gtsam::Vector6::Zero(), gtsam::Matrix6::Identity(), 1u);
-      const bool has_local_after =
-          fetchAgentLocalBelief(belief.source_agent, pose_key, &local_after);
-      const double receiver_merged_trace =
-          has_local_after ? beliefTraceFromMatrix(local_after.Sigma())
-                          : std::numeric_limits<double>::quiet_NaN();
-      const double hellinger_local_merged =
-          (has_local_before && has_local_after)
-              ? safeHellingerDistance(local_before.mu(), local_before.Sigma(),
-                                      local_after.mu(), local_after.Sigma())
-              : std::numeric_limits<double>::quiet_NaN();
-      const double dmu_local_merged =
-          (has_local_before && has_local_after)
-              ? safeDeltaNorm(local_before.mu(), local_after.mu())
-              : std::numeric_limits<double>::quiet_NaN();
-      const std::string status =
-          add_detail ? statusForBpsamDetail(add_detail->status)
-                     : (add_result.accepted > 0u ? "bpsam_added"
-                                                 : "bpsam_rejected");
-      const double step =
-          has_local_after ? local_after.contractionStepSize()
-                          : (add_detail ? add_detail->contraction_step_size
-                                        : std::numeric_limits<double>::quiet_NaN());
-      const double dxycurr =
-          has_local_after ? local_after.dxycurr()
-                          : (add_detail ? add_detail->dxycurr
-                                        : std::numeric_limits<double>::quiet_NaN());
-      const double dxy_target =
-          has_local_after ? local_after.dxy()
-                          : (add_detail ? add_detail->dxy
-                                        : std::numeric_limits<double>::quiet_NaN());
-      logMergeRowL2K(belief,
-                     formatPoseKeyToken(belief.source_agent,
-                                        belief.sender_pose_index),
-                     formatPoseKeyToken(static_cast<uint8_t>('k'),
-                                        local_frame_id),
-                     receiver_local_before_trace,
-                     receiver_merged_trace,
-                     receiver_local_before_trace,
-                     receiver_merged_trace,
-                     hellinger_local_incoming,
-                     hellinger_local_merged,
-                     mahal_local_incoming,
-                     status,
-                     "gbp_agent_local_prior",
-                     receiver_local_before_trace,
-                     receiver_merged_trace,
-                     dmu_local_incoming,
-                     dmu_local_merged,
-                     step,
-                     dxycurr,
-                     dxy_target);
-    } catch (const std::exception& e) {
-      ++rejected_by_bpsam;
-      ++rejected_bpsam_exception;
-      const double nan = std::numeric_limits<double>::quiet_NaN();
-      logMergeRowL2K(belief,
-                     formatPoseKeyToken(belief.source_agent,
-                                        belief.sender_pose_index),
-                     formatPoseKeyToken(static_cast<uint8_t>('k'),
-                                        local_frame_id),
-                     receiver_local_before_trace,
-                     nan,
-                     receiver_local_before_trace,
-                     nan,
-                     hellinger_local_incoming,
-                     nan,
-                     mahal_local_incoming,
-                     "bpsam_rejected_exception",
-                     "gbp_agent_local_prior",
-                     receiver_local_before_trace,
-                     nan,
-                     dmu_local_incoming,
-                     nan,
-                     nan,
-                     nan,
-                     nan);
-      LOG(WARNING) << "BPSAM rejected external CBS belief "
-                   << formatPoseKeyToken(belief.source_agent,
-                                         belief.sender_pose_index)
-                   << " for Kimera frame " << local_frame_id << ": "
-                   << e.what();
-    } catch (...) {
-      ++rejected_by_bpsam;
-      const double nan = std::numeric_limits<double>::quiet_NaN();
-      logMergeRowL2K(belief,
-                     formatPoseKeyToken(belief.source_agent,
-                                        belief.sender_pose_index),
-                     formatPoseKeyToken(static_cast<uint8_t>('k'),
-                                        local_frame_id),
-                     receiver_local_before_trace,
-                     nan,
-                     receiver_local_before_trace,
-                     nan,
-                     hellinger_local_incoming,
-                     nan,
-                     mahal_local_incoming,
-                     "bpsam_rejected_exception",
-                     "gbp_agent_local_prior",
-                     receiver_local_before_trace,
-                     nan,
-                     dmu_local_incoming,
-                     nan,
-                     nan,
-                     nan,
-                     nan);
-      LOG(WARNING) << "BPSAM rejected external CBS belief "
-                   << formatPoseKeyToken(belief.source_agent,
-                                         belief.sender_pose_index)
-                   << " for Kimera frame " << local_frame_id << ".";
-      ++rejected_bpsam_exception;
-    }
-  }
+                  << externalBeliefRejectReasonToken(
+                         static_cast<int>(to_reject_reason))
+                  << ","
+                  << sanitizeLogToken(decision);
+      };
 
   for (const auto& belief : pending_odom_beliefs) {
     FrameId from_frame_id = 0u;
     FrameId to_frame_id = 0u;
+    FrameId from_best_frame_id = 0u;
+    FrameId to_best_frame_id = 0u;
+    double from_best_stamp_sec = std::numeric_limits<double>::quiet_NaN();
+    double to_best_stamp_sec = std::numeric_limits<double>::quiet_NaN();
+    double from_best_abs_dt = std::numeric_limits<double>::quiet_NaN();
+    double to_best_abs_dt = std::numeric_limits<double>::quiet_NaN();
     ExternalBeliefRejectReason from_reject_reason =
         ExternalBeliefRejectReason::kNone;
     ExternalBeliefRejectReason to_reject_reason =
@@ -1378,22 +1111,64 @@ void VioBackend::collectExternalBeliefFactors(
         resolveExternalBeliefStamp(belief.from_stamp_sec,
                                    cur_id,
                                    &from_frame_id,
-                                   &from_reject_reason);
+                                   &from_reject_reason,
+                                   &from_best_frame_id,
+                                   &from_best_stamp_sec,
+                                   &from_best_abs_dt);
     const bool to_resolved =
         resolveExternalBeliefStamp(belief.to_stamp_sec,
                                    cur_id,
                                    &to_frame_id,
-                                   &to_reject_reason);
+                                   &to_reject_reason,
+                                   &to_best_frame_id,
+                                   &to_best_stamp_sec,
+                                   &to_best_abs_dt);
     if (!from_resolved || !to_resolved || from_frame_id >= to_frame_id) {
-      ++dropped_unmatched;
-      if (from_reject_reason == ExternalBeliefRejectReason::kWindow ||
-          to_reject_reason == ExternalBeliefRejectReason::kWindow) {
-        ++rejected_window;
+      const bool sender_stamps_valid =
+          std::isfinite(belief.from_stamp_sec) && belief.from_stamp_sec > 0.0 &&
+          std::isfinite(belief.to_stamp_sec) && belief.to_stamp_sec > 0.0;
+      const std::string retry_reason =
+          from_resolved && to_resolved ? "receiver_order" : "timestamp_match";
+      if (sender_stamps_valid &&
+          shouldRetryExternalOdometryBelief(belief, cur_id, retry_reason)) {
+        ++retried_unmatched;
+        retry_beliefs.push_back(belief);
+        log_match_decision(belief,
+                           from_best_frame_id,
+                           from_best_stamp_sec,
+                           from_best_abs_dt,
+                           from_reject_reason,
+                           to_best_frame_id,
+                           to_best_stamp_sec,
+                           to_best_abs_dt,
+                           to_reject_reason,
+                           from_resolved && to_resolved
+                               ? "retry_receiver_order"
+                               : "retry_timestamp_match");
       } else {
-        ++rejected_timestamp;
+        ++dropped_unmatched;
+        if (from_reject_reason == ExternalBeliefRejectReason::kWindow ||
+            to_reject_reason == ExternalBeliefRejectReason::kWindow) {
+          ++rejected_window;
+        } else {
+          ++rejected_timestamp;
+        }
+        log_match_decision(belief,
+                           from_best_frame_id,
+                           from_best_stamp_sec,
+                           from_best_abs_dt,
+                           from_reject_reason,
+                           to_best_frame_id,
+                           to_best_stamp_sec,
+                           to_best_abs_dt,
+                           to_reject_reason,
+                           from_resolved && to_resolved
+                               ? "dropped_receiver_order"
+                               : "dropped_timestamp_match");
       }
       continue;
     }
+    ++resolved_count;
 
     const gtsam::Key from_pose_key =
         gtsam::Symbol(kPoseSymbolChar, from_frame_id);
@@ -1401,8 +1176,35 @@ void VioBackend::collectExternalBeliefFactors(
         gtsam::Symbol(kPoseSymbolChar, to_frame_id);
     if (!smoother_->valueExists(from_pose_key) ||
         !smoother_->valueExists(to_pose_key)) {
-      ++dropped_unmatched;
-      ++rejected_missing_state;
+      if (shouldRetryExternalOdometryBelief(belief,
+                                            cur_id,
+                                            "missing_receiver_state")) {
+        ++retried_unmatched;
+        retry_beliefs.push_back(belief);
+        log_match_decision(belief,
+                           from_best_frame_id,
+                           from_best_stamp_sec,
+                           from_best_abs_dt,
+                           from_reject_reason,
+                           to_best_frame_id,
+                           to_best_stamp_sec,
+                           to_best_abs_dt,
+                           to_reject_reason,
+                           "retry_missing_state");
+      } else {
+        ++dropped_unmatched;
+        ++rejected_missing_state;
+        log_match_decision(belief,
+                           from_best_frame_id,
+                           from_best_stamp_sec,
+                           from_best_abs_dt,
+                           from_reject_reason,
+                           to_best_frame_id,
+                           to_best_stamp_sec,
+                           to_best_abs_dt,
+                           to_reject_reason,
+                           "dropped_missing_state");
+      }
       continue;
     }
 
@@ -1413,8 +1215,7 @@ void VioBackend::collectExternalBeliefFactors(
     odom_belief.measured_from_to =
         gtsam::Pose3::Expmap(vector6FromArray(belief.relative_mu));
     odom_belief.covariance =
-        sanitizePoseCovariance(matrix6FromArray(belief.covariance));
-    odom_belief.conditional_A = matrix6FromArray(belief.conditional_A);
+        poseCovarianceFromMatrix(matrix6FromArray(belief.covariance));
     odom_belief.relax_factor = belief.relax_factor;
 
     try {
@@ -1422,12 +1223,56 @@ void VioBackend::collectExternalBeliefFactors(
       single_belief.push_back(std::move(odom_belief));
       const auto add_result =
           smoother_->addOdometryBeliefsDetailed(std::move(single_belief));
+      const bool retry_bpsam_inactive =
+          add_result.accepted == 0u &&
+          add_result.rejected_inactive_window > 0u &&
+          add_result.rejected() == add_result.rejected_inactive_window &&
+          shouldRetryExternalOdometryBelief(belief,
+                                            cur_id,
+                                            "bpsam_inactive_window");
+      if (retry_bpsam_inactive) {
+        ++retried_unmatched;
+        retry_beliefs.push_back(belief);
+        log_match_decision(belief,
+                           from_best_frame_id,
+                           from_best_stamp_sec,
+                           from_best_abs_dt,
+                           from_reject_reason,
+                           to_best_frame_id,
+                           to_best_stamp_sec,
+                           to_best_abs_dt,
+                           to_reject_reason,
+                           "retry_bpsam_inactive_window");
+        continue;
+      }
       external_beliefs_added_per_update_ += add_result.accepted;
       rejected_by_bpsam += add_result.rejected();
       rejected_bpsam_inactive_window += add_result.rejected_inactive_window;
       rejected_bpsam_shape += add_result.rejected_shape;
       rejected_bpsam_exception += add_result.rejected_exception;
+      if (add_result.details.empty()) {
+        log_match_decision(belief,
+                           from_best_frame_id,
+                           from_best_stamp_sec,
+                           from_best_abs_dt,
+                           from_reject_reason,
+                           to_best_frame_id,
+                           to_best_stamp_sec,
+                           to_best_abs_dt,
+                           to_reject_reason,
+                           "bpsam_no_detail");
+      }
       for (const auto& detail : add_result.details) {
+        log_match_decision(belief,
+                           from_best_frame_id,
+                           from_best_stamp_sec,
+                           from_best_abs_dt,
+                           from_reject_reason,
+                           to_best_frame_id,
+                           to_best_stamp_sec,
+                           to_best_abs_dt,
+                           to_reject_reason,
+                           detail.message);
         LOG(INFO) << "CBS_BPSAM_ODOM_ADD_ROW_L2K,"
                   << formatPoseKeyToken(belief.source_agent,
                                         belief.sender_from_pose_index)
@@ -1442,12 +1287,21 @@ void VioBackend::collectExternalBeliefFactors(
                                         to_frame_id)
                   << "," << static_cast<int>(detail.status) << ","
                   << detail.covariance_trace << ","
-                  << detail.conditional_A_frobenius << ","
                   << sanitizeLogToken(detail.message);
       }
     } catch (const std::exception& e) {
       ++rejected_by_bpsam;
       ++rejected_bpsam_exception;
+      log_match_decision(belief,
+                         from_best_frame_id,
+                         from_best_stamp_sec,
+                         from_best_abs_dt,
+                         from_reject_reason,
+                         to_best_frame_id,
+                         to_best_stamp_sec,
+                         to_best_abs_dt,
+                         to_reject_reason,
+                         "bpsam_exception");
       LOG(WARNING) << "BPSAM rejected external CBS odometry "
                    << formatPoseKeyToken(belief.source_agent,
                                          belief.sender_from_pose_index)
@@ -1459,6 +1313,16 @@ void VioBackend::collectExternalBeliefFactors(
     } catch (...) {
       ++rejected_by_bpsam;
       ++rejected_bpsam_exception;
+      log_match_decision(belief,
+                         from_best_frame_id,
+                         from_best_stamp_sec,
+                         from_best_abs_dt,
+                         from_reject_reason,
+                         to_best_frame_id,
+                         to_best_stamp_sec,
+                         to_best_abs_dt,
+                         to_reject_reason,
+                         "bpsam_unknown_exception");
       LOG(WARNING) << "BPSAM rejected external CBS odometry "
                    << formatPoseKeyToken(belief.source_agent,
                                          belief.sender_from_pose_index)
@@ -1469,6 +1333,8 @@ void VioBackend::collectExternalBeliefFactors(
                    << to_frame_id << ".";
     }
   }
+
+  requeuePendingExternalOdometryBeliefs(retry_beliefs);
 
   dropped_unmatched += rejected_by_bpsam;
   external_beliefs_rejected_first_message_per_update_ =
@@ -1502,12 +1368,17 @@ void VioBackend::collectExternalBeliefFactors(
   external_beliefs_rejected_exception_total_.fetch_add(
       rejected_bpsam_exception, std::memory_order_relaxed);
 
-  LOG(INFO) << "Kimera CBS incoming flow: pending=" << pending_beliefs.size()
-            << " pending_odom=" << pending_odom_beliefs.size()
+  external_beliefs_resolved_total_.fetch_add(resolved_count,
+                                             std::memory_order_relaxed);
+  external_beliefs_selected_total_.fetch_add(resolved_count,
+                                             std::memory_order_relaxed);
+
+  LOG(INFO) << "Kimera CBS incoming odometry flow: pending_odom="
+            << pending_odom_beliefs.size()
             << " resolved=" << resolved_count
-            << " selected=" << selected_beliefs.size()
             << " bpsam_added=" << external_beliefs_added_per_update_
             << " rejected=" << dropped_unmatched
+            << " retried=" << retried_unmatched
             << " rejected_by(window=" << rejected_window
             << ",timestamp=" << rejected_timestamp
             << ",state=" << rejected_missing_state
@@ -1523,7 +1394,6 @@ void VioBackend::collectExternalBeliefFactors(
 }
 
 void VioBackend::refreshCbsOutgoingBeliefs(const FrameId& cur_id) {
-  cbs_outgoing_pose_beliefs_.clear();
   cbs_outgoing_odom_beliefs_.clear();
   cbs_belief_generation_time_sec_per_update_ = 0.0;
   cbs_marginalization_graph_factor_count_ = 0u;
@@ -1556,113 +1426,53 @@ void VioBackend::refreshCbsOutgoingBeliefs(const FrameId& cur_id) {
         smoother_->marginalizationGraphFactorCount();
 
     const auto get_beliefs_start = utils::Timer::tic();
-    const auto belief_factor_mode =
-        cbs::BPSAM::beliefFactorModeFromString(FLAGS_cbs_belief_factor_mode);
-    if (belief_factor_mode == cbs::BPSAM::CbsBeliefFactorMode::OdometryBetween) {
-      const auto outgoing =
-          smoother_->getOdometryBeliefs(request_keys, static_cast<cbs::AgentId>('l'));
-      cbs_belief_generation_time_sec_per_update_ =
-          utils::Timer::toc<std::chrono::duration<double>>(get_beliefs_start)
-              .count();
-
-      for (const auto& odom : outgoing) {
-        const gtsam::Symbol from_symbol(odom.from_pose_key);
-        const gtsam::Symbol to_symbol(odom.to_pose_key);
-        if (from_symbol.chr() != kPoseSymbolChar ||
-            to_symbol.chr() != kPoseSymbolChar) {
-          continue;
-        }
-        const FrameId from_frame_id =
-            static_cast<FrameId>(from_symbol.index());
-        const FrameId to_frame_id = static_cast<FrameId>(to_symbol.index());
-        const auto from_stamp_it = keyframe_timestamp_sec_.find(from_frame_id);
-        const auto to_stamp_it = keyframe_timestamp_sec_.find(to_frame_id);
-        if (from_stamp_it == keyframe_timestamp_sec_.end() ||
-            to_stamp_it == keyframe_timestamp_sec_.end()) {
-          continue;
-        }
-
-        ExternalOdometryBelief stamped_belief;
-        stamped_belief.source_agent = static_cast<uint8_t>('k');
-        stamped_belief.from_pose_index = static_cast<uint32_t>(from_frame_id);
-        stamped_belief.to_pose_index = static_cast<uint32_t>(to_frame_id);
-        stamped_belief.sender_from_pose_index =
-            stamped_belief.from_pose_index;
-        stamped_belief.sender_to_pose_index = stamped_belief.to_pose_index;
-        stamped_belief.from_stamp_sec = from_stamp_it->second;
-        stamped_belief.to_stamp_sec = to_stamp_it->second;
-        stamped_belief.sender_timestamp_ns =
-            static_cast<uint64_t>(
-                std::llround(stamped_belief.to_stamp_sec * 1e9));
-        stamped_belief.sender_frame_id = "odom";
-        stamped_belief.relax_factor = odom.relax_factor;
-        vector6ToArray(gtsam::Pose3::Logmap(odom.measured_from_to),
-                       &stamped_belief.relative_mu);
-        matrix6ToArray(sanitizePoseCovariance(odom.covariance),
-                       &stamped_belief.covariance);
-        gtsam::Matrix6 conditional_A = gtsam::Matrix6::Identity();
-        if (odom.conditional_A.rows() == 6 && odom.conditional_A.cols() == 6) {
-          conditional_A = odom.conditional_A;
-        }
-        matrix6ToArray(conditional_A, &stamped_belief.conditional_A);
-        cbs_outgoing_odom_beliefs_.push_back(stamped_belief);
-      }
-      return;
-    }
-
     const auto outgoing =
-        smoother_->getBeliefs(request_keys, static_cast<cbs::AgentId>('l'), false);
+        smoother_->getOdometryBeliefs(request_keys,
+                                      static_cast<cbs::AgentId>('l'));
     cbs_belief_generation_time_sec_per_update_ =
         utils::Timer::toc<std::chrono::duration<double>>(get_beliefs_start)
             .count();
 
-    for (const auto& [key, beliefs_by_agent] : outgoing) {
-      const gtsam::Symbol symbol(key);
-      if (symbol.chr() != kPoseSymbolChar) {
+    for (const auto& odom : outgoing) {
+      const gtsam::Symbol from_symbol(odom.from_pose_key);
+      const gtsam::Symbol to_symbol(odom.to_pose_key);
+      if (from_symbol.chr() != kPoseSymbolChar ||
+          to_symbol.chr() != kPoseSymbolChar) {
         continue;
       }
 
-      const FrameId frame_id = static_cast<FrameId>(symbol.index());
-      const auto stamp_it = keyframe_timestamp_sec_.find(frame_id);
-      if (stamp_it == keyframe_timestamp_sec_.end()) {
+      const FrameId from_frame_id = static_cast<FrameId>(from_symbol.index());
+      const FrameId to_frame_id = static_cast<FrameId>(to_symbol.index());
+      const auto from_stamp_it = keyframe_timestamp_sec_.find(from_frame_id);
+      const auto to_stamp_it = keyframe_timestamp_sec_.find(to_frame_id);
+      if (from_stamp_it == keyframe_timestamp_sec_.end() ||
+          to_stamp_it == keyframe_timestamp_sec_.end()) {
         continue;
       }
 
-      for (const auto& [agent_id, belief] : beliefs_by_agent) {
-        if (agent_id != static_cast<cbs::AgentId>('k')) {
-          continue;
-        }
-
-        ExternalPoseBelief stamped_belief;
-        stamped_belief.source_agent = static_cast<uint8_t>(agent_id);
-        stamped_belief.pose_index = static_cast<uint32_t>(frame_id);
-        stamped_belief.sender_pose_index = stamped_belief.pose_index;
-        stamped_belief.stamp_sec = stamp_it->second;
-        stamped_belief.sender_timestamp_ns =
-            static_cast<uint64_t>(std::llround(stamped_belief.stamp_sec * 1e9));
-        stamped_belief.sender_frame_id = "odom";
-        stamped_belief.relax_factor = belief.relax_factor();
-
-        for (size_t i = 0u; i < stamped_belief.mu.size(); ++i) {
-          stamped_belief.mu[i] = belief.mu()(i);
-        }
-
-        const gtsam::Matrix6 covariance =
-            sanitizePoseCovariance(belief.Sigma());
-        stamped_belief.sent_trace = covariance.trace();
-        stamped_belief.received_trace = covariance.trace();
-        for (size_t r = 0u; r < 6u; ++r) {
-          for (size_t c = 0u; c < 6u; ++c) {
-            stamped_belief.covariance[r * 6u + c] = covariance(r, c);
-          }
-        }
-        cbs_outgoing_pose_beliefs_.push_back(stamped_belief);
-      }
+      ExternalOdometryBelief stamped_belief;
+      stamped_belief.source_agent = static_cast<uint8_t>('k');
+      stamped_belief.from_pose_index = static_cast<uint32_t>(from_frame_id);
+      stamped_belief.to_pose_index = static_cast<uint32_t>(to_frame_id);
+      stamped_belief.sender_from_pose_index = stamped_belief.from_pose_index;
+      stamped_belief.sender_to_pose_index = stamped_belief.to_pose_index;
+      stamped_belief.from_stamp_sec = from_stamp_it->second;
+      stamped_belief.to_stamp_sec = to_stamp_it->second;
+      stamped_belief.sender_timestamp_ns =
+          static_cast<uint64_t>(std::llround(stamped_belief.to_stamp_sec * 1e9));
+      stamped_belief.sender_frame_id = "odom";
+      stamped_belief.received_wall_time_sec = wallTimeNowSec();
+      stamped_belief.relax_factor = odom.relax_factor;
+      vector6ToArray(gtsam::Pose3::Logmap(odom.measured_from_to),
+                     &stamped_belief.relative_mu);
+      matrix6ToArray(poseCovarianceFromMatrix(odom.covariance),
+                     &stamped_belief.covariance);
+      cbs_outgoing_odom_beliefs_.push_back(stamped_belief);
     }
   } catch (const std::exception& e) {
-    LOG(WARNING) << "Kimera CBS getBeliefs failed: " << e.what();
+    LOG(WARNING) << "Kimera CBS getOdometryBeliefs failed: " << e.what();
   } catch (...) {
-    LOG(WARNING) << "Kimera CBS getBeliefs failed.";
+    LOG(WARNING) << "Kimera CBS getOdometryBeliefs failed.";
   }
 }
 
@@ -2581,7 +2391,6 @@ bool VioBackend::optimize(
   optimization_time_sec_per_update_ = 0.0;
   cbs_belief_generation_time_sec_per_update_ = 0.0;
   cbs_marginalization_graph_factor_count_ = 0u;
-  cbs_outgoing_pose_beliefs_.clear();
   cbs_outgoing_odom_beliefs_.clear();
 
   // Only for statistics and debugging.
