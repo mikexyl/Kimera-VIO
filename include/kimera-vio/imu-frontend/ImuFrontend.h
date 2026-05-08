@@ -69,8 +69,8 @@ class ImuData {
  */
 class ImuFrontend {
  public:
-  using PimPtr = std::shared_ptr<gtsam::PreintegrationType>;
-  using PimUniquePtr = std::unique_ptr<gtsam::PreintegrationType>;
+  using PimPtr = std::shared_ptr<GtsamPreintegrationType>;
+  using PimUniquePtr = std::unique_ptr<GtsamPreintegrationType>;
 
  public:
   KIMERA_POINTER_TYPEDEFS(ImuFrontend);
@@ -181,13 +181,13 @@ class ImuFrontend {
   }
 
   /* ------------------------------------------------------------------------ */
-  inline gtsam::PreintegrationType::Params getGtsamImuParams() const {
+  inline GtsamPreintegrationType::Params getGtsamImuParams() const {
     return *(pim_->params());
   }
 
   /* ------------------------------------------------------------------------ */
   // Convert parameters for imu preintegration from the given ImuParams.
-  static gtsam::PreintegrationType::Params convertVioImuParamsToGtsam(
+  static GtsamPreintegrationType::Params convertVioImuParamsToGtsam(
       const ImuParams& imu_params);
 
  private:

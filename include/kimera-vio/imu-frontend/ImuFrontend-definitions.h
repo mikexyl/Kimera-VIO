@@ -69,9 +69,11 @@ enum class ImuPreintegrationType {
   kPreintegratedImuMeasurements = 1
 };
 
+using GtsamPreintegrationType = gtsam::DefaultPreintegrationType;
+
 /* -------------------------------------------------------------------------- */
 inline const gtsam::PreintegratedImuMeasurements&
-safeCastToPreintegratedImuMeasurements(const gtsam::PreintegrationType& pim) {
+safeCastToPreintegratedImuMeasurements(const GtsamPreintegrationType& pim) {
   try {
     return dynamic_cast<const gtsam::PreintegratedImuMeasurements&>(pim);
   } catch (const std::bad_cast& e) {
@@ -86,7 +88,7 @@ safeCastToPreintegratedImuMeasurements(const gtsam::PreintegrationType& pim) {
 /* -------------------------------------------------------------------------- */
 inline const gtsam::PreintegratedCombinedMeasurements&
 safeCastToPreintegratedCombinedImuMeasurements(
-    const gtsam::PreintegrationType& pim) {
+    const GtsamPreintegrationType& pim) {
   try {
     return dynamic_cast<const gtsam::PreintegratedCombinedMeasurements&>(pim);
   } catch (const std::bad_cast& e) {

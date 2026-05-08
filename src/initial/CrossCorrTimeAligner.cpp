@@ -102,7 +102,7 @@ size_t CrossCorrTimeAligner::addNewImuDataFrameRate(
       image_stamp_idx++;
     }
 
-    rot_pim.integrateMeasurement(
+    rot_pim.integrateGyroMeasurement(
         imu_acc_gyrs.block<3, 1>(3, i), Eigen::Vector3d::Zero(), imu_period_s_);
   }
 
@@ -110,7 +110,7 @@ size_t CrossCorrTimeAligner::addNewImuDataFrameRate(
       image_stamps.back() - imu_stamps[imu_stamps.cols() - 1]);
   if (last_dt > 0.0) {
     // integrate the last IMU measurement up to the frame timestamp
-    rot_pim.integrateMeasurement(
+    rot_pim.integrateGyroMeasurement(
         imu_acc_gyrs.block<3, 1>(3, imu_stamps.cols() - 1),
         Eigen::Vector3d::Zero(),
         last_dt);

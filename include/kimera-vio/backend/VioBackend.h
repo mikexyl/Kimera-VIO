@@ -228,7 +228,7 @@ class VioBackend {
   virtual bool addVisualInertialStateAndOptimize(
       const Timestamp& timestamp_kf_nsec,
       const StatusStereoMeasurements& status_smart_stereo_measurements_kf,
-      const gtsam::PreintegrationType& pim,
+      const GtsamPreintegrationType& pim,
       std::optional<gtsam::Pose3> odometry_body_pose = std::nullopt,
       std::optional<gtsam::Velocity3> odometry_vel = std::nullopt);
 
@@ -257,7 +257,7 @@ class VioBackend {
   void addStateValues(
       const FrameId& frame_id,
       const TrackerStatusSummary& tracker_status,
-      const gtsam::PreintegrationType& pim,
+      const GtsamPreintegrationType& pim,
       const std::optional<gtsam::Pose3> odom_pose = std::nullopt,
       std::optional<gtsam::Vector3> odom_vel = std::nullopt);
   void addStateValuesFromNavState(const FrameId& frame_id,
@@ -265,7 +265,7 @@ class VioBackend {
 
   void addImuFactor(const FrameId& from_id,
                     const FrameId& to_id,
-                    const gtsam::PreintegrationType& pim);
+                    const GtsamPreintegrationType& pim);
 
   // Add no motion factors in case of low disparity.
   void addZeroVelocityPrior(const FrameId& frame_id);

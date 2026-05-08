@@ -1737,7 +1737,7 @@ bool VioBackend::initStateAndSetPriors(
 bool VioBackend::addVisualInertialStateAndOptimize(
     const Timestamp& timestamp_kf_nsec,
     const StatusStereoMeasurements& status_smart_stereo_measurements_kf,
-    const gtsam::PreintegrationType& pim,
+    const GtsamPreintegrationType& pim,
     std::optional<gtsam::Pose3> odometry_body_pose,
     std::optional<gtsam::Velocity3> odometry_vel) {
   debug_info_.resetAddedFactorsStatistics();
@@ -2328,7 +2328,7 @@ void VioBackend::addStereoMeasurementsToFeatureTracks(
 /* -------------------------------------------------------------------------- */
 void VioBackend::addStateValues(const FrameId& frame_id,
                                 const TrackerStatusSummary& tracker_status,
-                                const gtsam::PreintegrationType& pim,
+                                const GtsamPreintegrationType& pim,
                                 std::optional<gtsam::Pose3> odom_pose,
                                 std::optional<gtsam::Vector3> odom_vel) {
   // NOTE: we use the latest state instead of W_Pose_B_lkf_from_increments_
@@ -2441,7 +2441,7 @@ void VioBackend::addStateValues(const FrameId& cur_id,
 /* -------------------------------------------------------------------------- */
 void VioBackend::addImuFactor(const FrameId& from_id,
                               const FrameId& to_id,
-                              const gtsam::PreintegrationType& pim) {
+                              const GtsamPreintegrationType& pim) {
   switch (imu_params_.imu_preintegration_type_) {
     case ImuPreintegrationType::kPreintegratedCombinedMeasurements: {
       new_imu_prior_and_other_factors_.emplace_shared<gtsam::CombinedImuFactor>(

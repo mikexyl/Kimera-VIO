@@ -5,6 +5,7 @@
 #include <gtsam/inference/Symbol.h>
 
 #include <algorithm>
+#include <optional>
 #include <set>
 #include <utility>
 
@@ -282,10 +283,10 @@ struct PersistentBpsamLocalCovarianceSidecar::Impl {
     return coverage;
   }
 
-  boost::optional<gtsam::FastMap<gtsam::Key, int>> createOrderingConstraints(
+  std::optional<gtsam::FastMap<gtsam::Key, int>> createOrderingConstraints(
       const gtsam::KeyVector& marginalizable_keys) const {
     if (marginalizable_keys.empty()) {
-      return boost::none;
+      return std::nullopt;
     }
 
     gtsam::FastMap<gtsam::Key, int> constrained_keys;
@@ -298,10 +299,10 @@ struct PersistentBpsamLocalCovarianceSidecar::Impl {
     return constrained_keys;
   }
 
-  boost::optional<gtsam::FastList<gtsam::Key>> createAdditionalMarkedKeys(
+  std::optional<gtsam::FastList<gtsam::Key>> createAdditionalMarkedKeys(
       const gtsam::KeyVector& marginalizable_keys) const {
     if (marginalizable_keys.empty()) {
-      return boost::none;
+      return std::nullopt;
     }
 
     std::set<gtsam::Key> additional_keys;
@@ -319,7 +320,7 @@ struct PersistentBpsamLocalCovarianceSidecar::Impl {
     }
 
     if (additional_keys.empty()) {
-      return boost::none;
+      return std::nullopt;
     }
     return gtsam::FastList<gtsam::Key>(additional_keys.begin(),
                                        additional_keys.end());

@@ -19,7 +19,7 @@
 #include <gtsam/geometry/Point3.h>
 #include <gtsam/nonlinear/GaussNewtonOptimizer.h>
 #include <gtsam/slam/PriorFactor.h>
-#include <gtsam_unstable/nonlinear/IncrementalFixedLagSmoother.h>
+#include <gtsam/nonlinear/IncrementalFixedLagSmoother.h>
 
 #include <algorithm>
 #include <cstdlib>
