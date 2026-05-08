@@ -37,14 +37,12 @@
 #include <glog/logging.h>
 
 #include <algorithm>
-#include <cctype>
 #include <chrono>
 #include <cmath>
 #include <exception>
 #include <iomanip>
 #include <limits>  // for numeric_limits<>
 #include <map>
-#include <set>
 #include <sstream>
 #include <string>
 #include <unordered_set>
@@ -142,20 +140,6 @@ DEFINE_double(cbs_external_belief_timestamp_tolerance_sec,
               0.2,
               "Max allowed absolute timestamp mismatch (seconds) when matching "
               "incoming external pose beliefs to local keyframes.");
-DEFINE_string(cbs_odom_interval_mode,
-              "adjacent",
-              "CBS odometry interval mode: adjacent or multi_horizon.");
-DEFINE_string(cbs_odom_interval_horizons_sec,
-              "0.3,0.5,1.0,1.5,2.0",
-              "Comma-separated sender-side CBS odometry interval horizons in "
-              "seconds for multi_horizon mode.");
-DEFINE_double(cbs_odom_interval_horizon_tolerance_sec,
-              0.15,
-              "Maximum timestamp error when selecting a sender-side CBS "
-              "odometry interval horizon endpoint.");
-DEFINE_int32(cbs_odom_max_outgoing_beliefs,
-             80,
-             "Maximum sender-side CBS odometry interval beliefs to publish.");
 DEFINE_double(cbs_odom_unmatched_retry_max_age_sec,
               5.0,
               "Maximum receiver-local timestamp age for retrying unmatched "
@@ -201,44 +185,6 @@ inline std::string sanitizeLogToken(std::string token) {
   std::replace(token.begin(), token.end(), '\n', '_');
   std::replace(token.begin(), token.end(), '\r', '_');
   return token.empty() ? "na" : token;
-}
-
-inline std::string normalizeModeToken(std::string token) {
-  std::transform(token.begin(), token.end(), token.begin(),
-                 [](unsigned char c) {
-                   return static_cast<char>(std::tolower(c));
-                 });
-  std::replace(token.begin(), token.end(), '-', '_');
-  return token;
-}
-
-inline std::vector<double> parsePositiveDoubleList(
-    const std::string& values,
-    const std::vector<double>& fallback) {
-  std::vector<double> parsed;
-  std::stringstream stream(values);
-  std::string token;
-  while (std::getline(stream, token, ',')) {
-    try {
-      const double value = std::stod(token);
-      if (std::isfinite(value) && value > 0.0) {
-        parsed.push_back(value);
-      }
-    } catch (...) {
-    }
-  }
-
-  if (parsed.empty()) {
-    return fallback;
-  }
-  std::sort(parsed.begin(), parsed.end());
-  parsed.erase(std::unique(parsed.begin(),
-                           parsed.end(),
-                           [](double a, double b) {
-                             return std::abs(a - b) < 1e-9;
-                           }),
-               parsed.end());
-  return parsed;
 }
 
 inline const char* externalBeliefRejectReasonToken(const int reason) {
@@ -550,23 +496,6 @@ VioBackend::VioBackend(const gtsam::Pose3& B_Pose_leftCamRect,
   }
   LOG(INFO) << "CBS external belief matcher tolerance: "
             << external_belief_timestamp_tolerance_sec_ << " s";
-  cbs_odom_interval_mode_ = normalizeModeToken(FLAGS_cbs_odom_interval_mode);
-  if (cbs_odom_interval_mode_ != "adjacent" &&
-      cbs_odom_interval_mode_ != "multi_horizon") {
-    LOG(WARNING) << "Invalid --cbs_odom_interval_mode="
-                 << FLAGS_cbs_odom_interval_mode
-                 << ", falling back to adjacent.";
-    cbs_odom_interval_mode_ = "adjacent";
-  }
-  cbs_odom_interval_horizons_sec_ = parsePositiveDoubleList(
-      FLAGS_cbs_odom_interval_horizons_sec, cbs_odom_interval_horizons_sec_);
-  if (std::isfinite(FLAGS_cbs_odom_interval_horizon_tolerance_sec) &&
-      FLAGS_cbs_odom_interval_horizon_tolerance_sec >= 0.0) {
-    cbs_odom_interval_horizon_tolerance_sec_ =
-        FLAGS_cbs_odom_interval_horizon_tolerance_sec;
-  }
-  max_cbs_outgoing_odom_beliefs_ =
-      static_cast<size_t>(std::max(1, FLAGS_cbs_odom_max_outgoing_beliefs));
   if (std::isfinite(FLAGS_cbs_odom_unmatched_retry_max_age_sec) &&
       FLAGS_cbs_odom_unmatched_retry_max_age_sec >= 0.0) {
     external_odom_unmatched_retry_max_age_sec_ =
@@ -574,11 +503,7 @@ VioBackend::VioBackend(const gtsam::Pose3& B_Pose_leftCamRect,
   }
   max_unmatched_external_odom_retry_beliefs_ = static_cast<size_t>(
       std::max(0, FLAGS_cbs_odom_unmatched_retry_max_beliefs));
-  LOG(INFO) << "CBS odometry interval mode: " << cbs_odom_interval_mode_
-            << " horizons='" << FLAGS_cbs_odom_interval_horizons_sec
-            << "' parsed=" << cbs_odom_interval_horizons_sec_.size()
-            << " tolerance=" << cbs_odom_interval_horizon_tolerance_sec_
-            << " max_outgoing=" << max_cbs_outgoing_odom_beliefs_
+  LOG(INFO) << "CBS outgoing odometry mode: adjacent-only"
             << " retry_max_age="
             << external_odom_unmatched_retry_max_age_sec_
             << " retry_max_beliefs="
@@ -1090,136 +1015,6 @@ bool VioBackend::shouldRetryExternalOdometryBelief(
   return keep;
 }
 
-std::vector<VioBackend::OutgoingOdomPair> VioBackend::buildCbsOutgoingOdomPairs(
-    const FrameId& cur_id) const {
-  struct LocalPoseStamp {
-    gtsam::Key key;
-    FrameId frame_id;
-    double stamp_sec;
-  };
-
-  const FrameId oldest_active_frame_id =
-      computeOldestActiveFrameId(cur_id, backend_params_);
-  std::vector<LocalPoseStamp> poses;
-  poses.reserve(keyframe_timestamp_sec_.size());
-  for (const auto& [frame_id, stamp_sec] : keyframe_timestamp_sec_) {
-    if (frame_id < oldest_active_frame_id || frame_id > cur_id ||
-        !std::isfinite(stamp_sec) || stamp_sec <= 0.0) {
-      continue;
-    }
-    const gtsam::Key pose_key = gtsam::Symbol(kPoseSymbolChar, frame_id);
-    if (!smoother_->valueExists(pose_key)) {
-      continue;
-    }
-    poses.push_back(LocalPoseStamp{pose_key, frame_id, stamp_sec});
-  }
-
-  std::sort(poses.begin(), poses.end(),
-            [](const LocalPoseStamp& a, const LocalPoseStamp& b) {
-              if (std::abs(a.stamp_sec - b.stamp_sec) > 1e-9) {
-                return a.stamp_sec < b.stamp_sec;
-              }
-              return a.frame_id < b.frame_id;
-            });
-
-  std::vector<OutgoingOdomPair> pairs;
-  std::set<std::pair<gtsam::Key, gtsam::Key>> seen_pairs;
-  const auto add_pair = [&](const LocalPoseStamp& from,
-                            const LocalPoseStamp& to,
-                            const std::string& source,
-                            const double horizon_sec) {
-    if (from.frame_id >= to.frame_id || from.stamp_sec >= to.stamp_sec) {
-      return;
-    }
-    const auto pair_key = std::make_pair(from.key, to.key);
-    if (!seen_pairs.insert(pair_key).second) {
-      return;
-    }
-    pairs.push_back(OutgoingOdomPair{from.key,
-                                     to.key,
-                                     from.frame_id,
-                                     to.frame_id,
-                                     from.stamp_sec,
-                                     to.stamp_sec,
-                                     source,
-                                     horizon_sec});
-  };
-
-  for (size_t i = 1u; i < poses.size(); ++i) {
-    add_pair(poses[i - 1u],
-             poses[i],
-             "adjacent",
-             poses[i].stamp_sec - poses[i - 1u].stamp_sec);
-  }
-
-  if (cbs_odom_interval_mode_ == "multi_horizon") {
-    for (size_t to_idx = 1u; to_idx < poses.size(); ++to_idx) {
-      const auto& to = poses[to_idx];
-      for (const double horizon_sec : cbs_odom_interval_horizons_sec_) {
-        const double target_stamp_sec = to.stamp_sec - horizon_sec;
-        size_t best_idx = 0u;
-        double best_abs_dt = std::numeric_limits<double>::max();
-        bool has_best = false;
-        for (size_t from_idx = 0u; from_idx < to_idx; ++from_idx) {
-          const auto& from = poses[from_idx];
-          const double abs_dt = std::abs(from.stamp_sec - target_stamp_sec);
-          if (abs_dt < best_abs_dt) {
-            best_abs_dt = abs_dt;
-            best_idx = from_idx;
-            has_best = true;
-          }
-        }
-        if (has_best &&
-            best_abs_dt <= cbs_odom_interval_horizon_tolerance_sec_) {
-          add_pair(poses[best_idx], to, "horizon", horizon_sec);
-        }
-      }
-    }
-  }
-
-  std::sort(pairs.begin(), pairs.end(),
-            [](const OutgoingOdomPair& a, const OutgoingOdomPair& b) {
-              if (std::abs(a.to_stamp_sec - b.to_stamp_sec) > 1e-9) {
-                return a.to_stamp_sec > b.to_stamp_sec;
-              }
-              if (std::abs(a.from_stamp_sec - b.from_stamp_sec) > 1e-9) {
-                return a.from_stamp_sec > b.from_stamp_sec;
-              }
-              return a.to_frame_id > b.to_frame_id;
-            });
-  if (pairs.size() > max_cbs_outgoing_odom_beliefs_) {
-    pairs.resize(max_cbs_outgoing_odom_beliefs_);
-  }
-  std::sort(pairs.begin(), pairs.end(),
-            [](const OutgoingOdomPair& a, const OutgoingOdomPair& b) {
-              if (std::abs(a.to_stamp_sec - b.to_stamp_sec) > 1e-9) {
-                return a.to_stamp_sec < b.to_stamp_sec;
-              }
-              if (std::abs(a.from_stamp_sec - b.from_stamp_sec) > 1e-9) {
-                return a.from_stamp_sec < b.from_stamp_sec;
-              }
-              return a.to_frame_id < b.to_frame_id;
-            });
-  return pairs;
-}
-
-void VioBackend::logCbsOutgoingIntervalRow(
-    const OutgoingOdomPair& pair,
-    double covariance_trace,
-    const std::string& status) const {
-  LOG(INFO) << std::fixed << std::setprecision(9)
-            << "CBS_ODOM_INTERVAL_ROW_K2L,"
-            << sanitizeLogToken(pair.source) << "," << pair.horizon_sec << ","
-            << formatPoseKeyToken(static_cast<uint8_t>('k'),
-                                  static_cast<uint32_t>(pair.from_frame_id))
-            << "->"
-            << formatPoseKeyToken(static_cast<uint8_t>('k'),
-                                  static_cast<uint32_t>(pair.to_frame_id))
-            << "," << pair.from_stamp_sec << "," << pair.to_stamp_sec << ","
-            << (pair.to_stamp_sec - pair.from_stamp_sec) << ","
-            << covariance_trace << "," << sanitizeLogToken(status);
-}
-
 void VioBackend::collectExternalBeliefFactors(
     const FrameId& cur_id,
     gtsam::FactorIndices* delete_slots,
@@ -1607,53 +1402,62 @@ void VioBackend::refreshCbsOutgoingBeliefs(const FrameId& cur_id) {
     return;
   }
 
-  const auto interval_pairs = buildCbsOutgoingOdomPairs(cur_id);
-  if (interval_pairs.empty()) {
+  const FrameId oldest_active_frame_id =
+      computeOldestActiveFrameId(cur_id, backend_params_);
+  gtsam::KeySet request_keys;
+  for (FrameId frame_id = oldest_active_frame_id; frame_id <= cur_id;
+       ++frame_id) {
+    const gtsam::Key pose_key = gtsam::Symbol(kPoseSymbolChar, frame_id);
+    if (smoother_->valueExists(pose_key)) {
+      request_keys.insert(pose_key);
+    }
+    if (frame_id == std::numeric_limits<FrameId>::max()) {
+      break;
+    }
+  }
+
+  if (request_keys.empty()) {
     return;
   }
 
   try {
-    std::vector<std::pair<gtsam::Key, gtsam::Key>> request_pairs;
-    request_pairs.reserve(interval_pairs.size());
-    std::map<std::pair<gtsam::Key, gtsam::Key>, OutgoingOdomPair>
-        interval_pair_by_keys;
-    for (const auto& pair : interval_pairs) {
-      request_pairs.emplace_back(pair.from_key, pair.to_key);
-      interval_pair_by_keys.emplace(std::make_pair(pair.from_key, pair.to_key),
-                                    pair);
-    }
-
     smoother_->setMarginalizationGraph(cbs::BPSAM::MarginalizationType::LOCAL);
     cbs_marginalization_graph_factor_count_ =
         smoother_->marginalizationGraphFactorCount();
 
     const auto get_beliefs_start = utils::Timer::tic();
     const auto outgoing =
-        smoother_->getOdometryBeliefsForPairs(
-            std::move(request_pairs), static_cast<cbs::AgentId>('l'));
+        smoother_->getOdometryBeliefs(request_keys,
+                                      static_cast<cbs::AgentId>('l'));
     cbs_belief_generation_time_sec_per_update_ =
         utils::Timer::toc<std::chrono::duration<double>>(get_beliefs_start)
             .count();
 
-    std::set<std::pair<gtsam::Key, gtsam::Key>> sent_pairs;
     for (const auto& odom : outgoing) {
-      const auto pair_key = std::make_pair(odom.from_pose_key, odom.to_pose_key);
-      const auto interval_it = interval_pair_by_keys.find(pair_key);
-      if (interval_it == interval_pair_by_keys.end()) {
+      const gtsam::Symbol from_symbol(odom.from_pose_key);
+      const gtsam::Symbol to_symbol(odom.to_pose_key);
+      if (from_symbol.chr() != kPoseSymbolChar ||
+          to_symbol.chr() != kPoseSymbolChar) {
         continue;
       }
-      const auto& interval_pair = interval_it->second;
+
+      const FrameId from_frame_id = static_cast<FrameId>(from_symbol.index());
+      const FrameId to_frame_id = static_cast<FrameId>(to_symbol.index());
+      const auto from_stamp_it = keyframe_timestamp_sec_.find(from_frame_id);
+      const auto to_stamp_it = keyframe_timestamp_sec_.find(to_frame_id);
+      if (from_stamp_it == keyframe_timestamp_sec_.end() ||
+          to_stamp_it == keyframe_timestamp_sec_.end()) {
+        continue;
+      }
 
       ExternalOdometryBelief stamped_belief;
       stamped_belief.source_agent = static_cast<uint8_t>('k');
-      stamped_belief.from_pose_index =
-          static_cast<uint32_t>(interval_pair.from_frame_id);
-      stamped_belief.to_pose_index =
-          static_cast<uint32_t>(interval_pair.to_frame_id);
+      stamped_belief.from_pose_index = static_cast<uint32_t>(from_frame_id);
+      stamped_belief.to_pose_index = static_cast<uint32_t>(to_frame_id);
       stamped_belief.sender_from_pose_index = stamped_belief.from_pose_index;
       stamped_belief.sender_to_pose_index = stamped_belief.to_pose_index;
-      stamped_belief.from_stamp_sec = interval_pair.from_stamp_sec;
-      stamped_belief.to_stamp_sec = interval_pair.to_stamp_sec;
+      stamped_belief.from_stamp_sec = from_stamp_it->second;
+      stamped_belief.to_stamp_sec = to_stamp_it->second;
       stamped_belief.sender_timestamp_ns =
           static_cast<uint64_t>(std::llround(stamped_belief.to_stamp_sec * 1e9));
       stamped_belief.sender_frame_id = "odom";
@@ -1664,15 +1468,6 @@ void VioBackend::refreshCbsOutgoingBeliefs(const FrameId& cur_id) {
       matrix6ToArray(poseCovarianceFromMatrix(odom.covariance),
                      &stamped_belief.covariance);
       cbs_outgoing_odom_beliefs_.push_back(stamped_belief);
-      sent_pairs.insert(pair_key);
-      logCbsOutgoingIntervalRow(interval_pair, odom.covariance.trace(), "sent");
-    }
-
-    for (const auto& pair : interval_pairs) {
-      if (sent_pairs.count(std::make_pair(pair.from_key, pair.to_key)) == 0u) {
-        logCbsOutgoingIntervalRow(
-            pair, std::numeric_limits<double>::quiet_NaN(), "skipped_bpsam");
-      }
     }
   } catch (const std::exception& e) {
     LOG(WARNING) << "Kimera CBS getOdometryBeliefs failed: " << e.what();

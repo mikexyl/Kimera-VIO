@@ -51,7 +51,6 @@
 #include <map>
 #include <memory>
 #include <mutex>
-#include <set>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -448,17 +447,6 @@ class VioBackend {
     size_t slot = 0u;
   };
 
-  struct OutgoingOdomPair {
-    gtsam::Key from_key = 0u;
-    gtsam::Key to_key = 0u;
-    FrameId from_frame_id = 0u;
-    FrameId to_frame_id = 0u;
-    double from_stamp_sec = 0.0;
-    double to_stamp_sec = 0.0;
-    std::string source = "adjacent";
-    double horizon_sec = 0.0;
-  };
-
   enum class ExternalBeliefRejectReason {
     kNone = 0,
     kWindow = 1,
@@ -490,12 +478,6 @@ class VioBackend {
       const ExternalOdometryBelief& belief,
       const FrameId& cur_id,
       const std::string& reason) const;
-  std::vector<OutgoingOdomPair> buildCbsOutgoingOdomPairs(
-      const FrameId& cur_id) const;
-  void logCbsOutgoingIntervalRow(const OutgoingOdomPair& pair,
-                                 double covariance_trace,
-                                 const std::string& status) const;
-
   void collectExternalBeliefFactors(
       const FrameId& cur_id,
       gtsam::FactorIndices* delete_slots,
@@ -715,11 +697,6 @@ class VioBackend {
   std::map<FrameId, double> keyframe_timestamp_sec_;
   size_t max_pending_external_odom_beliefs_ = 800u;
   double external_belief_timestamp_tolerance_sec_ = 0.2;
-  std::string cbs_odom_interval_mode_ = "adjacent";
-  std::vector<double> cbs_odom_interval_horizons_sec_{
-      0.3, 0.5, 1.0, 1.5, 2.0};
-  double cbs_odom_interval_horizon_tolerance_sec_ = 0.15;
-  size_t max_cbs_outgoing_odom_beliefs_ = 80u;
   double external_odom_unmatched_retry_max_age_sec_ = 5.0;
   size_t max_unmatched_external_odom_retry_beliefs_ = 500u;
   // External-belief flow diagnostics (monotonic counters).
