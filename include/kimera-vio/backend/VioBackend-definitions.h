@@ -327,6 +327,7 @@ struct BackendOutput : public PipelinePayload {
       const gtsam::Matrix& pose_belief_local_covariance_lkf = gtsam::Matrix(),
       bool pose_belief_local_covariance_valid = false,
       const std::string& pose_belief_covariance_source = "unavailable",
+      size_t external_beliefs_received_per_update = 0u,
       size_t external_beliefs_added_per_update = 0u,
       size_t external_beliefs_rejected_first_message_per_update = 0u,
       size_t external_beliefs_rejected_update_status_per_update = 0u,
@@ -350,6 +351,8 @@ struct BackendOutput : public PipelinePayload {
         pose_belief_local_covariance_lkf_(pose_belief_local_covariance_lkf),
         pose_belief_local_covariance_valid_(pose_belief_local_covariance_valid),
         pose_belief_covariance_source_(pose_belief_covariance_source),
+        external_beliefs_received_per_update_(
+            external_beliefs_received_per_update),
         external_beliefs_added_per_update_(external_beliefs_added_per_update),
         external_beliefs_rejected_first_message_per_update_(
             external_beliefs_rejected_first_message_per_update),
@@ -380,6 +383,7 @@ struct BackendOutput : public PipelinePayload {
       const gtsam::Matrix& pose_belief_local_covariance_lkf = gtsam::Matrix(),
       bool pose_belief_local_covariance_valid = false,
       const std::string& pose_belief_covariance_source = "unavailable",
+      size_t external_beliefs_received_per_update = 0u,
       size_t external_beliefs_added_per_update = 0u,
       size_t external_beliefs_rejected_first_message_per_update = 0u,
       size_t external_beliefs_rejected_update_status_per_update = 0u,
@@ -403,6 +407,8 @@ struct BackendOutput : public PipelinePayload {
         pose_belief_local_covariance_lkf_(pose_belief_local_covariance_lkf),
         pose_belief_local_covariance_valid_(pose_belief_local_covariance_valid),
         pose_belief_covariance_source_(pose_belief_covariance_source),
+        external_beliefs_received_per_update_(
+            external_beliefs_received_per_update),
         external_beliefs_added_per_update_(external_beliefs_added_per_update),
         external_beliefs_rejected_first_message_per_update_(
             external_beliefs_rejected_first_message_per_update),
@@ -432,6 +438,7 @@ struct BackendOutput : public PipelinePayload {
   const gtsam::Matrix pose_belief_local_covariance_lkf_;
   const bool pose_belief_local_covariance_valid_;
   const std::string pose_belief_covariance_source_;
+  const size_t external_beliefs_received_per_update_;
   const size_t external_beliefs_added_per_update_;
   const size_t external_beliefs_rejected_first_message_per_update_;
   const size_t external_beliefs_rejected_update_status_per_update_;

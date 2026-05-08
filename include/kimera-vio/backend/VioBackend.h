@@ -609,6 +609,7 @@ class VioBackend {
   gtsam::Matrix pose_belief_local_covariance_lkf_ = Eigen::MatrixXd::Zero(6, 6);
   bool pose_belief_local_covariance_valid_ = false;
   std::string pose_belief_covariance_source_ = "unavailable";
+  size_t external_beliefs_received_per_update_ = 0u;
   size_t external_beliefs_added_per_update_ = 0u;
   size_t external_beliefs_rejected_first_message_per_update_ = 0u;
   size_t external_beliefs_rejected_update_status_per_update_ = 0u;

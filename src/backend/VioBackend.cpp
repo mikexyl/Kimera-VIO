@@ -717,6 +717,7 @@ BackendOutput::UniquePtr VioBackend::spinOnce(const BackendInput& input) {
           pose_belief_local_covariance_lkf_,
           pose_belief_local_covariance_valid_,
           pose_belief_covariance_source_,
+          external_beliefs_received_per_update_,
           external_beliefs_added_per_update_,
           external_beliefs_rejected_first_message_per_update_,
           external_beliefs_rejected_update_status_per_update_,
@@ -1026,6 +1027,7 @@ void VioBackend::collectExternalBeliefFactors(
   (void)delete_slots;
   (void)new_factors_tmp;
   (void)inserted_external_factor_ids;
+  external_beliefs_received_per_update_ = 0u;
   external_beliefs_added_per_update_ = 0u;
   external_beliefs_rejected_first_message_per_update_ = 0u;
   external_beliefs_rejected_update_status_per_update_ = 0u;
@@ -1034,6 +1036,7 @@ void VioBackend::collectExternalBeliefFactors(
   external_beliefs_rejected_exception_per_update_ = 0u;
 
   const auto pending_odom_beliefs = popPendingExternalOdometryBeliefs();
+  external_beliefs_received_per_update_ = pending_odom_beliefs.size();
   if (pending_odom_beliefs.empty()) {
     return;
   }
@@ -2382,6 +2385,7 @@ bool VioBackend::optimize(
     const gtsam::FactorIndices& extra_factor_slots_to_delete) {
   DCHECK(smoother_) << "Incremental smoother is a null pointer.";
   const bool use_local_belief_cov_sidecar = false;
+  external_beliefs_received_per_update_ = 0u;
   external_beliefs_added_per_update_ = 0u;
   external_beliefs_rejected_first_message_per_update_ = 0u;
   external_beliefs_rejected_update_status_per_update_ = 0u;
