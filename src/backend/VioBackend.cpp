@@ -889,8 +889,6 @@ bool VioBackend::resolveExternalBeliefStamp(
     *best_abs_dt = std::numeric_limits<double>::quiet_NaN();
   }
 
-  const FrameId oldest_active_frame_id =
-      computeOldestActiveFrameId(cur_id, backend_params_);
   const bool has_valid_stamp =
       std::isfinite(stamp_sec) && stamp_sec > 0.0;
 
@@ -906,7 +904,7 @@ bool VioBackend::resolveExternalBeliefStamp(
     FrameId best_frame = 0;
     bool has_best_frame = false;
     for (const auto& [frame_id, frame_stamp_sec] : keyframe_timestamp_sec_) {
-      if (frame_id < oldest_active_frame_id || frame_id > cur_id) {
+      if (frame_id > cur_id) {
         continue;
       }
       const double dt = std::abs(frame_stamp_sec - stamp_sec);
@@ -1126,14 +1124,12 @@ void VioBackend::collectExternalBeliefFactors(
                                    &to_best_frame_id,
                                    &to_best_stamp_sec,
                                    &to_best_abs_dt);
-    if (!from_resolved || !to_resolved || from_frame_id >= to_frame_id) {
+    if (!from_resolved || !to_resolved) {
       const bool sender_stamps_valid =
           std::isfinite(belief.from_stamp_sec) && belief.from_stamp_sec > 0.0 &&
           std::isfinite(belief.to_stamp_sec) && belief.to_stamp_sec > 0.0;
-      const std::string retry_reason =
-          from_resolved && to_resolved ? "receiver_order" : "timestamp_match";
       if (sender_stamps_valid &&
-          shouldRetryExternalOdometryBelief(belief, cur_id, retry_reason)) {
+          shouldRetryExternalOdometryBelief(belief, cur_id, "timestamp_match")) {
         ++retried_unmatched;
         retry_beliefs.push_back(belief);
         log_match_decision(belief,
@@ -1145,9 +1141,7 @@ void VioBackend::collectExternalBeliefFactors(
                            to_best_stamp_sec,
                            to_best_abs_dt,
                            to_reject_reason,
-                           from_resolved && to_resolved
-                               ? "retry_receiver_order"
-                               : "retry_timestamp_match");
+                           "retry_timestamp_match");
       } else {
         ++dropped_unmatched;
         if (from_reject_reason == ExternalBeliefRejectReason::kWindow ||
@@ -1165,9 +1159,7 @@ void VioBackend::collectExternalBeliefFactors(
                            to_best_stamp_sec,
                            to_best_abs_dt,
                            to_reject_reason,
-                           from_resolved && to_resolved
-                               ? "dropped_receiver_order"
-                               : "dropped_timestamp_match");
+                           "dropped_timestamp_match");
       }
       continue;
     }
@@ -1177,39 +1169,6 @@ void VioBackend::collectExternalBeliefFactors(
         gtsam::Symbol(kPoseSymbolChar, from_frame_id);
     const gtsam::Key to_pose_key =
         gtsam::Symbol(kPoseSymbolChar, to_frame_id);
-    if (!smoother_->valueExists(from_pose_key) ||
-        !smoother_->valueExists(to_pose_key)) {
-      if (shouldRetryExternalOdometryBelief(belief,
-                                            cur_id,
-                                            "missing_receiver_state")) {
-        ++retried_unmatched;
-        retry_beliefs.push_back(belief);
-        log_match_decision(belief,
-                           from_best_frame_id,
-                           from_best_stamp_sec,
-                           from_best_abs_dt,
-                           from_reject_reason,
-                           to_best_frame_id,
-                           to_best_stamp_sec,
-                           to_best_abs_dt,
-                           to_reject_reason,
-                           "retry_missing_state");
-      } else {
-        ++dropped_unmatched;
-        ++rejected_missing_state;
-        log_match_decision(belief,
-                           from_best_frame_id,
-                           from_best_stamp_sec,
-                           from_best_abs_dt,
-                           from_reject_reason,
-                           to_best_frame_id,
-                           to_best_stamp_sec,
-                           to_best_abs_dt,
-                           to_reject_reason,
-                           "dropped_missing_state");
-      }
-      continue;
-    }
 
     cbs::BPSAM::CbsOdometryBelief odom_belief;
     odom_belief.source_agent = static_cast<cbs::AgentId>(belief.source_agent);
