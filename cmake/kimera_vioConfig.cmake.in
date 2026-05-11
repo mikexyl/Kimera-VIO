@@ -12,6 +12,7 @@ find_dependency(OpenCV REQUIRED)
 find_dependency(opengv REQUIRED)
 find_dependency(xfeat-cpp REQUIRED)
 find_dependency(vio-factors REQUIRED)
+find_dependency(vilib REQUIRED)
 
 list(REMOVE_AT CMAKE_MODULE_PATH -1)
 
