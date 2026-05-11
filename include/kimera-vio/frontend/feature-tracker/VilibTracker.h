@@ -172,8 +172,30 @@ class VilibTracker : public FeatureTracker {
       feature_id_to_kp_id[ids[i]] = i;
     }
 
+    if (vilib_frame->num_features_ == 0) {
+      double min_value = 0.0;
+      double max_value = 0.0;
+      cv::Scalar mean;
+      cv::Scalar stddev;
+      cv::minMaxLoc(tracker_image, &min_value, &max_value);
+      cv::meanStdDev(tracker_image, mean, stddev);
+      LOG(WARNING) << "VILIB returned no features for frame "
+                   << cur_frame->id_ << " timestamp "
+                   << cur_frame->timestamp_ << ". tracker_image rows="
+                   << tracker_image.rows << " cols=" << tracker_image.cols
+                   << " type=" << tracker_image.type() << " min=" << min_value
+                   << " max=" << max_value << " mean=" << mean[0]
+                   << " stddev=" << stddev[0];
+      nextPts->clear();
+      prevNextIds->assign(prevPts.size(), -1);
+      std->clear();
+      scores->clear();
+      prev_kp_id_to_feature_id_.clear();
+      prev_frame_id_ = cur_frame->id_;
+      return;
+    }
+
     // resize nextPts to number of keypoints * 2
-    CHECK_GT(vilib_frame->num_features_, 0);
     nextPts->resize(vilib_frame->num_features_);
 
     // populate next pts mat
