@@ -141,7 +141,7 @@ target_link_libraries(${PROJECT_NAME}
     xfeat-cpp::xfeat-cpp
     xfeat-cpp::sgm
     vio-factors
-    vilib
+    vilib::vilib
 )
 target_include_directories(${PROJECT_NAME}
   PUBLIC
@@ -179,13 +179,19 @@ target_compile_features(${PROJECT_NAME} PUBLIC
 # e.g. when testing
 add_library(kimera_vio::kimera_vio ALIAS kimera_vio)
 
-add_executable(stereoVIOEuroc ./examples/KimeraVIO.cpp)
-target_link_libraries(stereoVIOEuroc PUBLIC kimera_vio::kimera_vio)
+option(KIMERA_BUILD_EXAMPLES "Build Kimera-VIO examples" ON)
+if(KIMERA_BUILD_EXAMPLES)
+  add_executable(stereoVIOEuroc ./examples/KimeraVIO.cpp)
+  target_link_libraries(stereoVIOEuroc PUBLIC kimera_vio::kimera_vio)
+endif()
 
 
 ############################### TESTS ##########################################
-add_executable(testEdgeSelection tests/testEdgeSelection.cpp)
-target_link_libraries(testEdgeSelection PUBLIC kimera_vio::kimera_vio)
+option(KIMERA_BUILD_TESTS "Build Kimera-VIO tests" ON)
+if(KIMERA_BUILD_TESTS)
+  add_executable(testEdgeSelection tests/testEdgeSelection.cpp)
+  target_link_libraries(testEdgeSelection PUBLIC kimera_vio::kimera_vio)
+endif()
 
 ############################### INSTALL/EXPORT #################################
 ## We install the export that we defined above
