@@ -20,7 +20,11 @@
 
 #include <gtsam/geometry/Cal3_S2.h>
 #include <gtsam/geometry/StereoPoint2.h>
+#if GTSAM_VERSION_MAJOR <= 4 && GTSAM_VERSION_MINOR < 3
 #include <gtsam_unstable/nonlinear/IncrementalFixedLagSmoother.h>
+#else
+#include <gtsam/nonlinear/IncrementalFixedLagSmoother.h>
+#endif
 #include <gtsam_unstable/slam/SmartStereoProjectionPoseFactor.h>
 
 #include "kimera-vio/common/vio_types.h"

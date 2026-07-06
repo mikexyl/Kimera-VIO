@@ -40,6 +40,7 @@ StereoImuPipeline::StereoImuPipeline(const VioParams& params,
                                      Visualizer3D::UniquePtr&& visualizer,
                                      DisplayBase::UniquePtr&& displayer)
     : Pipeline(params), stereo_camera_(nullptr) {
+  const bool use_visualizer_module = FLAGS_visualize || visualizer != nullptr;
   //! Create Stereo Camera
   CHECK_EQ(params.camera_params_.size(), 2u)
       << "Need two cameras for StereoImuPipeline.";
@@ -212,10 +213,10 @@ StereoImuPipeline::StereoImuPipeline(const VioParams& params,
                   std::placeholders::_1));
   }
 
-  if (FLAGS_visualize) {
+  if (use_visualizer_module) {
     visualizer_module_ = std::make_unique<VisualizerModule>(
         //! Send ouput of visualizer to the display_input_queue_
-        &display_input_queue_,
+        FLAGS_visualize ? &display_input_queue_ : nullptr,
         parallel_run_,
         FLAGS_use_lcd,
         // Use given visualizer if any
@@ -256,18 +257,20 @@ StereoImuPipeline::StereoImuPipeline(const VioParams& params,
     //                 std::placeholders::_1));
     // }
 
-    //! Actual displaying of visual data is done in the main thread.
-    CHECK(params.display_params_);
-    display_module_ = std::make_unique<DisplayModule>(
-        &display_input_queue_,
-        nullptr,
-        parallel_run_,
-        // Use given displayer if any
-        displayer ? std::move(displayer)
-                  : DisplayFactory::makeDisplay(
-                        params.display_params_->display_type_,
-                        params.display_params_,
-                        std::bind(&StereoImuPipeline::shutdown, this)));
+    if (FLAGS_visualize) {
+      //! Actual displaying of visual data is done in the main thread.
+      CHECK(params.display_params_);
+      display_module_ = std::make_unique<DisplayModule>(
+          &display_input_queue_,
+          nullptr,
+          parallel_run_,
+          // Use given displayer if any
+          displayer ? std::move(displayer)
+                    : DisplayFactory::makeDisplay(
+                          params.display_params_->display_type_,
+                          params.display_params_,
+                          std::bind(&StereoImuPipeline::shutdown, this)));
+    }
   }
 
   // All modules are ready, launch threads! If the parallel_run flag is set to

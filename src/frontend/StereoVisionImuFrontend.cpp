@@ -664,6 +664,9 @@ void StereoVisionImuFrontend::getSmartStereoMeasurements(
     if (landmarkId_kf.at(i) == -1) {
       continue;  // skip invalid points
     }
+    if (leftKeypoints.at(i).first != KeypointStatus::VALID) {
+      continue;
+    }
 
     // TODO implicit conversion float to double increases floating-point
     // precision!

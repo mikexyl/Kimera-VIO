@@ -4,7 +4,7 @@
 backend_modality: 0
 
 #INITIALIZATION PARAMETERS
-autoInitialize: 0
+autoInitialize: 1
 roundOnAutoInitialize: 0
 initialPositionSigma: 1e-05
 initialRollPitchSigma: 0.174533 # 10.0/180.0*M_PI
@@ -91,3 +91,5 @@ useDogLeg: 0
 #   EXTERNAL_ODOM = 4
 pose_guess_source: 0
 mono_translation_scale_factor: 0.1
+min_num_obs_per_landmark_to_keep: 20
+max_lmk_reproj_error_to_keep: 6

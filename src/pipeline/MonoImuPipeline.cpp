@@ -39,6 +39,7 @@ MonoImuPipeline::MonoImuPipeline(const VioParams& params,
                                  Visualizer3D::UniquePtr&& visualizer,
                                  DisplayBase::UniquePtr&& displayer)
     : Pipeline(params), camera_(nullptr) {
+  const bool use_visualizer_module = FLAGS_visualize || visualizer != nullptr;
   // CHECK_EQ(params.camera_params_.size(), 1u) << "Need one camera for
   // MonoImuPipeline.";
   camera_ = std::make_shared<Camera>(params.camera_params_.at(0));
@@ -212,10 +213,10 @@ MonoImuPipeline::MonoImuPipeline(const VioParams& params,
                   std::placeholders::_1));
   }
 
-  if (FLAGS_visualize) {
+  if (use_visualizer_module) {
     visualizer_module_ = std::make_unique<VisualizerModule>(
         //! Send ouput of visualizer to the display_input_queue_
-        &display_input_queue_,
+        FLAGS_visualize ? &display_input_queue_ : nullptr,
         parallel_run_,
         FLAGS_use_lcd,
         // Use given visualizer if any
@@ -260,18 +261,20 @@ MonoImuPipeline::MonoImuPipeline(const VioParams& params,
     //                 std::placeholders::_1));
     // }
 
-    //! Actual displaying of visual data is done in the main thread.
-    CHECK(params.display_params_);
-    display_module_ = std::make_unique<DisplayModule>(
-        &display_input_queue_,
-        nullptr,
-        parallel_run_,
-        // Use given displayer if any
-        displayer ? std::move(displayer)
-                  : DisplayFactory::makeDisplay(
-                        params.display_params_->display_type_,
-                        params.display_params_,
-                        std::bind(&MonoImuPipeline::shutdown, this)));
+    if (FLAGS_visualize) {
+      //! Actual displaying of visual data is done in the main thread.
+      CHECK(params.display_params_);
+      display_module_ = std::make_unique<DisplayModule>(
+          &display_input_queue_,
+          nullptr,
+          parallel_run_,
+          // Use given displayer if any
+          displayer ? std::move(displayer)
+                    : DisplayFactory::makeDisplay(
+                          params.display_params_->display_type_,
+                          params.display_params_,
+                          std::bind(&MonoImuPipeline::shutdown, this)));
+    }
   }
 
   launchThreads();

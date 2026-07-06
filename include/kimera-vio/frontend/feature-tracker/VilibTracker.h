@@ -201,9 +201,11 @@ class VilibTracker : public FeatureTracker {
     // populate next pts mat
     std::map<size_t, int> cur_kp_id_to_feature_id;
     std::map<int, size_t> cur_feature_id_to_kp_id;
+    const float point_scale =
+        params_.downsample ? params_.downsample_scale : 1.0f;
     for (size_t i = 0; i < vilib_frame->num_features_; ++i) {
-      nextPts->at(i).x = features(0, i) / params_.downsample_scale;
-      nextPts->at(i).y = features(1, i) / params_.downsample_scale;
+      nextPts->at(i).x = features(0, i) / point_scale;
+      nextPts->at(i).y = features(1, i) / point_scale;
       cur_kp_id_to_feature_id[i] = ids[i];
       cur_feature_id_to_kp_id[ids[i]] = i;
     }

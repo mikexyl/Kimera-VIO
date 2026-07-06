@@ -39,6 +39,7 @@ RgbdImuPipeline::RgbdImuPipeline(const VioParams& params,
                                  Visualizer3D::UniquePtr&& visualizer,
                                  DisplayBase::UniquePtr&& displayer)
     : Pipeline(params) {
+  const bool use_visualizer_module = FLAGS_visualize || visualizer != nullptr;
   CHECK_GE(params.camera_params_.size(), 1u)
       << "Need at least one camera for RgbdImuPipeline.";
   camera_ = std::make_shared<RgbdCamera>(params.camera_params_.at(0));
@@ -206,9 +207,9 @@ RgbdImuPipeline::RgbdImuPipeline(const VioParams& params,
                   std::placeholders::_1));
   }
 
-  if (FLAGS_visualize) {
+  if (use_visualizer_module) {
     visualizer_module_ = std::make_unique<VisualizerModule>(
-        &display_input_queue_,
+        FLAGS_visualize ? &display_input_queue_ : nullptr,
         parallel_run_,
         FLAGS_use_lcd,
         visualizer ? std::move(visualizer)
@@ -237,18 +238,20 @@ RgbdImuPipeline::RgbdImuPipeline(const VioParams& params,
       visualizer_module->disableMesherQueue();
     }
 
-    //! Actual displaying of visual data is done in the main thread.
-    CHECK(params.display_params_);
-    display_module_ = std::make_unique<DisplayModule>(
-        &display_input_queue_,
-        nullptr,
-        parallel_run_,
-        // Use given displayer if any
-        displayer ? std::move(displayer)
-                  : DisplayFactory::makeDisplay(
-                        params.display_params_->display_type_,
-                        params.display_params_,
-                        std::bind(&RgbdImuPipeline::shutdown, this)));
+    if (FLAGS_visualize) {
+      //! Actual displaying of visual data is done in the main thread.
+      CHECK(params.display_params_);
+      display_module_ = std::make_unique<DisplayModule>(
+          &display_input_queue_,
+          nullptr,
+          parallel_run_,
+          // Use given displayer if any
+          displayer ? std::move(displayer)
+                    : DisplayFactory::makeDisplay(
+                          params.display_params_->display_type_,
+                          params.display_params_,
+                          std::bind(&RgbdImuPipeline::shutdown, this)));
+    }
   }
 
   launchThreads();

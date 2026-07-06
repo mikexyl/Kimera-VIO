@@ -37,6 +37,7 @@ using ImuAcc = Eigen::Matrix<double, 3, 1>;
 using ImuGyr = Eigen::Matrix<double, 3, 1>;
 using ImuAccGyrS = Eigen::Matrix<double, 6, Eigen::Dynamic>;
 using ImuBias = gtsam::imuBias::ConstantBias;
+using GtsamPreintegrationType = gtsam::DefaultPreintegrationType;
 
 struct ImuMeasurement {
   ImuMeasurement() = default;
@@ -71,7 +72,7 @@ enum class ImuPreintegrationType {
 
 /* -------------------------------------------------------------------------- */
 inline const gtsam::PreintegratedImuMeasurements&
-safeCastToPreintegratedImuMeasurements(const gtsam::PreintegrationType& pim) {
+safeCastToPreintegratedImuMeasurements(const GtsamPreintegrationType& pim) {
   try {
     return dynamic_cast<const gtsam::PreintegratedImuMeasurements&>(pim);
   } catch (const std::bad_cast& e) {
@@ -86,7 +87,7 @@ safeCastToPreintegratedImuMeasurements(const gtsam::PreintegrationType& pim) {
 /* -------------------------------------------------------------------------- */
 inline const gtsam::PreintegratedCombinedMeasurements&
 safeCastToPreintegratedCombinedImuMeasurements(
-    const gtsam::PreintegrationType& pim) {
+    const GtsamPreintegrationType& pim) {
   try {
     return dynamic_cast<const gtsam::PreintegratedCombinedMeasurements&>(pim);
   } catch (const std::bad_cast& e) {

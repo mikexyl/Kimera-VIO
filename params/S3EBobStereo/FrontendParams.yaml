@@ -160,7 +160,7 @@ dispWidth: 512
 dispHeight: 288
 onnxWarmupIterations: 3
 
-rectifiedInputs: 1
+rectifiedInputs: 0
 
 use_sky_segmentation_filter: 1
 sky_seg_engine_path: /workspaces/src/xfeat-cpp/onnx_model/skyseg.engine
