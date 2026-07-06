@@ -19,11 +19,11 @@
 
 #include <opencv2/calib3d.hpp>
 
-#include "xfeat-cpp/stereo_depth.h"
-#include "xfeat-cpp/stereo_depth_libsgm.h"
-#include "xfeat-cpp/stereo_depth_onnx.h"
+#include "xfeat-cpp/stereo_depth/stereo_depth.h"
+#include "xfeat-cpp/stereo_depth/stereo_depth_libsgm.h"
+#include "xfeat-cpp/stereo_depth/stereo_depth_onnx.h"
 #ifdef HAVE_TENSORRT
-#include "xfeat-cpp/stereo_depth_lightstereo.h"
+#include "xfeat-cpp/stereo_depth/stereo_depth_lightstereo.h"
 #endif
 #include "kimera-vio/frontend/StereoFrame.h"
 #include "kimera-vio/utils/Macros.h"
