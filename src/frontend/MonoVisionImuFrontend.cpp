@@ -365,8 +365,12 @@ StatusMonoMeasurementsPtr MonoVisionImuFrontend::processFrame(
     }
 
     // find the best (least tracked) keyframe to run matcher
-    if (tracker_status_summary_.kfTrackingStatus_mono_ !=
-        TrackingStatus::LOW_DISPARITY) {
+    if (tracker_->tracker_params_.desc_tracking_mode_ ==
+        DescTrackingMode::kOpticalFlowOnly) {
+      LOG(INFO) << "Skipping edge selection and descriptor tracking in "
+                   "optical-flow-only mode.";
+    } else if (tracker_status_summary_.kfTrackingStatus_mono_ !=
+               TrackingStatus::LOW_DISPARITY) {
       // Select the golden edge: among all connections FROM the current frame
       // to a historical keyframe in the sliding window, find the one that
       // maximises the expected pose-graph algebraic connectivity gain
