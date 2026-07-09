@@ -6,6 +6,7 @@ target_sources(kimera_vio PRIVATE
   "${CMAKE_CURRENT_LIST_DIR}/Frame.h"
   "${CMAKE_CURRENT_LIST_DIR}/FrontendInputPacketBase.h"
   "${CMAKE_CURRENT_LIST_DIR}/FrontendOutputPacketBase.h"
+  "${CMAKE_CURRENT_LIST_DIR}/MonoDepthInference.h"
   "${CMAKE_CURRENT_LIST_DIR}/MonoImuSyncPacket.h"
   "${CMAKE_CURRENT_LIST_DIR}/MonoVisionImuFrontend-definitions.h"
   "${CMAKE_CURRENT_LIST_DIR}/MonoVisionImuFrontend.h"

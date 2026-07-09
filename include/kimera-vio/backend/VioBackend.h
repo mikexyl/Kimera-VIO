@@ -52,6 +52,7 @@
 
 #include "kimera-vio/backend/VioBackend-definitions.h"
 #include "kimera-vio/backend/VioBackendParams.h"
+#include "kimera-vio/backend/MonoDepthAlignment.h"
 #include "kimera-vio/factors/PointPlaneFactor.h"
 #include "kimera-vio/frontend/OdometryParams.h"
 #include "kimera-vio/frontend/StereoVisionImuFrontend-definitions.h"
@@ -91,6 +92,7 @@ class VioBackend {
              const BackendParams& backend_params,
              const ImuParams& imu_params,
              const BackendOutputParams& backend_output_params,
+             const MonoDepthParams& mono_depth_params,
              bool log_output,
              std::optional<OdometryParams> odom_params = std::nullopt);
   virtual ~VioBackend() { LOG(INFO) << "Backend destructor called."; }
@@ -501,6 +503,7 @@ class VioBackend {
   const BackendParams backend_params_;
   const ImuParams imu_params_;
   const BackendOutputParams backend_output_params_;
+  const MonoDepthParams mono_depth_params_;
   std::optional<OdometryParams> odom_params_;
 
   std::deque<TrackingStatus> tracking_statuses_;
@@ -595,6 +598,7 @@ class VioBackend {
   //! Logger.
   const bool log_output_ = {false};
   std::unique_ptr<BackendLogger> logger_;
+  MonoDepthAlignment::UniquePtr mono_depth_alignment_;
 };
 
 }  // namespace VIO

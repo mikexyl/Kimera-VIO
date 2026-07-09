@@ -38,7 +38,8 @@ class VisionImuFrontendFactory {
       const Camera::ConstPtr& camera,
       DisplayQueue* display_queue,
       bool log_output,
-      std::optional<OdometryParams> odom_params) {
+      std::optional<OdometryParams> odom_params,
+      const MonoDepthParams& mono_depth_params = MonoDepthParams()) {
     switch (frontend_type) {
       case FrontendType::kMonoImu: {
         return std::make_unique<MonoVisionImuFrontend>(env,
@@ -48,7 +49,8 @@ class VisionImuFrontendFactory {
                                                        camera,
                                                        display_queue,
                                                        log_output,
-                                                       odom_params);
+                                                       odom_params,
+                                                       mono_depth_params);
       }
       case FrontendType::kStereoImu: {
         LOG(FATAL) << "Tried to create a StereoVisionFrontEnd"

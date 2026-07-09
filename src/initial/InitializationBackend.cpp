@@ -39,6 +39,7 @@ InitializationBackend::InitializationBackend(
                  backend_params,
                  imu_params,
                  backend_output_params,
+                 MonoDepthParams(),
                  log_output) {}
 
 /* ------------------------------------------------------------------------ */

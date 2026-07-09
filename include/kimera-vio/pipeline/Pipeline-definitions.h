@@ -19,6 +19,7 @@
 #include "kimera-vio/backend/RegularVioBackendParams.h"
 #include "kimera-vio/backend/VioBackend-definitions.h"
 #include "kimera-vio/backend/VioBackendParams.h"
+#include "kimera-vio/common/MonoDepthTypes.h"
 #include "kimera-vio/frontend/CameraParams.h"
 #include "kimera-vio/frontend/OdometryParams.h"
 #include "kimera-vio/frontend/VisionImuFrontend-definitions.h"
@@ -145,6 +146,7 @@ struct VioParams : public PipelineParams {
   BackendParams::Ptr backend_params_;
   LoopClosureDetectorParams lcd_params_;
   DisplayParams::Ptr display_params_;
+  MonoDepthParams mono_depth_params_;
   //! General Pipeline parameters
   FrontendType frontend_type_;
   BackendType backend_type_;
@@ -167,6 +169,7 @@ struct VioParams : public PipelineParams {
            display_type_ == rhs.display_type_ &&
            lcd_params_ == rhs.lcd_params_ &&
            display_params_ == rhs.display_params_ &&
+           mono_depth_params_ == rhs.mono_depth_params_ &&
            parallel_run_ == rhs.parallel_run_;
   }
 

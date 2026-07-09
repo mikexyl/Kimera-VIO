@@ -80,7 +80,8 @@ MonoImuPipeline::MonoImuPipeline(const VioParams& params,
           camera_,
           FLAGS_visualize ? &display_input_queue_ : nullptr,
           FLAGS_log_output,
-          params.odom_params_));
+          params.odom_params_,
+          params.mono_depth_params_));
   vio_frontend_module_->registerImuTimeShiftUpdateCallback(
       [&](double imu_time_shift_s) {
         data_provider_module_->setImuTimeShift(imu_time_shift_s);
@@ -100,7 +101,8 @@ MonoImuPipeline::MonoImuPipeline(const VioParams& params,
               converted_output->pim_,
               converted_output->imu_acc_gyrs_,
               converted_output->body_lkf_OdomPose_body_kf_,
-              converted_output->body_kf_world_OdomVel_body_kf_));
+              converted_output->body_kf_world_OdomVel_body_kf_,
+              converted_output->mono_depth_raw_packet_));
         } else {
           VLOG(5)
               << "Frontend did not output a keyframe, skipping Backend input.";
@@ -135,6 +137,7 @@ MonoImuPipeline::MonoImuPipeline(const VioParams& params,
           *backend_params_,
           imu_params_,
           backend_output_params,
+          params.mono_depth_params_,
           FLAGS_log_output,
           params.odom_params_));
 

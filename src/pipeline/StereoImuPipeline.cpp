@@ -41,6 +41,8 @@ StereoImuPipeline::StereoImuPipeline(const VioParams& params,
                                      DisplayBase::UniquePtr&& displayer)
     : Pipeline(params), stereo_camera_(nullptr) {
   const bool use_visualizer_module = FLAGS_visualize || visualizer != nullptr;
+  LOG_IF(FATAL, params.mono_depth_params_.enabled)
+      << "mono_depth.enabled=true is only supported by MonoImuPipeline.";
   //! Create Stereo Camera
   CHECK_EQ(params.camera_params_.size(), 2u)
       << "Need two cameras for StereoImuPipeline.";
@@ -135,6 +137,7 @@ StereoImuPipeline::StereoImuPipeline(const VioParams& params,
           *backend_params_,
           imu_params_,
           backend_output_params,
+          params.mono_depth_params_,
           FLAGS_log_output,
           params.odom_params_));
   vio_backend_module_->registerOnFailureCallback(

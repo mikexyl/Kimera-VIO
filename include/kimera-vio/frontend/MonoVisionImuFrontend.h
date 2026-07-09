@@ -20,6 +20,7 @@
 #include "kimera-vio/frontend/Camera.h"
 #include "kimera-vio/frontend/Frame.h"
 #include "kimera-vio/frontend/edge-selection/EdgeSelection.h"
+#include "kimera-vio/frontend/MonoDepthInference.h"
 #include "kimera-vio/frontend/MonoImuSyncPacket.h"
 #include "kimera-vio/frontend/MonoVisionImuFrontend-definitions.h"
 #include "kimera-vio/frontend/VisionImuFrontend.h"
@@ -48,7 +49,8 @@ class MonoVisionImuFrontend : public VisionImuFrontend {
       const Camera::ConstPtr& camera,
       DisplayQueue* display_queue = nullptr,
       bool log_output = false,
-      std::optional<OdometryParams> odom_params = std::nullopt);
+      std::optional<OdometryParams> odom_params = std::nullopt,
+      const MonoDepthParams& mono_depth_params = MonoDepthParams());
 
   virtual ~MonoVisionImuFrontend();
 
@@ -114,6 +116,7 @@ class MonoVisionImuFrontend : public VisionImuFrontend {
   FeatureDetector::UniquePtr feature_detector_;
 
   Camera::ConstPtr mono_camera_;
+  MonoDepthInference::UniquePtr mono_depth_inference_;
 };
 
 }  // namespace VIO

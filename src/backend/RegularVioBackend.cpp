@@ -102,6 +102,7 @@ RegularVioBackend::RegularVioBackend(
     const BackendParams& backend_params,
     const ImuParams& imu_params,
     const BackendOutputParams& backend_output_params,
+    const MonoDepthParams& mono_depth_params,
     const bool& log_output,
     std::optional<OdometryParams> odom_params)
     : VioBackend(B_Pose_leftCamRect,
@@ -109,6 +110,7 @@ RegularVioBackend::RegularVioBackend(
                  backend_params,
                  imu_params,
                  backend_output_params,
+                 mono_depth_params,
                  log_output,
                  odom_params),
       regular_vio_params_(RegularVioBackendParams::safeCast(backend_params)) {

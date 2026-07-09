@@ -194,6 +194,9 @@ void VioParams::print() const {
   lcd_params_.print();
   CHECK(display_params_);
   display_params_->print();
+  LOG(INFO) << "Mono depth enabled: " << mono_depth_params_.enabled;
+  LOG(INFO) << "Mono depth mode: "
+            << monoDepthModeToString(mono_depth_params_.mode);
   LOG(INFO) << "Frontend Type: " << VIO::to_underlying(frontend_type_);
   LOG(INFO) << "Backend Type: " << VIO::to_underlying(backend_type_);
   LOG(INFO) << "Display Type: " << VIO::to_underlying(display_type_);

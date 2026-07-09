@@ -75,12 +75,14 @@ VioBackend::VioBackend(const gtsam::Pose3& B_Pose_leftCamRect,
                        const BackendParams& backend_params,
                        const ImuParams& imu_params,
                        const BackendOutputParams& backend_output_params,
+                       const MonoDepthParams& mono_depth_params,
                        bool log_output,
                        std::optional<OdometryParams> odom_params)
     : backend_state_(BackendState::Bootstrap),
       backend_params_(backend_params),
       imu_params_(imu_params),
       backend_output_params_(backend_output_params),
+      mono_depth_params_(mono_depth_params),
       odom_params_(odom_params),
       timestamp_lkf_(-1),
       imu_bias_lkf_(ImuBias()),
@@ -95,7 +97,11 @@ VioBackend::VioBackend(const gtsam::Pose3& B_Pose_leftCamRect,
       curr_kf_id_(0),
       landmark_count_(0),
       log_output_(log_output),
-      logger_(log_output ? std::make_unique<BackendLogger>() : nullptr) {
+      logger_(log_output ? std::make_unique<BackendLogger>() : nullptr),
+      mono_depth_alignment_(mono_depth_params_.enabled
+                                ? std::make_unique<MonoDepthAlignment>(
+                                      mono_depth_params_)
+                                : nullptr) {
 // TODO the parsing of the params should be done inside here out from the
 // path to the params file, otherwise other derived VIO Backends will be
 // stuck with the parameters used by vanilla VIO, as there is no polymorphic
@@ -213,6 +219,14 @@ BackendOutput::UniquePtr VioBackend::spinOnce(const BackendInput& input) {
         kPoseSymbolChar, curr_kf_id_));  // Body pose from smoother.
     gtsam::Pose3 W_P_cur = W_Pose_B_lkf_from_increments_;
     gtsam::Pose3 W_P_smoother = W_P_cur * smoother_P_cur.inverse();
+    MonoDepthMapOutput::ConstPtr mono_depth_map_output =
+        mono_depth_alignment_
+            ? mono_depth_alignment_->process(input.mono_depth_raw_packet_,
+                                             state_,
+                                             lmks_in_local_window_with_stats
+                                                 .points,
+                                             W_P_smoother)
+            : nullptr;
 
     // Create Backend Output Payload.
     output_payload = std::make_unique<BackendOutput>(
@@ -235,7 +249,8 @@ BackendOutput::UniquePtr VioBackend::spinOnce(const BackendInput& input) {
         W_P_smoother,
         lmks_in_local_window_with_stats.num_observations,
         lmks_in_local_window_with_stats.residuals,
-        T_W_B_);
+        T_W_B_,
+        mono_depth_map_output);
 
     if (logger_) {
       logger_->logBackendOutput(*output_payload);

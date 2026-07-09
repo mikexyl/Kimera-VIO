@@ -36,6 +36,7 @@ class RegularVioBackend : public VioBackend {
                     const BackendParams& backend_params,
                     const ImuParams& imu_params,
                     const BackendOutputParams& backend_output_params,
+                    const MonoDepthParams& mono_depth_params,
                     const bool& log_output,
                     std::optional<OdometryParams> odom_params = std::nullopt);
 

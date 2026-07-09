@@ -36,7 +36,8 @@ MonoVisionImuFrontend::MonoVisionImuFrontend(
     const Camera::ConstPtr& camera,
     DisplayQueue* display_queue,
     bool log_output,
-    std::optional<OdometryParams> odom_params)
+    std::optional<OdometryParams> odom_params,
+    const MonoDepthParams& mono_depth_params)
     : VisionImuFrontend(env,
                         frontend_params,
                         imu_params,
@@ -49,7 +50,11 @@ MonoVisionImuFrontend::MonoVisionImuFrontend(
       mono_frame_lkf_(nullptr),
       keyframe_R_ref_frame_(gtsam::Rot3()),
       feature_detector_(nullptr),
-      mono_camera_(camera) {
+      mono_camera_(camera),
+      mono_depth_inference_(mono_depth_params.enabled
+                                ? std::make_unique<MonoDepthInference>(
+                                      mono_depth_params)
+                                : nullptr) {
   CHECK(mono_camera_);
   edge_selection_params_.b_T_c = mono_camera_->getBodyPoseCam();
 
@@ -100,6 +105,10 @@ MonoFrontendOutput::UniquePtr MonoVisionImuFrontend::bootstrapSpinMono(
   }
 
   // Create mostly invalid output
+  const MonoDepthRawPacket::ConstPtr mono_depth_raw_packet =
+      mono_depth_inference_
+          ? mono_depth_inference_->inferKeyframe(*mono_frame_lkf_)
+          : nullptr;
   return std::make_unique<MonoFrontendOutput>(mono_frame_lkf_->isKeyframe_,
                                               nullptr,
                                               mono_camera_->getBodyPoseCam(),
@@ -107,7 +116,10 @@ MonoFrontendOutput::UniquePtr MonoVisionImuFrontend::bootstrapSpinMono(
                                               nullptr,
                                               input->getImuAccGyrs(),
                                               cv::Mat(),
-                                              getTrackerInfo());
+                                              getTrackerInfo(),
+                                              std::nullopt,
+                                              std::nullopt,
+                                              mono_depth_raw_packet);
 }
 
 MonoFrontendOutput::UniquePtr MonoVisionImuFrontend::nominalSpinMono(
@@ -183,6 +195,10 @@ MonoFrontendOutput::UniquePtr MonoVisionImuFrontend::nominalSpinMono(
     // Return the output of the Frontend for the others.
     // We have a keyframe, so We fill frame_lkf_ with the newest keyframe
     VLOG(2) << "Frontend output is a keyframe: pushing to output callbacks.";
+    const MonoDepthRawPacket::ConstPtr mono_depth_raw_packet =
+        mono_depth_inference_
+            ? mono_depth_inference_->inferKeyframe(*mono_frame_lkf_)
+            : nullptr;
     return std::make_unique<MonoFrontendOutput>(
         frontend_state_ == FrontendState::Nominal,
         status_mono_measurements,
@@ -193,7 +209,8 @@ MonoFrontendOutput::UniquePtr MonoVisionImuFrontend::nominalSpinMono(
         feature_tracks,
         getTrackerInfo(),
         getExternalOdometryRelativeBodyPose(input.get()),
-        getExternalOdometryWorldVelocity(input.get()));
+        getExternalOdometryWorldVelocity(input.get()),
+        mono_depth_raw_packet);
   } else {
     // Record frame rate timing
     timing_stats_frame_rate.AddSample(utils::Timer::toc(start_time).count());

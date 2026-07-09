@@ -26,6 +26,7 @@
 
 #include <vector>
 
+#include "kimera-vio/common/MonoDepthTypes.h"
 #include "kimera-vio/common/VioNavState.h"
 #include "kimera-vio/common/vio_types.h"
 #include "kimera-vio/frontend/StereoVisionImuFrontend-definitions.h"
@@ -264,13 +265,15 @@ struct BackendInput : public PipelinePayload {
       const ImuAccGyrS& imu_acc_gyrs,
       std::optional<gtsam::Pose3> body_lkf_OdomPose_body_kf = std::nullopt,
       std::optional<gtsam::Velocity3> body_kf_world_OdomVel_body_kf =
-          std::nullopt)
+          std::nullopt,
+      const MonoDepthRawPacket::ConstPtr& mono_depth_raw_packet = nullptr)
       : PipelinePayload(timestamp_kf_nsec),
         status_stereo_measurements_kf_(status_stereo_measurements_kf),
         pim_(pim),
         imu_acc_gyrs_(imu_acc_gyrs),
         body_lkf_OdomPose_body_kf_(body_lkf_OdomPose_body_kf),
-        body_kf_world_OdomVel_body_kf_(body_kf_world_OdomVel_body_kf) {}
+        body_kf_world_OdomVel_body_kf_(body_kf_world_OdomVel_body_kf),
+        mono_depth_raw_packet_(mono_depth_raw_packet) {}
 
  public:
   const StatusStereoMeasurementsPtr status_stereo_measurements_kf_;
@@ -281,6 +284,7 @@ struct BackendInput : public PipelinePayload {
   // velocity of the current keyframe body w.r.t. the world frame in the body
   // frame
   std::optional<gtsam::Velocity3> body_kf_world_OdomVel_body_kf_;
+  MonoDepthRawPacket::ConstPtr mono_depth_raw_packet_;
 
  public:
   void print() const {
@@ -329,7 +333,9 @@ struct BackendOutput : public PipelinePayload {
                 const gtsam::Pose3& W_Pose_smoother = gtsam::Pose3(),
                 const LmkIdToNumObsMap& lmk_num_observations = {},
                 const LmkIdToResidualMap& lmk_smart_factor_residuals = {},
-                const Matrix3& B_Rot_W = Matrix3::Identity())
+                const Matrix3& B_Rot_W = Matrix3::Identity(),
+                const MonoDepthMapOutput::ConstPtr& mono_depth_map_output =
+                    nullptr)
       : PipelinePayload(timestamp_kf),
         W_State_Blkf_(timestamp_kf, W_Pose_Blkf, W_Vel_Blkf, imu_bias_lkf),
         state_(state),
@@ -344,7 +350,8 @@ struct BackendOutput : public PipelinePayload {
         W_Pose_smoother_(W_Pose_smoother),
         lmk_num_observations_(lmk_num_observations),
         lmk_smart_factor_residuals_(lmk_smart_factor_residuals),
-        T_W_B_(B_Rot_W) {}
+        T_W_B_(B_Rot_W),
+        mono_depth_map_output_(mono_depth_map_output) {}
 
   BackendOutput(const VioNavStateTimestamped& vio_navstate_timestamped,
                 const gtsam::Values& state,
@@ -359,7 +366,9 @@ struct BackendOutput : public PipelinePayload {
                 const gtsam::Pose3& W_Pose_smoother = gtsam::Pose3(),
                 const LmkIdToNumObsMap& lmk_num_observations = {},
                 const LmkIdToResidualMap& lmk_smart_factor_residuals = {},
-                const gtsam::Pose3& T_W_B = gtsam::Pose3())
+                const gtsam::Pose3& T_W_B = gtsam::Pose3(),
+                const MonoDepthMapOutput::ConstPtr& mono_depth_map_output =
+                    nullptr)
       : PipelinePayload(vio_navstate_timestamped.timestamp_),
         W_State_Blkf_(vio_navstate_timestamped),
         state_(state),
@@ -374,7 +383,8 @@ struct BackendOutput : public PipelinePayload {
         W_Pose_smoother_(W_Pose_smoother),
         lmk_num_observations_(lmk_num_observations),
         lmk_smart_factor_residuals_(lmk_smart_factor_residuals),
-        T_W_B_(T_W_B) {}
+        T_W_B_(T_W_B),
+        mono_depth_map_output_(mono_depth_map_output) {}
 
   const VioNavStateTimestamped W_State_Blkf_;
   const gtsam::Values state_;
@@ -391,6 +401,7 @@ struct BackendOutput : public PipelinePayload {
   const LmkIdToResidualMap lmk_smart_factor_residuals_;
   const gtsam::Pose3
       T_W_B_;  //!< Rotation from world to body frame at last keyframe.
+  MonoDepthMapOutput::ConstPtr mono_depth_map_output_;
 };
 
 ////////////////////////////////////////////////////////////////////////////////

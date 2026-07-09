@@ -49,7 +49,8 @@ struct MonoFrontendOutput : public FrontendOutputPacketBase {
       const cv::Mat& feature_tracks,
       const DebugTrackerInfo& debug_tracker_info,
       std::optional<gtsam::Pose3> lkf_body_Pose_kf_body = std::nullopt,
-      std::optional<gtsam::Velocity3> body_world_Vel_body = std::nullopt)
+      std::optional<gtsam::Velocity3> body_world_Vel_body = std::nullopt,
+      const MonoDepthRawPacket::ConstPtr& mono_depth_raw_packet = nullptr)
       : FrontendOutputPacketBase(frame_lkf.timestamp_,
                                  is_keyframe,
                                  FrontendType::kMonoImu,
@@ -57,7 +58,8 @@ struct MonoFrontendOutput : public FrontendOutputPacketBase {
                                  imu_acc_gyrs,
                                  debug_tracker_info,
                                  lkf_body_Pose_kf_body,
-                                 body_world_Vel_body),
+                                 body_world_Vel_body,
+                                 mono_depth_raw_packet),
         status_mono_measurements_(status_mono_measurements),
         b_Pose_cam_rect_(b_Pose_cam_rect),
         frame_lkf_(frame_lkf),
