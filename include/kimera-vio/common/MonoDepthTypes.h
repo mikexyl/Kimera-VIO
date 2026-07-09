@@ -105,10 +105,10 @@ struct MonoDepthMapOutput {
   double scale_log_rmse = 0.0;
   std::size_t scale_candidate_pairs = 0u;
   std::size_t scale_inlier_pairs = 0u;
-  std::vector<Point3> keyframe_cloud;
-  std::vector<Eigen::Vector4f> keyframe_colors;
-  std::vector<Point3> accumulated_map;
-  std::vector<Eigen::Vector4f> accumulated_colors;
+  Point3Vector keyframe_cloud;
+  RgbaColorVector keyframe_colors;
+  Point3Vector accumulated_map;
+  RgbaColorVector accumulated_colors;
   float point_radius = 0.005f;
 };
 

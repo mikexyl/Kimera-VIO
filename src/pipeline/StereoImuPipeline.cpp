@@ -138,6 +138,7 @@ StereoImuPipeline::StereoImuPipeline(const VioParams& params,
           imu_params_,
           backend_output_params,
           params.mono_depth_params_,
+          params.dense_map_params_,
           FLAGS_log_output,
           params.odom_params_));
   vio_backend_module_->registerOnFailureCallback(

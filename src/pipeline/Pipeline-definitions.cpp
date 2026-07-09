@@ -197,6 +197,11 @@ void VioParams::print() const {
   LOG(INFO) << "Mono depth enabled: " << mono_depth_params_.enabled;
   LOG(INFO) << "Mono depth mode: "
             << monoDepthModeToString(mono_depth_params_.mode);
+  LOG(INFO) << "Dense map enabled: " << dense_map_params_.enabled;
+  LOG(INFO) << "Dense map backend: "
+            << denseMapBackendToString(dense_map_params_.backend);
+  LOG(INFO) << "Dense map voxel resolution: "
+            << dense_map_params_.voxel_resolution;
   LOG(INFO) << "Frontend Type: " << VIO::to_underlying(frontend_type_);
   LOG(INFO) << "Backend Type: " << VIO::to_underlying(backend_type_);
   LOG(INFO) << "Display Type: " << VIO::to_underlying(display_type_);

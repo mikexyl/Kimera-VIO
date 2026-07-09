@@ -37,6 +37,7 @@ class BackendFactory {
       const ImuParams& imu_params,
       const BackendOutputParams& backend_output_params,
       const MonoDepthParams& mono_depth_params,
+      const DenseMapParams& dense_map_params,
       bool log_output,
       std::optional<OdometryParams> odom_params) {
     switch (backend_type) {
@@ -47,6 +48,7 @@ class BackendFactory {
                                             imu_params,
                                             backend_output_params,
                                             mono_depth_params,
+                                            dense_map_params,
                                             log_output,
                                             odom_params);
       }
@@ -57,6 +59,7 @@ class BackendFactory {
                                                    imu_params,
                                                    backend_output_params,
                                                    mono_depth_params,
+                                                   dense_map_params,
                                                    log_output,
                                                    odom_params);
       }

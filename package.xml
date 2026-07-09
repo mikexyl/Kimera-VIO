@@ -11,6 +11,7 @@
 
   <depend>dbow2</depend>
   <depend>gtsam</depend>
+  <depend>gtsam_points</depend>
   <depend>kimera_rpgo</depend>
   <depend>libgflags-dev</depend>
   <depend>libgoogle-glog-dev</depend>

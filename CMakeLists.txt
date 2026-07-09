@@ -36,6 +36,7 @@ find_package(opengv REQUIRED)
 find_package(OpenCV REQUIRED)
 find_package(DBoW2 REQUIRED)
 find_package(KimeraRPGO REQUIRED)
+find_package(gtsam_points REQUIRED)
 # Pangolin is optional
 find_package(Pangolin QUIET)
 find_package(xfeat-cpp REQUIRED)
@@ -137,6 +138,7 @@ target_link_libraries(${PROJECT_NAME}
     ${DBoW2_LIBRARIES}
     gtsam
     gtsam_unstable
+    gtsam_points::gtsam_points
     opengv
     xfeat-cpp::xfeat-cpp
     xfeat-cpp::sgm

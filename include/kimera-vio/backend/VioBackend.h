@@ -50,6 +50,7 @@
 #include <memory>
 #include <unordered_map>
 
+#include "kimera-vio/backend/DenseMap.h"
 #include "kimera-vio/backend/VioBackend-definitions.h"
 #include "kimera-vio/backend/VioBackendParams.h"
 #include "kimera-vio/backend/MonoDepthAlignment.h"
@@ -93,6 +94,7 @@ class VioBackend {
              const ImuParams& imu_params,
              const BackendOutputParams& backend_output_params,
              const MonoDepthParams& mono_depth_params,
+             const DenseMapParams& dense_map_params,
              bool log_output,
              std::optional<OdometryParams> odom_params = std::nullopt);
   virtual ~VioBackend() { LOG(INFO) << "Backend destructor called."; }
@@ -504,6 +506,7 @@ class VioBackend {
   const ImuParams imu_params_;
   const BackendOutputParams backend_output_params_;
   const MonoDepthParams mono_depth_params_;
+  const DenseMapParams dense_map_params_;
   std::optional<OdometryParams> odom_params_;
 
   std::deque<TrackingStatus> tracking_statuses_;
@@ -599,6 +602,7 @@ class VioBackend {
   const bool log_output_ = {false};
   std::unique_ptr<BackendLogger> logger_;
   MonoDepthAlignment::UniquePtr mono_depth_alignment_;
+  DenseMapModule::UniquePtr dense_map_module_;
 };
 
 }  // namespace VIO

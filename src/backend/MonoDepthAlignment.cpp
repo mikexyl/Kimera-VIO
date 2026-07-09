@@ -275,8 +275,8 @@ MonoDepthMapOutput::ConstPtr MonoDepthAlignment::buildMapOutput(
   const int stride = std::max(1, params_.point_stride);
   const int max_points = std::max(0, params_.max_points_per_keyframe);
 
-  std::vector<Point3> candidate_points;
-  std::vector<Eigen::Vector4f> candidate_colors;
+  Point3Vector candidate_points;
+  RgbaColorVector candidate_colors;
   if (max_points > 0) {
     const int rows =
         std::min({raw_packet.depth.rows,
@@ -335,8 +335,8 @@ MonoDepthMapOutput::ConstPtr MonoDepthAlignment::buildMapOutput(
   }
 
   const std::size_t candidate_count = candidate_points.size();
-  std::vector<Point3> keyframe_points;
-  std::vector<Eigen::Vector4f> keyframe_colors;
+  Point3Vector keyframe_points;
+  RgbaColorVector keyframe_colors;
   if (static_cast<int>(candidate_count) <= max_points) {
     keyframe_points = std::move(candidate_points);
     keyframe_colors = std::move(candidate_colors);
@@ -373,13 +373,12 @@ MonoDepthMapOutput::ConstPtr MonoDepthAlignment::buildMapOutput(
   output->accumulated_colors = accumulated_colors_;
   output->point_radius = params_.point_radius;
 
-  LOG_EVERY_N(INFO, 10)
-      << "Mono depth map points: " << accumulated_map_.size() << " ("
-      << output->keyframe_cloud.size() << "/" << candidate_count
-      << " keyframe points for delayed frame " << raw_packet.keyframe_id
-      << "), scale: " << output->scale << " from "
-      << output->scale_inlier_pairs << "/" << output->scale_candidate_pairs
-      << " landmark depth pairs, log rmse: " << output->scale_log_rmse;
+  VLOG(1) << "Mono depth map points: " << accumulated_map_.size() << " ("
+          << output->keyframe_cloud.size() << "/" << candidate_count
+          << " keyframe points for delayed frame " << raw_packet.keyframe_id
+          << "), scale: " << output->scale << " from "
+          << output->scale_inlier_pairs << "/" << output->scale_candidate_pairs
+          << " landmark depth pairs, log rmse: " << output->scale_log_rmse;
 
   return output;
 }

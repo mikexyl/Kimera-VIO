@@ -1,5 +1,6 @@
 ### Add source code just for IDEs
 target_sources(kimera_vio PRIVATE
+  "${CMAKE_CURRENT_LIST_DIR}/DenseMap.h"
   "${CMAKE_CURRENT_LIST_DIR}/MonoDepthAlignment.h"
   "${CMAKE_CURRENT_LIST_DIR}/RegularVioBackend-definitions.h"
   "${CMAKE_CURRENT_LIST_DIR}/RegularVioBackend.h"

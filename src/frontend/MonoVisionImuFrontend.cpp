@@ -100,7 +100,7 @@ MonoFrontendOutput::UniquePtr MonoVisionImuFrontend::bootstrapSpinMono(
   CHECK(mono_camera_);
 
   if (FLAGS_do_fine_imu_camera_temporal_sync) {
-    LOG(INFO) << "skip adding frame to downstream modules";
+    VLOG(2) << "Skipping frame output during fine IMU-camera temporal sync.";
     return nullptr;  // skip adding a frame to all downstream modules
   }
 
@@ -384,8 +384,8 @@ StatusMonoMeasurementsPtr MonoVisionImuFrontend::processFrame(
     // find the best (least tracked) keyframe to run matcher
     if (tracker_->tracker_params_.desc_tracking_mode_ ==
         DescTrackingMode::kOpticalFlowOnly) {
-      LOG(INFO) << "Skipping edge selection and descriptor tracking in "
-                   "optical-flow-only mode.";
+      VLOG(2) << "Skipping edge selection and descriptor tracking in "
+                 "optical-flow-only mode.";
     } else if (tracker_status_summary_.kfTrackingStatus_mono_ !=
                TrackingStatus::LOW_DISPARITY) {
       // Select the golden edge: among all connections FROM the current frame
@@ -399,8 +399,8 @@ StatusMonoMeasurementsPtr MonoVisionImuFrontend::processFrame(
         // computed.
         const auto nav_state = getLatestNavStateFromBackend();
         if (!nav_state) {
-          LOG(INFO) << "EdgeSelection: skipping — no backend pose for current "
-                       "frame yet.";
+          VLOG(2) << "EdgeSelection: skipping — no backend pose for current "
+                     "frame yet.";
         } else {
           // Build the SlidingWindow: historical KFs first, current frame last.
           SlidingWindow window;
@@ -442,8 +442,8 @@ StatusMonoMeasurementsPtr MonoVisionImuFrontend::processFrame(
             const int hist_idx =
                 (best_edge.id_i == cur_idx) ? best_edge.id_j : best_edge.id_i;
 
-            LOG(INFO) << "golden edge between curr " << mono_frame_k_->id_
-                      << " and hist " << mono_frames_[hist_idx]->id_;
+            VLOG(1) << "Golden edge between curr " << mono_frame_k_->id_
+                    << " and hist " << mono_frames_[hist_idx]->id_;
 
             // ref_frame (arg1) must own the descriptors: use the historical KF.
             // cur_frame (arg2) is the current frame that receives the
@@ -457,18 +457,18 @@ StatusMonoMeasurementsPtr MonoVisionImuFrontend::processFrame(
                 false,
                 DescTrackingMode::kDescriptorOnly);
           } else {
-            LOG(WARNING) << "No valid golden edge found for current keyframe "
-                         << mono_frame_k_->id_
-                         << ": no additional tracking will be performed.";
+            VLOG(1) << "No valid golden edge found for current keyframe "
+                    << mono_frame_k_->id_
+                    << ": no additional tracking will be performed.";
           }
         }  // nav_state
       } else {
-        LOG(WARNING) << "EdgeSelection: skipping — no historical keyframes or "
-                        "low disparity.";
+        VLOG(1) << "EdgeSelection: skipping — no historical keyframes or "
+                   "low disparity.";
       }
     } else {
-      LOG(WARNING) << "Skipping edge selection and descriptor tracking due to "
-                      "low disparity.";
+      VLOG(1) << "Skipping edge selection and descriptor tracking due to "
+                 "low disparity.";
     }
 
     if (feature_tracks) {

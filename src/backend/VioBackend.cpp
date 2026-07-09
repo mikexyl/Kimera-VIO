@@ -76,6 +76,7 @@ VioBackend::VioBackend(const gtsam::Pose3& B_Pose_leftCamRect,
                        const ImuParams& imu_params,
                        const BackendOutputParams& backend_output_params,
                        const MonoDepthParams& mono_depth_params,
+                       const DenseMapParams& dense_map_params,
                        bool log_output,
                        std::optional<OdometryParams> odom_params)
     : backend_state_(BackendState::Bootstrap),
@@ -83,6 +84,7 @@ VioBackend::VioBackend(const gtsam::Pose3& B_Pose_leftCamRect,
       imu_params_(imu_params),
       backend_output_params_(backend_output_params),
       mono_depth_params_(mono_depth_params),
+      dense_map_params_(dense_map_params),
       odom_params_(odom_params),
       timestamp_lkf_(-1),
       imu_bias_lkf_(ImuBias()),
@@ -101,7 +103,11 @@ VioBackend::VioBackend(const gtsam::Pose3& B_Pose_leftCamRect,
       mono_depth_alignment_(mono_depth_params_.enabled
                                 ? std::make_unique<MonoDepthAlignment>(
                                       mono_depth_params_)
-                                : nullptr) {
+                                : nullptr),
+      dense_map_module_(dense_map_params_.enabled
+                            ? std::make_unique<DenseMapModule>(
+                                  dense_map_params_)
+                            : nullptr) {
 // TODO the parsing of the params should be done inside here out from the
 // path to the params file, otherwise other derived VIO Backends will be
 // stuck with the parameters used by vanilla VIO, as there is no polymorphic
@@ -227,6 +233,18 @@ BackendOutput::UniquePtr VioBackend::spinOnce(const BackendInput& input) {
                                                  .points,
                                              W_P_smoother)
             : nullptr;
+    DenseMapOutput::ConstPtr dense_map_output = nullptr;
+    if (dense_map_module_ && mono_depth_map_output &&
+        !mono_depth_map_output->keyframe_cloud.empty()) {
+      auto dense_packet = std::make_shared<DenseMapInputPacket>();
+      dense_packet->keyframe_id = mono_depth_map_output->target_frame_id;
+      dense_packet->timestamp = mono_depth_map_output->target_timestamp;
+      dense_packet->points = Point3VectorConstPtr(
+          mono_depth_map_output, &mono_depth_map_output->keyframe_cloud);
+      dense_packet->colors = RgbaColorVectorConstPtr(
+          mono_depth_map_output, &mono_depth_map_output->keyframe_colors);
+      dense_map_output = dense_map_module_->process(dense_packet);
+    }
 
     // Create Backend Output Payload.
     output_payload = std::make_unique<BackendOutput>(
@@ -250,7 +268,8 @@ BackendOutput::UniquePtr VioBackend::spinOnce(const BackendInput& input) {
         lmks_in_local_window_with_stats.num_observations,
         lmks_in_local_window_with_stats.residuals,
         T_W_B_,
-        mono_depth_map_output);
+        mono_depth_map_output,
+        dense_map_output);
 
     if (logger_) {
       logger_->logBackendOutput(*output_payload);

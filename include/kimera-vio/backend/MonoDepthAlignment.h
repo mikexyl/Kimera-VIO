@@ -64,8 +64,8 @@ class MonoDepthAlignment {
   std::optional<FrameId> last_processed_frame_id_;
   double scale_ = 1.0;
   bool scale_valid_ = false;
-  std::vector<Point3> accumulated_map_;
-  std::vector<Eigen::Vector4f> accumulated_colors_;
+  Point3Vector accumulated_map_;
+  RgbaColorVector accumulated_colors_;
 
   static constexpr std::size_t kRawPacketCacheSize = 256u;
 };

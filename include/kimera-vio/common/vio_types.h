@@ -18,6 +18,9 @@ using Timestamp = std::int64_t;
 // Typedefs of commonly used Eigen matrices and vectors.
 using Point2 = gtsam::Point2;
 using Point3 = gtsam::Point3;
+using Point3Vector = std::vector<Point3, Eigen::aligned_allocator<Point3>>;
+using Point3VectorPtr = std::shared_ptr<Point3Vector>;
+using Point3VectorConstPtr = std::shared_ptr<const Point3Vector>;
 using Vector3 = gtsam::Vector3;
 using Vector6 = gtsam::Vector6;
 using Matrix3 = gtsam::Matrix33;
@@ -34,6 +37,10 @@ using Matrix6f = Eigen::Matrix<float, 6, 6>;
 using Matrixf = Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic>;
 using Matrices3f = std::vector<Matrix3f, Eigen::aligned_allocator<Matrix3f>>;
 using Vectors3f = std::vector<Vector3f, Eigen::aligned_allocator<Vector3f>>;
+using RgbaColorVector =
+    std::vector<Eigen::Vector4f, Eigen::aligned_allocator<Eigen::Vector4f>>;
+using RgbaColorVectorPtr = std::shared_ptr<RgbaColorVector>;
+using RgbaColorVectorConstPtr = std::shared_ptr<const RgbaColorVector>;
 
 enum class KeypointStatus {
   VALID,
