@@ -156,7 +156,8 @@ bool RegularVioBackend::addVisualInertialStateAndOptimize(
     const StatusStereoMeasurements& status_smart_stereo_measurements_kf,
     const GtsamPreintegrationType& pim,
     std::optional<gtsam::Pose3> odometry_body_pose,
-    std::optional<gtsam::Velocity3> odometry_vel) {
+    std::optional<gtsam::Velocity3> odometry_vel,
+    const MonoDepthRawPacket::ConstPtr& mono_depth_raw_packet) {
   debug_info_.resetAddedFactorsStatistics();
 
   // Features and IMU line up --> do iSAM update.
@@ -386,7 +387,8 @@ bool RegularVioBackend::addVisualInertialStateAndOptimize(
   bool is_smoother_ok = optimize(timestamp_kf_nsec,
                                  curr_kf_id_,
                                  backend_params_.numOptimize_,
-                                 delete_slots);
+                                 delete_slots,
+                                 mono_depth_raw_packet);
   VLOG(10) << "Finished optimize.";
 
   if (is_smoother_ok) {

@@ -3,6 +3,7 @@
 #include <glog/logging.h>
 #include <opencv2/imgproc.hpp>
 
+#include <algorithm>
 #include <cmath>
 #include <filesystem>
 #include <stdexcept>
@@ -59,6 +60,17 @@ MonoDepthRawPacket::ConstPtr MonoDepthInference::inferKeyframe(
   CHECK(frame.isKeyframe_);
   CHECK(frame.keyframe_id_.has_value());
 
+  const int keyframe_skip = params_.keyframe_skip > 0
+                                ? params_.keyframe_skip
+                                : 0;
+  const FrameId keyframe_interval =
+      static_cast<FrameId>(keyframe_skip + 1);
+  if ((*frame.keyframe_id_ % keyframe_interval) != 0u) {
+    VLOG(1) << "Skipping DA3 mono depth for keyframe " << *frame.keyframe_id_
+            << " because mono_depth.keyframe_skip=" << keyframe_skip;
+    return nullptr;
+  }
+
   if (params_.mode == MonoDepthMode::kMultiView) {
     LOG(FATAL) << "mono_depth.mode=multi_view is not implemented yet.";
   }
@@ -109,6 +121,8 @@ MonoDepthRawPacket::ConstPtr MonoDepthInference::inferKeyframe(
   packet->intrinsics.cy = xfeat_intrinsics.cy;
   packet->intrinsics.width = xfeat_intrinsics.width;
   packet->intrinsics.height = xfeat_intrinsics.height;
+  packet->weight_image =
+      makeWeightImage(packet->depth, packet->valid_mask, packet->intrinsics);
   packet->body_T_cam = frame.cam_param_.body_Pose_cam_;
   packet->keypoints = frame.keypoints_;
   packet->landmark_ids = frame.landmarks_;
@@ -157,6 +171,119 @@ cv::Mat MonoDepthInference::makeValidMask(const cv::Mat& depth,
     }
   }
   return valid_mask;
+}
+
+Eigen::Vector3d MonoDepthInference::backprojectDepthPixel(
+    const int u,
+    const int v,
+    const float z,
+    const MonoDepthIntrinsics& intrinsics) {
+  return Eigen::Vector3d(
+      (static_cast<double>(u) - intrinsics.cx) * static_cast<double>(z) /
+          intrinsics.fx,
+      (static_cast<double>(v) - intrinsics.cy) * static_cast<double>(z) /
+          intrinsics.fy,
+      static_cast<double>(z));
+}
+
+cv::Mat MonoDepthInference::makeWeightImage(
+    const cv::Mat& depth,
+    const cv::Mat& valid_mask,
+    const MonoDepthIntrinsics& intrinsics) const {
+  CHECK(!depth.empty());
+  CHECK_EQ(depth.type(), CV_32FC1);
+
+  cv::Mat weights(depth.rows, depth.cols, CV_32FC1, cv::Scalar(0.0f));
+  if (valid_mask.empty() || valid_mask.type() != CV_8UC1 ||
+      intrinsics.fx <= 0.0 || intrinsics.fy <= 0.0) {
+    return weights;
+  }
+
+  if (!params_.depth_weighting_enabled) {
+    for (int v = 0; v < std::min(depth.rows, valid_mask.rows); ++v) {
+      const uint8_t* valid_row = valid_mask.ptr<uint8_t>(v);
+      float* weight_row = weights.ptr<float>(v);
+      for (int u = 0; u < std::min(depth.cols, valid_mask.cols); ++u) {
+        weight_row[u] = valid_row[u] == 0u ? 0.0f : 1.0f;
+      }
+    }
+    return weights;
+  }
+
+  const int radius = std::max(1, params_.depth_weight_normal_radius);
+  const bool use_range_weight = params_.depth_weight_range_ref > 0.0;
+  const int rows = std::min(depth.rows, valid_mask.rows);
+  const int cols = std::min(depth.cols, valid_mask.cols);
+  for (int v = radius; v < rows - radius; ++v) {
+    const float* depth_row = depth.ptr<float>(v);
+    const uint8_t* valid_row = valid_mask.ptr<uint8_t>(v);
+    float* weight_row = weights.ptr<float>(v);
+    for (int u = radius; u < cols - radius; ++u) {
+      if (valid_row[u] == 0u ||
+          valid_mask.at<uint8_t>(v, u - radius) == 0u ||
+          valid_mask.at<uint8_t>(v, u + radius) == 0u ||
+          valid_mask.at<uint8_t>(v - radius, u) == 0u ||
+          valid_mask.at<uint8_t>(v + radius, u) == 0u) {
+        continue;
+      }
+
+      const float z = depth_row[u];
+      const float z_l = depth.at<float>(v, u - radius);
+      const float z_r = depth.at<float>(v, u + radius);
+      const float z_u = depth.at<float>(v - radius, u);
+      const float z_d = depth.at<float>(v + radius, u);
+      const auto depth_is_valid = [this](const float depth_value) {
+        return std::isfinite(depth_value) &&
+               depth_value >= params_.min_depth_m &&
+               depth_value <= params_.max_depth_m;
+      };
+      if (!depth_is_valid(z) || !depth_is_valid(z_l) ||
+          !depth_is_valid(z_r) || !depth_is_valid(z_u) ||
+          !depth_is_valid(z_d)) {
+        continue;
+      }
+
+      const Eigen::Vector3d p = backprojectDepthPixel(u, v, z, intrinsics);
+      const Eigen::Vector3d p_l =
+          backprojectDepthPixel(u - radius, v, z_l, intrinsics);
+      const Eigen::Vector3d p_r =
+          backprojectDepthPixel(u + radius, v, z_r, intrinsics);
+      const Eigen::Vector3d p_u =
+          backprojectDepthPixel(u, v - radius, z_u, intrinsics);
+      const Eigen::Vector3d p_d =
+          backprojectDepthPixel(u, v + radius, z_d, intrinsics);
+
+      Eigen::Vector3d normal = (p_r - p_l).cross(p_d - p_u);
+      const double normal_norm = normal.norm();
+      const double point_norm = p.norm();
+      if (normal_norm < 1e-9 || point_norm < 1e-9) {
+        continue;
+      }
+
+      normal /= normal_norm;
+      const Eigen::Vector3d view_to_camera = -p / point_norm;
+      const double cos_theta =
+          std::clamp(std::abs(normal.dot(view_to_camera)), 0.0, 1.0);
+      const double grazing_confidence =
+          std::pow(cos_theta, params_.depth_weight_grazing_power);
+      const double grazing_weight =
+          params_.depth_weight_min +
+          (1.0 - params_.depth_weight_min) * grazing_confidence;
+      const double range_weight =
+          use_range_weight
+              ? std::clamp(
+                    std::pow(params_.depth_weight_range_ref / point_norm,
+                             params_.depth_weight_range_power),
+                    params_.depth_weight_range_min,
+                    1.0)
+              : 1.0;
+      weight_row[u] =
+          static_cast<float>(std::clamp(grazing_weight * range_weight,
+                                        0.0,
+                                        1.0));
+    }
+  }
+  return weights;
 }
 
 }  // namespace VIO

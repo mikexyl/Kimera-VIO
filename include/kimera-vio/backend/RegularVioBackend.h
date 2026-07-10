@@ -49,7 +49,9 @@ class RegularVioBackend : public VioBackend {
       const StatusStereoMeasurements& status_smart_stereo_measurements_kf,
       const GtsamPreintegrationType& pim,
       std::optional<gtsam::Pose3> odometry_body_pose = std::nullopt,
-      std::optional<gtsam::Velocity3> odometry_vel = std::nullopt) override;
+      std::optional<gtsam::Velocity3> odometry_vel = std::nullopt,
+      const MonoDepthRawPacket::ConstPtr& mono_depth_raw_packet =
+          nullptr) override;
 
  private:
   typedef size_t Slot;

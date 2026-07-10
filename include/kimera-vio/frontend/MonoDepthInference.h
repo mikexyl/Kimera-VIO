@@ -25,6 +25,14 @@ class MonoDepthInference {
  private:
   static cv::Mat toBgrImage(const cv::Mat& image);
   static cv::Mat makeValidMask(const cv::Mat& depth, const cv::Mat& sky_mask);
+  static Eigen::Vector3d backprojectDepthPixel(
+      int u,
+      int v,
+      float z,
+      const MonoDepthIntrinsics& intrinsics);
+  cv::Mat makeWeightImage(const cv::Mat& depth,
+                          const cv::Mat& valid_mask,
+                          const MonoDepthIntrinsics& intrinsics) const;
 
  private:
   MonoDepthParams params_;

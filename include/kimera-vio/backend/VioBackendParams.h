@@ -153,6 +153,18 @@ class BackendParams : public PipelineParams {
 
   int min_num_obs_per_landmark_to_keep_ = 20;
   int max_lmk_reproj_error_to_keep_ = 6;
+
+  //! Dense mono-depth VGICP factors.
+  bool vgicp_factors_enabled_ = false;
+  bool vgicp_use_weighted_icp_factor_ = true;
+  int vgicp_min_shared_tracks_ = 30;
+  int vgicp_max_edges_per_keyframe_ = 6;
+  double vgicp_downsample_resolution_ = 0.5;
+  double vgicp_voxel_resolution_ = 1.0;
+  int vgicp_covariance_neighbors_ = 20;
+  int vgicp_num_threads_ = 1;
+  int vgicp_min_points_per_keyframe_ = 300;
+  double vgicp_max_correspondence_distance_ = 1.0;
 };
 
 }  // namespace VIO

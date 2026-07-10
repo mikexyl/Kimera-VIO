@@ -17,6 +17,18 @@
 #include <utility>
 
 namespace VIO {
+namespace {
+
+template <class T>
+void getYamlParamIfPresent(const YamlParser& yaml_parser,
+                           const std::string& id,
+                           T* output) {
+  if (yaml_parser.hasParam(id)) {
+    yaml_parser.getYamlParam(id, output);
+  }
+}
+
+}  // namespace
 
 BackendParams::BackendParams() : PipelineParams("Backend Parameters") {
   // Trivial sanity checks.
@@ -178,6 +190,45 @@ bool BackendParams::parseYAMLVioBackendParams(const YamlParser& yaml_parser) {
   yaml_parser.getYamlParam("max_lmk_reproj_error_to_keep",
                            &max_lmk_reproj_error_to_keep_);
 
+  getYamlParamIfPresent(yaml_parser,
+                        "vgicp_factors_enabled",
+                        &vgicp_factors_enabled_);
+  getYamlParamIfPresent(yaml_parser,
+                        "vgicp_use_weighted_icp_factor",
+                        &vgicp_use_weighted_icp_factor_);
+  getYamlParamIfPresent(yaml_parser,
+                        "vgicp_min_shared_tracks",
+                        &vgicp_min_shared_tracks_);
+  getYamlParamIfPresent(yaml_parser,
+                        "vgicp_max_edges_per_keyframe",
+                        &vgicp_max_edges_per_keyframe_);
+  getYamlParamIfPresent(yaml_parser,
+                        "vgicp_downsample_resolution",
+                        &vgicp_downsample_resolution_);
+  getYamlParamIfPresent(yaml_parser,
+                        "vgicp_voxel_resolution",
+                        &vgicp_voxel_resolution_);
+  getYamlParamIfPresent(yaml_parser,
+                        "vgicp_covariance_neighbors",
+                        &vgicp_covariance_neighbors_);
+  getYamlParamIfPresent(yaml_parser,
+                        "vgicp_num_threads",
+                        &vgicp_num_threads_);
+  getYamlParamIfPresent(yaml_parser,
+                        "vgicp_min_points_per_keyframe",
+                        &vgicp_min_points_per_keyframe_);
+  getYamlParamIfPresent(yaml_parser,
+                        "vgicp_max_correspondence_distance",
+                        &vgicp_max_correspondence_distance_);
+
+  CHECK_GE(vgicp_min_shared_tracks_, 0);
+  CHECK_GE(vgicp_max_edges_per_keyframe_, 0);
+  CHECK_GT(vgicp_downsample_resolution_, 0.0);
+  CHECK_GT(vgicp_voxel_resolution_, 0.0);
+  CHECK_GT(vgicp_covariance_neighbors_, 0);
+  CHECK_GT(vgicp_num_threads_, 0);
+  CHECK_GE(vgicp_min_points_per_keyframe_, 0);
+
   return true;
 }
 
@@ -222,8 +273,26 @@ bool BackendParams::equalsVioBackendParams(const BackendParams& vp2,
       (wildfire_threshold_ == vp2.wildfire_threshold_) &&
       (useDogLeg_ == vp2.useDogLeg_) &&
       (pose_guess_source_ == vp2.pose_guess_source_) &&
-      (fabs(mono_translation_scale_factor_ ==
-            vp2.mono_translation_scale_factor_));
+      (fabs(mono_translation_scale_factor_ -
+            vp2.mono_translation_scale_factor_) <= tol) &&
+      (min_num_obs_per_landmark_to_keep_ ==
+       vp2.min_num_obs_per_landmark_to_keep_) &&
+      (max_lmk_reproj_error_to_keep_ == vp2.max_lmk_reproj_error_to_keep_) &&
+      (vgicp_factors_enabled_ == vp2.vgicp_factors_enabled_) &&
+      (vgicp_use_weighted_icp_factor_ ==
+       vp2.vgicp_use_weighted_icp_factor_) &&
+      (vgicp_min_shared_tracks_ == vp2.vgicp_min_shared_tracks_) &&
+      (vgicp_max_edges_per_keyframe_ ==
+       vp2.vgicp_max_edges_per_keyframe_) &&
+      (fabs(vgicp_downsample_resolution_ -
+            vp2.vgicp_downsample_resolution_) <= tol) &&
+      (fabs(vgicp_voxel_resolution_ - vp2.vgicp_voxel_resolution_) <= tol) &&
+      (vgicp_covariance_neighbors_ == vp2.vgicp_covariance_neighbors_) &&
+      (vgicp_num_threads_ == vp2.vgicp_num_threads_) &&
+      (vgicp_min_points_per_keyframe_ ==
+       vp2.vgicp_min_points_per_keyframe_) &&
+      (fabs(vgicp_max_correspondence_distance_ -
+            vp2.vgicp_max_correspondence_distance_) <= tol);
 }
 
 void BackendParams::printVioBackendParams() const {
@@ -296,7 +365,29 @@ void BackendParams::printVioBackendParams() const {
       "Pose Guess Source",
       VIO::to_underlying(pose_guess_source_),
       "Mono Translation Scale Factor",
-      mono_translation_scale_factor_);
+      mono_translation_scale_factor_,
+      std::string(kCenter, '.') + "** VGICP factor parameters **",
+      "",
+      "VGICP Factors Enabled",
+      vgicp_factors_enabled_,
+      "VGICP Use Weighted ICP Factor",
+      vgicp_use_weighted_icp_factor_,
+      "VGICP Min Shared Tracks",
+      vgicp_min_shared_tracks_,
+      "VGICP Max Edges Per Keyframe",
+      vgicp_max_edges_per_keyframe_,
+      "VGICP Downsample Resolution",
+      vgicp_downsample_resolution_,
+      "VGICP Voxel Resolution",
+      vgicp_voxel_resolution_,
+      "VGICP Covariance Neighbors",
+      vgicp_covariance_neighbors_,
+      "VGICP Num Threads",
+      vgicp_num_threads_,
+      "VGICP Min Points Per Keyframe",
+      vgicp_min_points_per_keyframe_,
+      "VGICP Max Correspondence Distance",
+      vgicp_max_correspondence_distance_);
   LOG(INFO) << out.str();
   LOG(INFO) << "** Backend Iinitialization Parameters **\n"
             << "initial_ground_truth_state_: ";

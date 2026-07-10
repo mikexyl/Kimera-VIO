@@ -49,22 +49,47 @@ inline MonoDepthMode monoDepthModeFromString(std::string mode) {
 struct MonoDepthParams {
   bool enabled = false;
   std::string engine_path;
+  int keyframe_skip = 0;
   int point_stride = 4;
   int max_points_per_keyframe = 5000;
+  int visualization_point_stride = 4;
+  int visualization_max_points_per_keyframe = 5000;
   double min_depth_m = 0.1;
   double max_depth_m = 30.0;
+  bool depth_weighting_enabled = true;
+  int depth_weight_normal_radius = 2;
+  double depth_weight_min = 0.05;
+  double depth_weight_grazing_power = 1.0;
+  double depth_weight_range_ref = 0.0;
+  double depth_weight_range_power = 2.0;
+  double depth_weight_range_min = 0.05;
+  bool visualize_weights = false;
   float point_radius = 0.005f;
   bool verbose = false;
+  bool align_scale_with_landmarks = false;
   MonoDepthMode mode = MonoDepthMode::kSingleView;
   int view_count = 1;
   int view_stride = 1;
 
   bool operator==(const MonoDepthParams& rhs) const {
     return enabled == rhs.enabled && engine_path == rhs.engine_path &&
+           keyframe_skip == rhs.keyframe_skip &&
            point_stride == rhs.point_stride &&
            max_points_per_keyframe == rhs.max_points_per_keyframe &&
+           visualization_point_stride == rhs.visualization_point_stride &&
+           visualization_max_points_per_keyframe ==
+               rhs.visualization_max_points_per_keyframe &&
            min_depth_m == rhs.min_depth_m && max_depth_m == rhs.max_depth_m &&
+           depth_weighting_enabled == rhs.depth_weighting_enabled &&
+           depth_weight_normal_radius == rhs.depth_weight_normal_radius &&
+           depth_weight_min == rhs.depth_weight_min &&
+           depth_weight_grazing_power == rhs.depth_weight_grazing_power &&
+           depth_weight_range_ref == rhs.depth_weight_range_ref &&
+           depth_weight_range_power == rhs.depth_weight_range_power &&
+           depth_weight_range_min == rhs.depth_weight_range_min &&
+           visualize_weights == rhs.visualize_weights &&
            point_radius == rhs.point_radius && verbose == rhs.verbose &&
+           align_scale_with_landmarks == rhs.align_scale_with_landmarks &&
            mode == rhs.mode && view_count == rhs.view_count &&
            view_stride == rhs.view_stride;
   }
@@ -88,6 +113,7 @@ struct MonoDepthRawPacket {
   cv::Mat source_image_bgr;
   cv::Mat depth;
   cv::Mat valid_mask;
+  cv::Mat weight_image;
   MonoDepthIntrinsics intrinsics;
   gtsam::Pose3 body_T_cam;
   KeypointsCV keypoints;
@@ -107,8 +133,10 @@ struct MonoDepthMapOutput {
   std::size_t scale_inlier_pairs = 0u;
   Point3Vector keyframe_cloud;
   RgbaColorVector keyframe_colors;
-  Point3Vector accumulated_map;
-  RgbaColorVector accumulated_colors;
+  Point3Vector window_cloud;
+  RgbaColorVector window_colors;
+  RgbaColorVector window_weight_colors;
+  std::size_t window_keyframes = 0u;
   float point_radius = 0.005f;
 };
 

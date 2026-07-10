@@ -51,6 +51,7 @@
 #include <unordered_map>
 
 #include "kimera-vio/backend/DenseMap.h"
+#include "kimera-vio/backend/MonoDepthVGICPFactors.h"
 #include "kimera-vio/backend/VioBackend-definitions.h"
 #include "kimera-vio/backend/VioBackendParams.h"
 #include "kimera-vio/backend/MonoDepthAlignment.h"
@@ -242,7 +243,8 @@ class VioBackend {
       const StatusStereoMeasurements& status_smart_stereo_measurements_kf,
       const GtsamPreintegrationType& pim,
       std::optional<gtsam::Pose3> odometry_body_pose = std::nullopt,
-      std::optional<gtsam::Velocity3> odometry_vel = std::nullopt);
+      std::optional<gtsam::Velocity3> odometry_vel = std::nullopt,
+      const MonoDepthRawPacket::ConstPtr& mono_depth_raw_packet = nullptr);
 
   // Uses landmark table to add factors in graph.
   void addLandmarksToGraph(const LandmarkIds& landmarks_kf);
@@ -305,7 +307,9 @@ class VioBackend {
                 const FrameId& cur_id,
                 const size_t& max_iterations,
                 const gtsam::FactorIndices& extra_factor_slots_to_delete =
-                    gtsam::FactorIndices());
+                    gtsam::FactorIndices(),
+                const MonoDepthRawPacket::ConstPtr& mono_depth_raw_packet =
+                    nullptr);
   /// Printers.
   void printFeatureTracks() const;
 
@@ -603,6 +607,7 @@ class VioBackend {
   std::unique_ptr<BackendLogger> logger_;
   MonoDepthAlignment::UniquePtr mono_depth_alignment_;
   DenseMapModule::UniquePtr dense_map_module_;
+  MonoDepthVGICPFactors::UniquePtr mono_depth_vgicp_factors_;
 };
 
 }  // namespace VIO

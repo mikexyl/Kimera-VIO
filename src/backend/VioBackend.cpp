@@ -107,7 +107,11 @@ VioBackend::VioBackend(const gtsam::Pose3& B_Pose_leftCamRect,
       dense_map_module_(dense_map_params_.enabled
                             ? std::make_unique<DenseMapModule>(
                                   dense_map_params_)
-                            : nullptr) {
+                            : nullptr),
+      mono_depth_vgicp_factors_(backend_params_.vgicp_factors_enabled_
+                                    ? std::make_unique<MonoDepthVGICPFactors>(
+                                          backend_params_, mono_depth_params_)
+                                    : nullptr) {
 // TODO the parsing of the params should be done inside here out from the
 // path to the params file, otherwise other derived VIO Backends will be
 // stuck with the parameters used by vanilla VIO, as there is no polymorphic
@@ -350,7 +354,8 @@ bool VioBackend::addVisualInertialStateAndOptimize(
     const StatusStereoMeasurements& status_smart_stereo_measurements_kf,
     const GtsamPreintegrationType& pim,
     std::optional<gtsam::Pose3> odometry_body_pose,
-    std::optional<gtsam::Velocity3> odometry_vel) {
+    std::optional<gtsam::Velocity3> odometry_vel,
+    const MonoDepthRawPacket::ConstPtr& mono_depth_raw_packet) {
   debug_info_.resetAddedFactorsStatistics();
 
   // Features and IMU line up --> do iSAM update
@@ -498,7 +503,11 @@ bool VioBackend::addVisualInertialStateAndOptimize(
   // imu_bias_lkf_ gets updated in the optimize call.
   imu_bias_prev_kf_ = imu_bias_lkf_;
 
-  return optimize(timestamp_kf_nsec, curr_kf_id_, backend_params_.numOptimize_);
+  return optimize(timestamp_kf_nsec,
+                  curr_kf_id_,
+                  backend_params_.numOptimize_,
+                  gtsam::FactorIndices(),
+                  mono_depth_raw_packet);
 }
 
 bool VioBackend::addVisualInertialStateAndOptimize(const BackendInput& input) {
@@ -510,7 +519,8 @@ bool VioBackend::addVisualInertialStateAndOptimize(const BackendInput& input) {
       *input.status_stereo_measurements_kf_,  // Vision data.
       *input.pim_,                            // Imu preintegrated data.
       input.body_lkf_OdomPose_body_kf_,
-      input.body_kf_world_OdomVel_body_kf_);
+      input.body_kf_world_OdomVel_body_kf_,
+      input.mono_depth_raw_packet_);
   // Bookkeeping
   timestamp_lkf_ = input.timestamp_;
   return is_smoother_ok;
@@ -1125,7 +1135,8 @@ bool VioBackend::optimize(
     const Timestamp& timestamp_kf_nsec,
     const FrameId& cur_id,
     const size_t& max_extra_iterations,
-    const gtsam::FactorIndices& extra_factor_slots_to_delete) {
+    const gtsam::FactorIndices& extra_factor_slots_to_delete,
+    const MonoDepthRawPacket::ConstPtr& mono_depth_raw_packet) {
   DCHECK(smoother_) << "Incremental smoother is a null pointer.";
 
   // Only for statistics and debugging.
@@ -1207,6 +1218,14 @@ bool VioBackend::optimize(
   new_factors_tmp.push_back(new_imu_prior_and_other_factors_.begin(),
                             new_imu_prior_and_other_factors_.end());
 
+  if (mono_depth_vgicp_factors_) {
+    mono_depth_vgicp_factors_->addFactors(mono_depth_raw_packet,
+                                          state_,
+                                          new_values_,
+                                          feature_tracks_,
+                                          &new_factors_tmp);
+  }
+
   //////////////////////////////////////////////////////////////////////////////
 
   if (VLOG_IS_ON(10) || log_output_) {
@@ -1268,6 +1287,9 @@ bool VioBackend::optimize(
   VLOG(10) << "Starting first update.";
   bool is_smoother_ok = updateSmoother(
       &result, new_factors_tmp, new_values_, key_frame_count, delete_slots);
+  if (mono_depth_vgicp_factors_) {
+    mono_depth_vgicp_factors_->notifySmootherUpdateResult(is_smoother_ok);
+  }
   VLOG(10) << "Finished first update.";
 
   // Store time after iSAM update.

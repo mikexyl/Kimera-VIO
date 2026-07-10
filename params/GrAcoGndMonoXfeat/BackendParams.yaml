@@ -67,7 +67,7 @@ no_motion_position_precision: 1000
 no_motion_rotation_precision: 10000
 constant_vel_precision: 0.00001
 numOptimize: 1
-nr_states: 100 # number of nodes in horizon.
+nr_states: 50 # number of nodes in horizon.
 # ISAM2GaussNewtonParams: continue updating the linear delta only when
 # changes are above this threshold (default: 0.001)
 wildfire_threshold: 0.001
@@ -93,3 +93,15 @@ pose_guess_source: 0
 mono_translation_scale_factor: 0.1
 min_num_obs_per_landmark_to_keep: 0
 max_lmk_reproj_error_to_keep: 1000000
+
+# Mono-depth VGICP factors ####################################################
+vgicp_factors_enabled: 1
+vgicp_use_weighted_icp_factor: 1
+vgicp_min_shared_tracks: 500
+vgicp_max_edges_per_keyframe: 1
+vgicp_downsample_resolution: 0.5
+vgicp_voxel_resolution: 0.5
+vgicp_covariance_neighbors: 20
+vgicp_num_threads: 1
+vgicp_min_points_per_keyframe: 300
+vgicp_max_correspondence_distance: 1.0

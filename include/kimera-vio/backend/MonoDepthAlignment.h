@@ -4,6 +4,7 @@
 
 #include <map>
 #include <optional>
+#include <vector>
 
 #include "kimera-vio/backend/VioBackend-definitions.h"
 #include "kimera-vio/common/MonoDepthTypes.h"
@@ -37,8 +38,10 @@ class MonoDepthAlignment {
 
   void cacheRawPacket(const MonoDepthRawPacket::ConstPtr& raw_packet);
 
-  static std::optional<FrameId> findOldestSmootherPoseFrameId(
+  static std::vector<FrameId> findSmootherPoseFrameIds(
       const gtsam::Values& state);
+
+  void pruneRawPacketCache(const std::vector<FrameId>& smoother_frame_ids);
 
   static bool sampleDepthBilinear(const cv::Mat& depth,
                                   const cv::Mat& valid_mask,
@@ -52,10 +55,19 @@ class MonoDepthAlignment {
                               const cv::Mat& depth,
                               const gtsam::Pose3& cam_T_smoother) const;
 
+  std::size_t backprojectPacket(const MonoDepthRawPacket& raw_packet,
+                                const gtsam::Pose3& world_T_cam,
+                                double depth_scale,
+                                Point3Vector* points,
+                                RgbaColorVector* colors,
+                                RgbaColorVector* weight_colors) const;
+
   MonoDepthMapOutput::ConstPtr buildMapOutput(
-      const MonoDepthRawPacket& raw_packet,
-      const gtsam::Pose3& world_T_cam,
-      const ScaleEstimate& scale_estimate);
+      const std::vector<FrameId>& smoother_frame_ids,
+      const gtsam::Values& state,
+      const PointsWithIdMap& landmarks,
+      const gtsam::Pose3& world_T_smoother,
+      const std::optional<FrameId>& insert_frame_id);
 
  private:
   MonoDepthParams params_;
@@ -64,8 +76,6 @@ class MonoDepthAlignment {
   std::optional<FrameId> last_processed_frame_id_;
   double scale_ = 1.0;
   bool scale_valid_ = false;
-  Point3Vector accumulated_map_;
-  RgbaColorVector accumulated_colors_;
 
   static constexpr std::size_t kRawPacketCacheSize = 256u;
 };

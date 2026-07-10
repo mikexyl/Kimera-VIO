@@ -24,6 +24,7 @@ double elapsedMs(
 
 constexpr double kSlowDenseMapInsertMs = 20.0;
 constexpr double kSlowDenseMapProcessMs = 30.0;
+constexpr int kDenseMapTimingLogEveryN = 100;
 
 double colorToIntensity(const Eigen::Vector4f& color) {
   const double r = static_cast<double>(color[0]);
@@ -90,6 +91,10 @@ class GaussianVoxelDenseMap final : public DenseMap {
             params.voxel_resolution)),
         mutex_(std::make_shared<std::mutex>()) {
     CHECK_GT(params_.voxel_resolution, 0.0);
+    // Keep the map persistent for now. gtsam_points' incremental voxel map
+    // defaults to LRU pruning, which drops old voxels after a few inserts.
+    voxel_map_->set_lru_clear_cycle(std::numeric_limits<int>::max());
+    voxel_map_->set_lru_horizon(std::numeric_limits<int>::max());
   }
 
   std::string backendName() const override {
@@ -172,7 +177,7 @@ class GaussianVoxelDenseMap final : public DenseMap {
                    << ", voxel_insert_ms=" << voxel_insert_ms
                    << ", total_ms=" << total_ms;
     } else {
-      LOG_EVERY_N(INFO, 10)
+      LOG_EVERY_N(INFO, kDenseMapTimingLogEveryN)
           << "Dense map insert timing: keyframe_id=" << packet->keyframe_id
           << ", input_points=" << packet_points.size()
           << ", inserted_points=" << points.size()
@@ -260,7 +265,7 @@ DenseMapOutput::ConstPtr DenseMapModule::process(
                    << ", build_output_ms=" << build_output_ms
                    << ", total_ms=" << total_ms;
     } else {
-      LOG_EVERY_N(INFO, 10)
+      LOG_EVERY_N(INFO, kDenseMapTimingLogEveryN)
           << "Dense map process timing: keyframe_id=" << packet->keyframe_id
           << ", input_points=" << packet->points->size()
           << ", map_points=" << output->map_points
