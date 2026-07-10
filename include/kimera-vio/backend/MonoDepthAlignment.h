@@ -27,6 +27,9 @@ class MonoDepthAlignment {
       const PointsWithIdMap& landmarks,
       const gtsam::Pose3& world_T_smoother);
 
+  void replaceRawPackets(
+      const std::map<FrameId, MonoDepthRawPacket::ConstPtr>& raw_packets);
+
  private:
   struct ScaleEstimate {
     double scale = 1.0;

@@ -35,10 +35,12 @@
 
 #include <limits>  // for numeric_limits<>
 #include <map>
+#include <set>
 #include <string>
 #include <utility>  // for make_pair
 #include <vector>
 
+#include "kimera-vio/common/MonoDepthUtils.h"
 #include "kimera-vio/common/VioNavState.h"
 #include "kimera-vio/imu-frontend/ImuFrontend-definitions.h"
 #include "kimera-vio/logging/Logger.h"
@@ -155,6 +157,8 @@ VioBackend::VioBackend(const gtsam::Pose3& B_Pose_leftCamRect,
 
 /* -------------------------------------------------------------------------- */
 BackendOutput::UniquePtr VioBackend::spinOnce(const BackendInput& input) {
+  backend_mono_depth_packet_ = input.mono_depth_raw_packet_;
+  cacheMonoDepthRawPacket(input.mono_depth_raw_packet_);
   if (VLOG_IS_ON(10)) {
     input.print();
   }
@@ -231,7 +235,7 @@ BackendOutput::UniquePtr VioBackend::spinOnce(const BackendInput& input) {
     gtsam::Pose3 W_P_smoother = W_P_cur * smoother_P_cur.inverse();
     MonoDepthMapOutput::ConstPtr mono_depth_map_output =
         mono_depth_alignment_
-            ? mono_depth_alignment_->process(input.mono_depth_raw_packet_,
+            ? mono_depth_alignment_->process(backend_mono_depth_packet_,
                                              state_,
                                              lmks_in_local_window_with_stats
                                                  .points,
@@ -281,6 +285,189 @@ BackendOutput::UniquePtr VioBackend::spinOnce(const BackendInput& input) {
   }
 
   return output_payload;
+}
+
+void VioBackend::cacheMonoDepthRawPacket(
+    const MonoDepthRawPacket::ConstPtr& raw_packet) {
+  if (!raw_packet || !raw_packet->da3_pose_scale_required) {
+    return;
+  }
+  mono_depth_canonical_packet_cache_[raw_packet->keyframe_id] = raw_packet;
+  while (mono_depth_canonical_packet_cache_.size() >
+         kMonoDepthPacketCacheSize) {
+    mono_depth_canonical_packet_cache_.erase(
+        mono_depth_canonical_packet_cache_.begin());
+  }
+}
+
+MonoDepthRawPacket::ConstPtr VioBackend::prepareMonoDepthPacketForBackend(
+    const MonoDepthRawPacket::ConstPtr& raw_packet,
+    const std::map<FrameId, gtsam::Pose3>& endpoint_body_poses) const {
+  if (!raw_packet || !raw_packet->da3_pose_scale_required) {
+    return raw_packet;
+  }
+
+  auto adjusted_packet = std::make_shared<MonoDepthRawPacket>(*raw_packet);
+  const auto fail_closed = [&](const std::string& error) {
+    adjusted_packet->da3_pose_scale_valid = false;
+    adjusted_packet->da3_pose_scale_error = error;
+    if (!adjusted_packet->depth.empty()) {
+      adjusted_packet->valid_mask = cv::Mat(
+          adjusted_packet->depth.size(), CV_8UC1, cv::Scalar(0));
+      const cv::Size weight_size = adjusted_packet->weight_image.empty()
+                                       ? adjusted_packet->metadata.model_size
+                                       : adjusted_packet->weight_image.size();
+      if (weight_size.width > 0 && weight_size.height > 0) {
+        adjusted_packet->weight_image =
+            cv::Mat(weight_size, CV_32FC1, cv::Scalar(0.0f));
+      } else {
+        adjusted_packet->weight_image.release();
+      }
+    }
+    LOG_EVERY_N(ERROR, 30)
+        << "Rejecting backend mono-depth packet for keyframe "
+        << adjusted_packet->keyframe_id << ": " << error;
+    return MonoDepthRawPacket::ConstPtr(adjusted_packet);
+  };
+
+  if (!raw_packet->da3_context_keyframe_id.has_value() ||
+      !raw_packet->da3_context_body_T_cam.has_value() ||
+      !raw_packet->da3_context_cam_T_current_cam.has_value()) {
+    return fail_closed("DA3 two-view relative pose metadata is missing");
+  }
+  if (raw_packet->depth.empty() || raw_packet->depth.type() != CV_32FC1) {
+    return fail_closed("DA3 depth map is missing or malformed");
+  }
+
+  const FrameId context_id = *raw_packet->da3_context_keyframe_id;
+  const auto context_pose_it = endpoint_body_poses.find(context_id);
+  const auto current_pose_it =
+      endpoint_body_poses.find(raw_packet->keyframe_id);
+  if (context_pose_it == endpoint_body_poses.end() ||
+      current_pose_it == endpoint_body_poses.end()) {
+    return fail_closed(
+        "backend endpoint pose is unavailable for the DA3 frame pair");
+  }
+
+  const gtsam::Pose3 world_T_context_cam =
+      context_pose_it->second.compose(*raw_packet->da3_context_body_T_cam);
+  const gtsam::Pose3 world_T_current_cam =
+      current_pose_it->second.compose(raw_packet->body_T_cam);
+  const MonoDepthPoseScaleEstimate estimate = estimateMonoDepthPoseScale(
+      *raw_packet->da3_context_cam_T_current_cam,
+      world_T_context_cam,
+      world_T_current_cam);
+  adjusted_packet->da3_camera_displacement =
+      estimate.da3_camera_displacement;
+  adjusted_packet->odometry_camera_displacement =
+      estimate.odometry_camera_displacement;
+  adjusted_packet->da3_pose_depth_scale = estimate.depth_scale;
+  adjusted_packet->da3_pose_scale_valid = estimate.valid;
+  adjusted_packet->da3_pose_scale_error = estimate.error;
+  if (!estimate.valid) {
+    return fail_closed(estimate.error);
+  }
+
+  adjusted_packet->depth =
+      scaleMonoDepthImage(raw_packet->depth, estimate.depth_scale);
+  if (adjusted_packet->depth.empty()) {
+    return fail_closed("failed to scale canonical DA3 depth image");
+  }
+
+  VLOG(1) << "Scaled DA3 pair [" << context_id << ", "
+          << raw_packet->keyframe_id
+          << "] from optimized endpoint camera displacement: da3="
+          << estimate.da3_camera_displacement
+          << ", odometry=" << estimate.odometry_camera_displacement
+          << ", depth_scale=" << estimate.depth_scale;
+  return adjusted_packet;
+}
+
+void VioBackend::refreshMonoDepthWindowAfterOptimization() {
+  if (!mono_depth_params_.enabled ||
+      mono_depth_canonical_packet_cache_.empty()) {
+    return;
+  }
+
+  std::set<FrameId> active_frame_ids;
+  for (const gtsam::Key key : state_.keys()) {
+    const gtsam::Symbol symbol(key);
+    if (symbol.chr() != kPoseSymbolChar) {
+      continue;
+    }
+    const FrameId frame_id = symbol.index();
+    active_frame_ids.insert(frame_id);
+    mono_depth_endpoint_pose_cache_[frame_id] =
+        state_.at<gtsam::Pose3>(key);
+  }
+
+  for (auto it = mono_depth_canonical_packet_cache_.begin();
+       it != mono_depth_canonical_packet_cache_.end();) {
+    if (active_frame_ids.find(it->first) != active_frame_ids.end()) {
+      ++it;
+    } else {
+      it = mono_depth_canonical_packet_cache_.erase(it);
+    }
+  }
+
+  std::set<FrameId> required_endpoint_ids = active_frame_ids;
+  for (const auto& frame_and_packet : mono_depth_canonical_packet_cache_) {
+    const MonoDepthRawPacket::ConstPtr& packet = frame_and_packet.second;
+    if (packet && packet->da3_context_keyframe_id.has_value()) {
+      required_endpoint_ids.insert(*packet->da3_context_keyframe_id);
+    }
+  }
+  for (auto it = mono_depth_endpoint_pose_cache_.begin();
+       it != mono_depth_endpoint_pose_cache_.end();) {
+    if (required_endpoint_ids.find(it->first) !=
+        required_endpoint_ids.end()) {
+      ++it;
+    } else {
+      it = mono_depth_endpoint_pose_cache_.erase(it);
+    }
+  }
+
+  std::map<FrameId, MonoDepthRawPacket::ConstPtr> refreshed_packets;
+  std::size_t pose_scaled_packets = 0u;
+  std::size_t rejected_packets = 0u;
+  for (const auto& frame_and_packet : mono_depth_canonical_packet_cache_) {
+    const MonoDepthRawPacket::ConstPtr adjusted_packet =
+        prepareMonoDepthPacketForBackend(frame_and_packet.second,
+                                         mono_depth_endpoint_pose_cache_);
+    refreshed_packets[frame_and_packet.first] = adjusted_packet;
+    if (adjusted_packet && adjusted_packet->da3_pose_scale_required) {
+      ++pose_scaled_packets;
+      if (!adjusted_packet->da3_pose_scale_valid) {
+        ++rejected_packets;
+      }
+    }
+  }
+  mono_depth_scaled_packet_cache_ = std::move(refreshed_packets);
+
+  if (backend_mono_depth_packet_) {
+    const auto adjusted_it = mono_depth_scaled_packet_cache_.find(
+        backend_mono_depth_packet_->keyframe_id);
+    backend_mono_depth_packet_ =
+        adjusted_it == mono_depth_scaled_packet_cache_.end()
+            ? nullptr
+            : adjusted_it->second;
+  }
+  if (mono_depth_alignment_) {
+    mono_depth_alignment_->replaceRawPackets(
+        mono_depth_scaled_packet_cache_);
+  }
+  if (mono_depth_vgicp_factors_) {
+    mono_depth_vgicp_factors_->replaceRawPackets(
+        mono_depth_scaled_packet_cache_);
+  }
+
+  LOG_EVERY_N(INFO, 10)
+      << "Refreshed mono-depth scales after smoother optimization: "
+      << "local_window_packets=" << mono_depth_scaled_packet_cache_.size()
+      << ", da3_pose_scaled=" << pose_scaled_packets
+      << ", rejected=" << rejected_packets
+      << ", optimized_endpoint_poses="
+      << mono_depth_endpoint_pose_cache_.size();
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1139,6 +1326,16 @@ bool VioBackend::optimize(
     const MonoDepthRawPacket::ConstPtr& mono_depth_raw_packet) {
   DCHECK(smoother_) << "Incremental smoother is a null pointer.";
 
+  cacheMonoDepthRawPacket(mono_depth_raw_packet);
+  // A new DA3 packet cannot be metric-scaled until the current smoother
+  // update has produced optimized poses for both endpoints. Previously
+  // refreshed local-window packets remain available inside the VGICP cache;
+  // the new packet joins that cache immediately after this optimization.
+  const MonoDepthRawPacket::ConstPtr mono_depth_packet_for_optimization =
+      mono_depth_raw_packet && !mono_depth_raw_packet->da3_pose_scale_required
+          ? mono_depth_raw_packet
+          : nullptr;
+
   // Only for statistics and debugging.
   // Store start time to calculate absolute total time taken.
   const auto& total_start_time = utils::Timer::tic();
@@ -1219,7 +1416,7 @@ bool VioBackend::optimize(
                             new_imu_prior_and_other_factors_.end());
 
   if (mono_depth_vgicp_factors_) {
-    mono_depth_vgicp_factors_->addFactors(mono_depth_raw_packet,
+    mono_depth_vgicp_factors_->addFactors(mono_depth_packet_for_optimization,
                                           state_,
                                           new_values_,
                                           feature_tracks_,
@@ -1344,6 +1541,7 @@ bool VioBackend::optimize(
     // Update states we need for next iteration, if smoother is ok.
     if (is_smoother_ok) {
       updateStates(cur_id);
+      refreshMonoDepthWindowAfterOptimization();
 
       // TODO: Add Update latest covariance --> move flag
       if (FLAGS_compute_state_covariance) {

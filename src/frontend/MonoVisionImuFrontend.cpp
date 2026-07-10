@@ -77,6 +77,18 @@ MonoVisionImuFrontend::~MonoVisionImuFrontend() {
   LOG(INFO) << "MonoVisionImuFrontend destructor called.";
 }
 
+std::optional<gtsam::Pose3> MonoVisionImuFrontend::predictCurrentBodyPose(
+    const GtsamPreintegrationType& pim) const {
+  const std::optional<VioNavStateTimestamped> backend_nav_state =
+      getLatestNavStateFromBackend();
+  if (!backend_nav_state.has_value()) {
+    return std::nullopt;
+  }
+  const gtsam::NavState previous_nav_state(backend_nav_state->pose_,
+                                           backend_nav_state->velocity_);
+  return pim.predict(previous_nav_state, backend_nav_state->imu_bias_).pose();
+}
+
 MonoFrontendOutput::UniquePtr MonoVisionImuFrontend::bootstrapSpinMono(
     MonoFrontendInputPayload::UniquePtr&& input) {
   CHECK(input);
@@ -197,7 +209,8 @@ MonoFrontendOutput::UniquePtr MonoVisionImuFrontend::nominalSpinMono(
     VLOG(2) << "Frontend output is a keyframe: pushing to output callbacks.";
     const MonoDepthRawPacket::ConstPtr mono_depth_raw_packet =
         mono_depth_inference_
-            ? mono_depth_inference_->inferKeyframe(*mono_frame_lkf_)
+            ? mono_depth_inference_->inferKeyframe(
+                  *mono_frame_lkf_, predictCurrentBodyPose(*pim))
             : nullptr;
     return std::make_unique<MonoFrontendOutput>(
         frontend_state_ == FrontendState::Nominal,

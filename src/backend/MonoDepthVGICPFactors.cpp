@@ -13,6 +13,7 @@
 #include <limits>
 #include <numeric>
 
+#include "kimera-vio/common/MonoDepthUtils.h"
 #include "kimera-vio/utils/Timer.h"
 
 namespace VIO {
@@ -155,6 +156,15 @@ void MonoDepthVGICPFactors::notifySmootherUpdateResult(
   pending_factor_pairs_.clear();
 }
 
+void MonoDepthVGICPFactors::replaceRawPackets(
+    const std::map<FrameId, MonoDepthRawPacket::ConstPtr>& raw_packets) {
+  raw_packet_cache_ = raw_packets;
+  dense_frames_.clear();
+  while (raw_packet_cache_.size() > kRawPacketCacheSize) {
+    raw_packet_cache_.erase(raw_packet_cache_.begin());
+  }
+}
+
 void MonoDepthVGICPFactors::cacheRawPacket(
     const MonoDepthRawPacket::ConstPtr& raw_packet) {
   if (!raw_packet) {
@@ -291,6 +301,8 @@ bool MonoDepthVGICPFactors::ensureDenseFrame(const FrameId& frame_id) {
   const double total_ms = elapsedMs(total_tic);
   LOG_EVERY_N(INFO, kVgicpLogEveryN)
       << "Cached mono-depth VGICP cloud: keyframe_id=" << frame_id
+      << ", da3_pose_depth_scale="
+      << raw_it->second->da3_pose_depth_scale
       << ", candidate_points=" << candidate_points
       << ", sampled_points=" << sampled_points
       << ", downsampled_points=" << cloud->size()
@@ -316,10 +328,6 @@ MonoDepthVGICPFactors::buildBodyFrameCloud(
       raw_packet.valid_mask.type() != CV_8UC1) {
     return nullptr;
   }
-  const bool has_weight_image =
-      !raw_packet.weight_image.empty() &&
-      raw_packet.weight_image.type() == CV_32FC1;
-
   const double fx = raw_packet.intrinsics.fx;
   const double fy = raw_packet.intrinsics.fy;
   const double cx = raw_packet.intrinsics.cx;
@@ -340,10 +348,6 @@ MonoDepthVGICPFactors::buildBodyFrameCloud(
 
   int rows = std::min(raw_packet.depth.rows, raw_packet.valid_mask.rows);
   int cols = std::min(raw_packet.depth.cols, raw_packet.valid_mask.cols);
-  if (has_weight_image) {
-    rows = std::min(rows, raw_packet.weight_image.rows);
-    cols = std::min(cols, raw_packet.weight_image.cols);
-  }
 
   std::vector<Eigen::Vector4d, Eigen::aligned_allocator<Eigen::Vector4d>>
       body_points;
@@ -357,8 +361,6 @@ MonoDepthVGICPFactors::buildBodyFrameCloud(
   for (int v = 0; v < rows; v += stride) {
     const float* depth_row = raw_packet.depth.ptr<float>(v);
     const uint8_t* valid_row = raw_packet.valid_mask.ptr<uint8_t>(v);
-    const float* weight_row =
-        has_weight_image ? raw_packet.weight_image.ptr<float>(v) : nullptr;
     for (int u = 0; u < cols; u += stride) {
       if (valid_row[u] == 0u) {
         continue;
@@ -383,8 +385,8 @@ MonoDepthVGICPFactors::buildBodyFrameCloud(
           !std::isfinite(body_point.z())) {
         continue;
       }
-      const double weight =
-          weight_row ? static_cast<double>(weight_row[u]) : 1.0;
+      const double weight = static_cast<double>(sampleMonoDepthWeight(
+          raw_packet.weight_image, raw_packet.depth.size(), u, v));
       if (!std::isfinite(weight) || weight <= 0.0) {
         continue;
       }

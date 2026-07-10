@@ -23,6 +23,13 @@ struct MonoDepthConfidenceFilterResult {
   std::string error;
 };
 
+struct MonoDepthPairDistanceGateResult {
+  bool valid = false;
+  bool passes = false;
+  double camera_displacement_m = 0.0;
+  std::string error;
+};
+
 MonoDepthConfidenceFilterResult makeMonoDepthConfidenceFilter(
     const cv::Size& expected_size,
     const cv::Mat& confidence,
@@ -31,6 +38,11 @@ MonoDepthConfidenceFilterResult makeMonoDepthConfidenceFilter(
 cv::Mat makeMonoDepthValidMask(const cv::Mat& depth,
                                const cv::Mat& sky_mask,
                                const cv::Mat& confidence_mask = cv::Mat());
+
+MonoDepthPairDistanceGateResult evaluateMonoDepthPairDistanceGate(
+    const gtsam::Pose3& odometry_world_T_context_cam,
+    const gtsam::Pose3& odometry_world_T_current_cam,
+    double min_keyframe_distance_m);
 
 class MonoDepthInference {
  public:
@@ -41,7 +53,10 @@ class MonoDepthInference {
   explicit MonoDepthInference(const MonoDepthParams& params);
   ~MonoDepthInference() = default;
 
-  MonoDepthRawPacket::ConstPtr inferKeyframe(const Frame& frame) const;
+  MonoDepthRawPacket::ConstPtr inferKeyframe(
+      const Frame& frame,
+      const std::optional<gtsam::Pose3>& odometry_world_T_body =
+          std::nullopt) const;
 
  private:
   struct BufferedKeyframe {
@@ -50,26 +65,31 @@ class MonoDepthInference {
     cv::Mat image_bgr;
     MonoDepthIntrinsics intrinsics;
     gtsam::Pose3 body_T_cam;
+    std::optional<gtsam::Pose3> odometry_world_T_body;
     KeypointsCV keypoints;
     LandmarkIds landmark_ids;
   };
 
+  struct Da3PairInfo {
+    FrameId context_keyframe_id = 0u;
+    gtsam::Pose3 context_body_T_cam;
+    std::optional<gtsam::Pose3> context_cam_T_current_cam;
+  };
+
   static cv::Mat toBgrImage(const cv::Mat& image);
-  static std::optional<BufferedKeyframe> bufferKeyframe(const Frame& frame);
+  static std::optional<BufferedKeyframe> bufferKeyframe(
+      const Frame& frame,
+      const std::optional<gtsam::Pose3>& odometry_world_T_body);
   static xfeat::CameraIntrinsics toXfeatIntrinsics(
       const MonoDepthIntrinsics& intrinsics);
+  static std::optional<gtsam::Pose3> makeDa3ContextToCurrentPose(
+      const xfeat::MonoDepthResult& context_result,
+      const xfeat::MonoDepthResult& current_result);
   MonoDepthRawPacket::ConstPtr buildPacket(
       const BufferedKeyframe& frame,
       const xfeat::MonoDepthResult& depth_result,
-      bool apply_confidence_filter) const;
-  static Eigen::Vector3d backprojectDepthPixel(
-      int u,
-      int v,
-      float z,
-      const MonoDepthIntrinsics& intrinsics);
-  cv::Mat makeWeightImage(const cv::Mat& depth,
-                          const cv::Mat& valid_mask,
-                          const MonoDepthIntrinsics& intrinsics) const;
+      bool apply_confidence_filter,
+      const std::optional<Da3PairInfo>& pair_info = std::nullopt) const;
 
  private:
   MonoDepthParams params_;

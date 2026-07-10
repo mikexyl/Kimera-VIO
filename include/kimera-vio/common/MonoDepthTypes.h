@@ -9,6 +9,7 @@
 #include <cctype>
 #include <cstddef>
 #include <opencv2/core.hpp>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -49,7 +50,7 @@ inline MonoDepthMode monoDepthModeFromString(std::string mode) {
 struct MonoDepthParams {
   bool enabled = false;
   std::string engine_path;
-  int keyframe_skip = 0;
+  double min_keyframe_distance_m = 1.0;
   int point_stride = 4;
   int max_points_per_keyframe = 5000;
   int visualization_point_stride = 4;
@@ -73,7 +74,7 @@ struct MonoDepthParams {
 
   bool operator==(const MonoDepthParams& rhs) const {
     return enabled == rhs.enabled && engine_path == rhs.engine_path &&
-           keyframe_skip == rhs.keyframe_skip &&
+           min_keyframe_distance_m == rhs.min_keyframe_distance_m &&
            point_stride == rhs.point_stride &&
            max_points_per_keyframe == rhs.max_points_per_keyframe &&
            visualization_point_stride == rhs.visualization_point_stride &&
@@ -125,6 +126,15 @@ struct MonoDepthRawPacket {
   std::size_t confidence_rejected_pixels = 0u;
   double confidence_retained_fraction = 1.0;
   std::string confidence_error;
+  bool da3_pose_scale_required = false;
+  std::optional<FrameId> da3_context_keyframe_id;
+  std::optional<gtsam::Pose3> da3_context_body_T_cam;
+  std::optional<gtsam::Pose3> da3_context_cam_T_current_cam;
+  bool da3_pose_scale_valid = false;
+  double da3_camera_displacement = 0.0;
+  double odometry_camera_displacement = 0.0;
+  double da3_pose_depth_scale = 1.0;
+  std::string da3_pose_scale_error;
   MonoDepthIntrinsics intrinsics;
   gtsam::Pose3 body_T_cam;
   KeypointsCV keypoints;
@@ -142,6 +152,10 @@ struct MonoDepthMapOutput {
   double scale_log_rmse = 0.0;
   std::size_t scale_candidate_pairs = 0u;
   std::size_t scale_inlier_pairs = 0u;
+  bool da3_pose_scale_valid = false;
+  double da3_camera_displacement = 0.0;
+  double odometry_camera_displacement = 0.0;
+  double da3_pose_depth_scale = 1.0;
   Point3Vector keyframe_cloud;
   RgbaColorVector keyframe_colors;
   Point3Vector window_cloud;

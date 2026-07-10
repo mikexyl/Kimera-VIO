@@ -7,6 +7,7 @@
 #include <limits>
 #include <stdexcept>
 
+#include "kimera-vio/common/MonoDepthUtils.h"
 #include "kimera-vio/frontend/MonoDepthInference.h"
 
 #define EXPECT_TRUE(condition, message)                                 \
@@ -124,6 +125,164 @@ int testInvalidThresholdsAreRejected() {
   return EXIT_SUCCESS;
 }
 
+int testPoseScaleUsesEndpointCameraDisplacement() {
+  const double pi = std::acos(-1.0);
+  const gtsam::Pose3 da3_context_T_current(
+      gtsam::Rot3(), gtsam::Point3(2.0, 0.0, 0.0));
+
+  // Quarter-circle endpoint poses. The traveled arc is pi/2, while the
+  // camera-center chord between timestamps is sqrt(2). Only the chord is used.
+  const gtsam::Pose3 odometry_world_T_context(
+      gtsam::Rot3::Rz(pi / 2.0), gtsam::Point3(1.0, 0.0, 0.0));
+  const gtsam::Pose3 odometry_world_T_current(
+      gtsam::Rot3::Rz(pi), gtsam::Point3(0.0, 1.0, 0.0));
+
+  const auto estimate = VIO::estimateMonoDepthPoseScale(
+      da3_context_T_current,
+      odometry_world_T_context,
+      odometry_world_T_current);
+  EXPECT_TRUE(estimate.valid, "non-zero endpoint displacements are valid");
+  EXPECT_TRUE(std::abs(estimate.odometry_camera_displacement -
+                       std::sqrt(2.0)) < 1e-12,
+              "odometry displacement is the endpoint chord, not arc length");
+  EXPECT_TRUE(std::abs(estimate.da3_camera_displacement - 2.0) < 1e-12,
+              "DA3 displacement comes from the predicted relative pose");
+  EXPECT_TRUE(std::abs(estimate.depth_scale - std::sqrt(2.0) / 2.0) <
+                  1e-12,
+              "depth scale is odometry chord divided by DA3 displacement");
+
+  const auto zero_da3 = VIO::estimateMonoDepthPoseScale(
+      gtsam::Pose3(),
+      odometry_world_T_context,
+      odometry_world_T_current);
+  EXPECT_TRUE(!zero_da3.valid, "zero DA3 displacement is rejected");
+
+  const auto zero_odometry = VIO::estimateMonoDepthPoseScale(
+      da3_context_T_current,
+      odometry_world_T_context,
+      odometry_world_T_context);
+  EXPECT_TRUE(!zero_odometry.valid,
+              "zero odometry endpoint displacement is rejected");
+  return EXIT_SUCCESS;
+}
+
+int testPoseScaleAlwaysStartsFromCanonicalDepth() {
+  const cv::Mat canonical_depth(1, 2, CV_32FC1, cv::Scalar(2.0f));
+  const cv::Mat first_refresh =
+      VIO::scaleMonoDepthImage(canonical_depth, 3.0);
+  const cv::Mat second_refresh =
+      VIO::scaleMonoDepthImage(canonical_depth, 4.0);
+
+  EXPECT_TRUE(!first_refresh.empty() && !second_refresh.empty(),
+              "valid scales produce depth images");
+  EXPECT_TRUE(std::abs(canonical_depth.at<float>(0, 0) - 2.0f) < 1e-6f,
+              "refresh does not mutate canonical DA3 depth");
+  EXPECT_TRUE(std::abs(first_refresh.at<float>(0, 0) - 6.0f) < 1e-6f,
+              "first refresh applies its scale to canonical depth");
+  EXPECT_TRUE(std::abs(second_refresh.at<float>(0, 0) - 8.0f) < 1e-6f,
+              "later refresh replaces rather than compounds scale");
+  EXPECT_TRUE(first_refresh.data != canonical_depth.data &&
+                  second_refresh.data != canonical_depth.data,
+              "scaled depth images own distinct storage");
+  return EXIT_SUCCESS;
+}
+
+int testWeightImageUsesDa3Resolution() {
+  cv::Mat depth(6, 8, CV_32FC1, cv::Scalar(4.0f));
+  cv::Mat valid_mask(6, 8, CV_8UC1, cv::Scalar(255u));
+  VIO::MonoDepthIntrinsics intrinsics;
+  intrinsics.fx = 8.0;
+  intrinsics.fy = 8.0;
+  intrinsics.cx = 3.5;
+  intrinsics.cy = 2.5;
+  intrinsics.width = depth.cols;
+  intrinsics.height = depth.rows;
+  VIO::MonoDepthParams params;
+  params.depth_weight_normal_radius = 1;
+  params.min_depth_m = 0.1;
+  params.max_depth_m = 20.0;
+
+  const cv::Mat weights = VIO::makeMonoDepthWeightImageAtSize(
+      depth, valid_mask, intrinsics, cv::Size(4, 3), params);
+  EXPECT_TRUE(weights.type() == CV_32FC1,
+              "downsampled weights retain float type");
+  EXPECT_TRUE(weights.size() == cv::Size(4, 3),
+              "weights are computed on the requested DA3 grid");
+  EXPECT_TRUE(weights.at<float>(1, 1) > 0.0f,
+              "valid planar depth produces a positive interior weight");
+
+  valid_mask.setTo(cv::Scalar(0u));
+  const cv::Mat rejected_weights = VIO::makeMonoDepthWeightImageAtSize(
+      depth, valid_mask, intrinsics, cv::Size(4, 3), params);
+  EXPECT_TRUE(cv::countNonZero(rejected_weights) == 0,
+              "rejected full-resolution pixels remain zero on the weight grid");
+  return EXIT_SUCCESS;
+}
+
+int testLowResolutionWeightSampling() {
+  const cv::Mat weights =
+      (cv::Mat_<float>(2, 2) << 0.1f, 0.2f, 0.3f, 0.4f);
+  const cv::Size depth_size(4, 4);
+  EXPECT_TRUE(std::abs(VIO::sampleMonoDepthWeight(
+                           weights, depth_size, 0, 0) -
+                       0.1f) < 1e-6f,
+              "top-left depth pixels map to the top-left weight");
+  EXPECT_TRUE(std::abs(VIO::sampleMonoDepthWeight(
+                           weights, depth_size, 3, 0) -
+                       0.2f) < 1e-6f,
+              "top-right depth pixels map to the top-right weight");
+  EXPECT_TRUE(std::abs(VIO::sampleMonoDepthWeight(
+                           weights, depth_size, 0, 3) -
+                       0.3f) < 1e-6f,
+              "bottom-left depth pixels map to the bottom-left weight");
+  EXPECT_TRUE(std::abs(VIO::sampleMonoDepthWeight(
+                           weights, depth_size, 3, 3) -
+                       0.4f) < 1e-6f,
+              "bottom-right depth pixels map to the bottom-right weight");
+  EXPECT_TRUE(std::abs(VIO::sampleMonoDepthWeight(
+                           cv::Mat(), depth_size, 2, 2) -
+                       1.0f) < 1e-6f,
+              "missing weights retain the legacy unit-weight fallback");
+  return EXIT_SUCCESS;
+}
+
+int testPairDistanceGateUsesEndpointCameraChord() {
+  const double pi = std::acos(-1.0);
+  const gtsam::Pose3 world_T_context_cam(
+      gtsam::Rot3::Rz(pi / 2.0), gtsam::Point3(1.0, 0.0, 0.0));
+  const gtsam::Pose3 world_T_current_cam(
+      gtsam::Rot3::Rz(pi), gtsam::Point3(0.0, 1.0, 0.0));
+  const double chord = std::sqrt(2.0);
+
+  const auto boundary = VIO::evaluateMonoDepthPairDistanceGate(
+      world_T_context_cam, world_T_current_cam, chord);
+  EXPECT_TRUE(boundary.valid && boundary.passes,
+              "distance equal to the minimum threshold passes");
+  EXPECT_TRUE(std::abs(boundary.camera_displacement_m - chord) < 1e-12,
+              "distance gate uses endpoint camera-center chord");
+
+  const auto too_close = VIO::evaluateMonoDepthPairDistanceGate(
+      world_T_context_cam, world_T_current_cam, 1.5);
+  EXPECT_TRUE(too_close.valid && !too_close.passes,
+              "pair below the minimum camera displacement is held");
+
+  const auto disabled = VIO::evaluateMonoDepthPairDistanceGate(
+      gtsam::Pose3(), gtsam::Pose3(), 0.0);
+  EXPECT_TRUE(disabled.valid && disabled.passes,
+              "zero threshold disables distance filtering");
+
+  const auto negative = VIO::evaluateMonoDepthPairDistanceGate(
+      world_T_context_cam, world_T_current_cam, -1.0);
+  EXPECT_TRUE(!negative.valid, "negative distance threshold is rejected");
+  const auto non_finite = VIO::evaluateMonoDepthPairDistanceGate(
+      world_T_context_cam,
+      world_T_current_cam,
+      std::numeric_limits<double>::quiet_NaN());
+  EXPECT_TRUE(!non_finite.valid,
+              "non-finite distance threshold is rejected");
+  return EXIT_SUCCESS;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -135,6 +294,11 @@ int main(int argc, char** argv) {
   status |= testMissingAndMalformedConfidenceFailClosed();
   status |= testDisabledFilteringAndSingleViewBehavior();
   status |= testInvalidThresholdsAreRejected();
+  status |= testPoseScaleUsesEndpointCameraDisplacement();
+  status |= testPoseScaleAlwaysStartsFromCanonicalDepth();
+  status |= testWeightImageUsesDa3Resolution();
+  status |= testLowResolutionWeightSampling();
+  status |= testPairDistanceGateUsesEndpointCameraChord();
   if (status == EXIT_SUCCESS) {
     std::cout << "All mono-depth confidence tests PASSED.\n";
   }

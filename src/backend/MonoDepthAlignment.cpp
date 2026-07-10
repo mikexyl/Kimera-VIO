@@ -8,6 +8,8 @@
 #include <iterator>
 #include <limits>
 
+#include "kimera-vio/common/MonoDepthUtils.h"
+
 namespace VIO {
 namespace {
 
@@ -63,6 +65,14 @@ MonoDepthMapOutput::ConstPtr MonoDepthAlignment::process(
     last_processed_frame_id_ = *insert_frame_id;
   }
   return output;
+}
+
+void MonoDepthAlignment::replaceRawPackets(
+    const std::map<FrameId, MonoDepthRawPacket::ConstPtr>& raw_packets) {
+  raw_packet_cache_ = raw_packets;
+  while (raw_packet_cache_.size() > kRawPacketCacheSize) {
+    raw_packet_cache_.erase(raw_packet_cache_.begin());
+  }
 }
 
 void MonoDepthAlignment::cacheRawPacket(
@@ -339,12 +349,6 @@ std::size_t MonoDepthAlignment::backprojectPacket(
     const float* depth_row = raw_packet.depth.ptr<float>(v);
     const uint8_t* valid_row = raw_packet.valid_mask.ptr<uint8_t>(v);
     const cv::Vec3b* color_row = raw_packet.source_image_bgr.ptr<cv::Vec3b>(v);
-    const float* weight_row =
-        !raw_packet.weight_image.empty() &&
-                raw_packet.weight_image.type() == CV_32FC1 &&
-                raw_packet.weight_image.rows > v
-            ? raw_packet.weight_image.ptr<float>(v)
-            : nullptr;
     for (int u = 0; u < cols; u += stride) {
       if (valid_row[u] == 0u) {
         continue;
@@ -368,10 +372,8 @@ std::size_t MonoDepthAlignment::backprojectPacket(
                                     static_cast<float>(bgr[0]),
                                     180.0f);
       if (params_.visualize_weights) {
-        const double weight =
-            weight_row && raw_packet.weight_image.cols > u
-                ? static_cast<double>(weight_row[u])
-                : 1.0;
+        const double weight = static_cast<double>(sampleMonoDepthWeight(
+            raw_packet.weight_image, raw_packet.depth.size(), u, v));
         candidate_weight_colors.emplace_back(weightToColor(weight));
       }
     }
@@ -467,6 +469,13 @@ MonoDepthMapOutput::ConstPtr MonoDepthAlignment::buildMapOutput(
     }
 
     const MonoDepthRawPacket& packet = *raw_it->second;
+    if (packet.da3_pose_scale_required) {
+      output->da3_pose_scale_valid = packet.da3_pose_scale_valid;
+      output->da3_camera_displacement = packet.da3_camera_displacement;
+      output->odometry_camera_displacement =
+          packet.odometry_camera_displacement;
+      output->da3_pose_depth_scale = packet.da3_pose_depth_scale;
+    }
     const gtsam::Pose3 smoother_T_body = state.at<Pose3>(pose_key);
     const gtsam::Pose3 smoother_T_cam =
         smoother_T_body.compose(packet.body_T_cam);
@@ -525,7 +534,11 @@ MonoDepthMapOutput::ConstPtr MonoDepthAlignment::buildMapOutput(
           << output->keyframe_cloud.size() << "/" << keyframe_candidate_points
           << ", scale: " << output->scale << " from "
           << output->scale_inlier_pairs << "/" << output->scale_candidate_pairs
-          << " landmark depth pairs, log rmse: " << output->scale_log_rmse;
+          << " landmark depth pairs, log rmse: " << output->scale_log_rmse
+          << ", DA3 pose scale: " << output->da3_pose_depth_scale
+          << " (DA3 displacement=" << output->da3_camera_displacement
+          << ", odometry endpoint displacement="
+          << output->odometry_camera_displacement << ")";
 
   return output;
 }

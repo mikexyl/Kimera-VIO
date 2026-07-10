@@ -38,6 +38,9 @@ class MonoDepthVGICPFactors {
                   const FeatureTracks& feature_tracks,
                   gtsam::NonlinearFactorGraph* new_factors);
 
+  void replaceRawPackets(
+      const std::map<FrameId, MonoDepthRawPacket::ConstPtr>& raw_packets);
+
   void notifySmootherUpdateResult(bool update_succeeded);
 
  private:

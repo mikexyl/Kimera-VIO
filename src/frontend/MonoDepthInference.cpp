@@ -8,11 +8,42 @@
 #include <filesystem>
 #include <stdexcept>
 
+#include "kimera-vio/common/MonoDepthUtils.h"
+
 #ifdef HAVE_TENSORRT
 #include <xfeat-cpp/mono_depth/depth_anything_v3_trt.h>
 #endif
 
 namespace VIO {
+
+MonoDepthPairDistanceGateResult evaluateMonoDepthPairDistanceGate(
+    const gtsam::Pose3& odometry_world_T_context_cam,
+    const gtsam::Pose3& odometry_world_T_current_cam,
+    const double min_keyframe_distance_m) {
+  MonoDepthPairDistanceGateResult result;
+  if (!std::isfinite(min_keyframe_distance_m) ||
+      min_keyframe_distance_m < 0.0) {
+    result.error =
+        "minimum keyframe distance must be finite and non-negative";
+    return result;
+  }
+
+  result.camera_displacement_m =
+      odometry_world_T_context_cam
+          .between(odometry_world_T_current_cam)
+          .translation()
+          .norm();
+  if (!std::isfinite(result.camera_displacement_m)) {
+    result.error = "odometry camera-center displacement is not finite";
+    return result;
+  }
+  result.valid = true;
+  const double comparison_tolerance =
+      1e-9 * std::max(1.0, min_keyframe_distance_m);
+  result.passes = result.camera_displacement_m + comparison_tolerance >=
+                  min_keyframe_distance_m;
+  return result;
+}
 
 MonoDepthInference::MonoDepthInference(const MonoDepthParams& params)
     : params_(params), mono_depth_(nullptr), buffered_keyframe_(std::nullopt) {
@@ -20,6 +51,12 @@ MonoDepthInference::MonoDepthInference(const MonoDepthParams& params)
       params_.min_confidence < 0.0) {
     LOG(FATAL) << "mono_depth.min_confidence must be finite and non-negative, "
                << "but got " << params_.min_confidence;
+  }
+  if (!std::isfinite(params_.min_keyframe_distance_m) ||
+      params_.min_keyframe_distance_m < 0.0) {
+    LOG(FATAL) << "mono_depth.min_keyframe_distance_m must be finite and "
+                  "non-negative, but got "
+               << params_.min_keyframe_distance_m;
   }
   if (!params_.enabled) {
     return;
@@ -53,7 +90,9 @@ MonoDepthInference::MonoDepthInference(const MonoDepthParams& params)
   LOG(INFO) << "Initialized DA3 mono depth inference with engine: "
             << params_.engine_path << ", mode="
             << monoDepthModeToString(params_.mode)
-            << ", min_confidence=" << params_.min_confidence;
+            << ", min_confidence=" << params_.min_confidence
+            << ", min_keyframe_distance_m="
+            << params_.min_keyframe_distance_m;
 #else
   LOG(FATAL) << "Mono depth inference requires xfeat-cpp TensorRT support, "
                 "but HAVE_TENSORRT is not enabled.";
@@ -61,7 +100,8 @@ MonoDepthInference::MonoDepthInference(const MonoDepthParams& params)
 }
 
 MonoDepthRawPacket::ConstPtr MonoDepthInference::inferKeyframe(
-    const Frame& frame) const {
+    const Frame& frame,
+    const std::optional<gtsam::Pose3>& odometry_world_T_body) const {
   if (!params_.enabled) {
     return nullptr;
   }
@@ -69,18 +109,17 @@ MonoDepthRawPacket::ConstPtr MonoDepthInference::inferKeyframe(
   CHECK(frame.isKeyframe_);
   CHECK(frame.keyframe_id_.has_value());
 
-  const int keyframe_skip = params_.keyframe_skip > 0
-                                ? params_.keyframe_skip
-                                : 0;
-  const FrameId keyframe_interval =
-      static_cast<FrameId>(keyframe_skip + 1);
-  if ((*frame.keyframe_id_ % keyframe_interval) != 0u) {
-    VLOG(1) << "Skipping DA3 mono depth for keyframe " << *frame.keyframe_id_
-            << " because mono_depth.keyframe_skip=" << keyframe_skip;
+  if (params_.mode == MonoDepthMode::kMultiView &&
+      !odometry_world_T_body.has_value()) {
+    LOG_EVERY_N(WARNING, 30)
+        << "Holding DA3 two-view inference at keyframe "
+        << *frame.keyframe_id_
+        << " because a metric odometry pose is unavailable.";
     return nullptr;
   }
 
-  const std::optional<BufferedKeyframe> current = bufferKeyframe(frame);
+  const std::optional<BufferedKeyframe> current =
+      bufferKeyframe(frame, odometry_world_T_body);
   if (!current.has_value()) {
     return nullptr;
   }
@@ -107,13 +146,42 @@ MonoDepthRawPacket::ConstPtr MonoDepthInference::inferKeyframe(
     return nullptr;
   }
 
+  CHECK(buffered_keyframe_->odometry_world_T_body.has_value());
+  CHECK(current->odometry_world_T_body.has_value());
+  const gtsam::Pose3 odometry_world_T_context_cam =
+      buffered_keyframe_->odometry_world_T_body->compose(
+          buffered_keyframe_->body_T_cam);
+  const gtsam::Pose3 odometry_world_T_current_cam =
+      current->odometry_world_T_body->compose(current->body_T_cam);
+  const MonoDepthPairDistanceGateResult distance_gate =
+      evaluateMonoDepthPairDistanceGate(odometry_world_T_context_cam,
+                                        odometry_world_T_current_cam,
+                                        params_.min_keyframe_distance_m);
+  if (!distance_gate.valid) {
+    LOG(ERROR) << "Cannot evaluate DA3 two-view distance gate for pair ["
+               << buffered_keyframe_->keyframe_id << ", "
+               << current->keyframe_id << "]: " << distance_gate.error;
+    return nullptr;
+  }
+  if (!distance_gate.passes) {
+    VLOG(1) << "Holding DA3 two-view context keyframe "
+            << buffered_keyframe_->keyframe_id << "; candidate keyframe "
+            << current->keyframe_id << " has endpoint camera displacement "
+            << distance_gate.camera_displacement_m << " m < "
+            << params_.min_keyframe_distance_m << " m.";
+    return nullptr;
+  }
+
   BufferedKeyframe previous = std::move(*buffered_keyframe_);
   // Advance before inference so a failed pair does not get retried and the
-  // next sampled keyframe still uses the newest available context view.
+  // next distance-gated pair uses the newest accepted context view.
   buffered_keyframe_ = current;
 
   LOG(INFO) << "Running pose-free DA3 two-view pair ["
-            << previous.keyframe_id << ", " << current->keyframe_id << "]";
+            << previous.keyframe_id << ", " << current->keyframe_id
+            << "] with odometry endpoint camera displacement "
+            << distance_gate.camera_displacement_m << " m (threshold "
+            << params_.min_keyframe_distance_m << " m)";
   std::vector<xfeat::MonoDepthResult> depth_results;
   try {
     const std::vector<cv::Mat> images{previous.image_bgr, current->image_bgr};
@@ -135,8 +203,20 @@ MonoDepthRawPacket::ConstPtr MonoDepthInference::inferKeyframe(
     return nullptr;
   }
 
+  Da3PairInfo pair_info;
+  pair_info.context_keyframe_id = previous.keyframe_id;
+  pair_info.context_body_T_cam = previous.body_T_cam;
+  pair_info.context_cam_T_current_cam =
+      makeDa3ContextToCurrentPose(depth_results[0], depth_results[1]);
+  if (!pair_info.context_cam_T_current_cam.has_value()) {
+    LOG(ERROR) << "DA3 pair [" << previous.keyframe_id << ", "
+               << current->keyframe_id
+               << "] did not return usable predicted camera poses; backend "
+                  "depth scaling will fail closed.";
+  }
+
   MonoDepthRawPacket::ConstPtr packet =
-      buildPacket(*current, depth_results[1], true);
+      buildPacket(*current, depth_results[1], true, pair_info);
   if (packet) {
     LOG(INFO) << "DA3 pair [" << previous.keyframe_id << ", "
               << current->keyframe_id << "] emitted keyframe "
@@ -170,7 +250,9 @@ cv::Mat MonoDepthInference::toBgrImage(const cv::Mat& image) {
 }
 
 std::optional<MonoDepthInference::BufferedKeyframe>
-MonoDepthInference::bufferKeyframe(const Frame& frame) {
+MonoDepthInference::bufferKeyframe(
+    const Frame& frame,
+    const std::optional<gtsam::Pose3>& odometry_world_T_body) {
   const cv::Mat bgr_image = toBgrImage(frame.img_);
   if (bgr_image.empty()) {
     LOG(ERROR) << "Skipping mono depth inference for an empty or unsupported "
@@ -196,6 +278,7 @@ MonoDepthInference::bufferKeyframe(const Frame& frame) {
     return std::nullopt;
   }
   buffered.body_T_cam = frame.cam_param_.body_Pose_cam_;
+  buffered.odometry_world_T_body = odometry_world_T_body;
   buffered.keypoints = frame.keypoints_;
   buffered.landmark_ids = frame.landmarks_;
   return buffered;
@@ -211,6 +294,44 @@ xfeat::CameraIntrinsics MonoDepthInference::toXfeatIntrinsics(
   converted.width = intrinsics.width;
   converted.height = intrinsics.height;
   return converted;
+}
+
+std::optional<gtsam::Pose3> MonoDepthInference::makeDa3ContextToCurrentPose(
+    const xfeat::MonoDepthResult& context_result,
+    const xfeat::MonoDepthResult& current_result) {
+  const auto to_pose = [](const std::optional<cv::Matx44f>& extrinsic)
+      -> std::optional<gtsam::Pose3> {
+    if (!extrinsic.has_value()) {
+      return std::nullopt;
+    }
+    gtsam::Matrix3 rotation;
+    gtsam::Point3 translation;
+    for (int row = 0; row < 3; ++row) {
+      for (int col = 0; col < 3; ++col) {
+        const double value = static_cast<double>((*extrinsic)(row, col));
+        if (!std::isfinite(value)) {
+          return std::nullopt;
+        }
+        rotation(row, col) = value;
+      }
+      const double value = static_cast<double>((*extrinsic)(row, 3));
+      if (!std::isfinite(value)) {
+        return std::nullopt;
+      }
+      translation(row) = value;
+    }
+    return gtsam::Pose3(gtsam::Rot3::ClosestTo(rotation), translation);
+  };
+
+  const std::optional<gtsam::Pose3> context_cam_T_world =
+      to_pose(context_result.predicted_world_to_camera);
+  const std::optional<gtsam::Pose3> current_cam_T_world =
+      to_pose(current_result.predicted_world_to_camera);
+  if (!context_cam_T_world.has_value() ||
+      !current_cam_T_world.has_value()) {
+    return std::nullopt;
+  }
+  return context_cam_T_world->compose(current_cam_T_world->inverse());
 }
 
 MonoDepthConfidenceFilterResult makeMonoDepthConfidenceFilter(
@@ -318,7 +439,8 @@ cv::Mat makeMonoDepthValidMask(const cv::Mat& depth,
 MonoDepthRawPacket::ConstPtr MonoDepthInference::buildPacket(
     const BufferedKeyframe& frame,
     const xfeat::MonoDepthResult& depth_result,
-    const bool apply_confidence_filter) const {
+    const bool apply_confidence_filter,
+    const std::optional<Da3PairInfo>& pair_info) const {
   if (depth_result.depth.empty() || depth_result.depth.type() != CV_32FC1) {
     LOG(ERROR) << "DA3 mono depth returned an empty or non-CV_32FC1 depth map "
                << "for keyframe " << frame.keyframe_id;
@@ -338,6 +460,13 @@ MonoDepthRawPacket::ConstPtr MonoDepthInference::buildPacket(
   if (apply_confidence_filter) {
     packet->metadata.view_index = 1;
     packet->metadata.view_count = 2;
+    packet->da3_pose_scale_required = true;
+    if (pair_info.has_value()) {
+      packet->da3_context_keyframe_id = pair_info->context_keyframe_id;
+      packet->da3_context_body_T_cam = pair_info->context_body_T_cam;
+      packet->da3_context_cam_T_current_cam =
+          pair_info->context_cam_T_current_cam;
+    }
   }
 
   const double threshold =
@@ -362,8 +491,21 @@ MonoDepthRawPacket::ConstPtr MonoDepthInference::buildPacket(
 
   packet->valid_mask = makeMonoDepthValidMask(
       packet->depth, depth_result.sky_mask, confidence_filter.mask);
-  packet->weight_image =
-      makeWeightImage(packet->depth, packet->valid_mask, packet->intrinsics);
+  const cv::Size weight_size =
+      depth_result.metadata.model_size.width > 0 &&
+              depth_result.metadata.model_size.height > 0
+          ? depth_result.metadata.model_size
+          : packet->depth.size();
+  packet->weight_image = makeMonoDepthWeightImageAtSize(
+      packet->depth,
+      packet->valid_mask,
+      packet->intrinsics,
+      weight_size,
+      params_);
+  VLOG(1) << "Computed mono-depth weights once for keyframe "
+          << packet->keyframe_id << " on " << packet->weight_image.cols << "x"
+          << packet->weight_image.rows << " grid (depth " << packet->depth.cols
+          << "x" << packet->depth.rows << ").";
 
   packet->confidence_visualization_enabled =
       apply_confidence_filter && params_.visualize_confidence;
@@ -374,119 +516,6 @@ MonoDepthRawPacket::ConstPtr MonoDepthInference::buildPacket(
     packet->confidence_mask = confidence_filter.mask.clone();
   }
   return packet;
-}
-
-Eigen::Vector3d MonoDepthInference::backprojectDepthPixel(
-    const int u,
-    const int v,
-    const float z,
-    const MonoDepthIntrinsics& intrinsics) {
-  return Eigen::Vector3d(
-      (static_cast<double>(u) - intrinsics.cx) * static_cast<double>(z) /
-          intrinsics.fx,
-      (static_cast<double>(v) - intrinsics.cy) * static_cast<double>(z) /
-          intrinsics.fy,
-      static_cast<double>(z));
-}
-
-cv::Mat MonoDepthInference::makeWeightImage(
-    const cv::Mat& depth,
-    const cv::Mat& valid_mask,
-    const MonoDepthIntrinsics& intrinsics) const {
-  CHECK(!depth.empty());
-  CHECK_EQ(depth.type(), CV_32FC1);
-
-  cv::Mat weights(depth.rows, depth.cols, CV_32FC1, cv::Scalar(0.0f));
-  if (valid_mask.empty() || valid_mask.type() != CV_8UC1 ||
-      intrinsics.fx <= 0.0 || intrinsics.fy <= 0.0) {
-    return weights;
-  }
-
-  if (!params_.depth_weighting_enabled) {
-    for (int v = 0; v < std::min(depth.rows, valid_mask.rows); ++v) {
-      const uint8_t* valid_row = valid_mask.ptr<uint8_t>(v);
-      float* weight_row = weights.ptr<float>(v);
-      for (int u = 0; u < std::min(depth.cols, valid_mask.cols); ++u) {
-        weight_row[u] = valid_row[u] == 0u ? 0.0f : 1.0f;
-      }
-    }
-    return weights;
-  }
-
-  const int radius = std::max(1, params_.depth_weight_normal_radius);
-  const bool use_range_weight = params_.depth_weight_range_ref > 0.0;
-  const int rows = std::min(depth.rows, valid_mask.rows);
-  const int cols = std::min(depth.cols, valid_mask.cols);
-  for (int v = radius; v < rows - radius; ++v) {
-    const float* depth_row = depth.ptr<float>(v);
-    const uint8_t* valid_row = valid_mask.ptr<uint8_t>(v);
-    float* weight_row = weights.ptr<float>(v);
-    for (int u = radius; u < cols - radius; ++u) {
-      if (valid_row[u] == 0u ||
-          valid_mask.at<uint8_t>(v, u - radius) == 0u ||
-          valid_mask.at<uint8_t>(v, u + radius) == 0u ||
-          valid_mask.at<uint8_t>(v - radius, u) == 0u ||
-          valid_mask.at<uint8_t>(v + radius, u) == 0u) {
-        continue;
-      }
-
-      const float z = depth_row[u];
-      const float z_l = depth.at<float>(v, u - radius);
-      const float z_r = depth.at<float>(v, u + radius);
-      const float z_u = depth.at<float>(v - radius, u);
-      const float z_d = depth.at<float>(v + radius, u);
-      const auto depth_is_valid = [this](const float depth_value) {
-        return std::isfinite(depth_value) &&
-               depth_value >= params_.min_depth_m &&
-               depth_value <= params_.max_depth_m;
-      };
-      if (!depth_is_valid(z) || !depth_is_valid(z_l) ||
-          !depth_is_valid(z_r) || !depth_is_valid(z_u) ||
-          !depth_is_valid(z_d)) {
-        continue;
-      }
-
-      const Eigen::Vector3d p = backprojectDepthPixel(u, v, z, intrinsics);
-      const Eigen::Vector3d p_l =
-          backprojectDepthPixel(u - radius, v, z_l, intrinsics);
-      const Eigen::Vector3d p_r =
-          backprojectDepthPixel(u + radius, v, z_r, intrinsics);
-      const Eigen::Vector3d p_u =
-          backprojectDepthPixel(u, v - radius, z_u, intrinsics);
-      const Eigen::Vector3d p_d =
-          backprojectDepthPixel(u, v + radius, z_d, intrinsics);
-
-      Eigen::Vector3d normal = (p_r - p_l).cross(p_d - p_u);
-      const double normal_norm = normal.norm();
-      const double point_norm = p.norm();
-      if (normal_norm < 1e-9 || point_norm < 1e-9) {
-        continue;
-      }
-
-      normal /= normal_norm;
-      const Eigen::Vector3d view_to_camera = -p / point_norm;
-      const double cos_theta =
-          std::clamp(std::abs(normal.dot(view_to_camera)), 0.0, 1.0);
-      const double grazing_confidence =
-          std::pow(cos_theta, params_.depth_weight_grazing_power);
-      const double grazing_weight =
-          params_.depth_weight_min +
-          (1.0 - params_.depth_weight_min) * grazing_confidence;
-      const double range_weight =
-          use_range_weight
-              ? std::clamp(
-                    std::pow(params_.depth_weight_range_ref / point_norm,
-                             params_.depth_weight_range_power),
-                    params_.depth_weight_range_min,
-                    1.0)
-              : 1.0;
-      weight_row[u] =
-          static_cast<float>(std::clamp(grazing_weight * range_weight,
-                                        0.0,
-                                        1.0));
-    }
-  }
-  return weights;
 }
 
 }  // namespace VIO

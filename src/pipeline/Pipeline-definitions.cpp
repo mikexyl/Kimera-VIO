@@ -197,6 +197,8 @@ void VioParams::print() const {
   LOG(INFO) << "Mono depth enabled: " << mono_depth_params_.enabled;
   LOG(INFO) << "Mono depth mode: "
             << monoDepthModeToString(mono_depth_params_.mode);
+  LOG(INFO) << "Mono depth minimum keyframe distance [m]: "
+            << mono_depth_params_.min_keyframe_distance_m;
   LOG(INFO) << "Mono depth minimum confidence: "
             << mono_depth_params_.min_confidence;
   LOG(INFO) << "Mono depth confidence visualization: "

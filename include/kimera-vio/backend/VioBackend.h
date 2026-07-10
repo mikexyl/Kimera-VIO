@@ -47,6 +47,7 @@
 
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <memory>
 #include <unordered_map>
 
@@ -410,6 +411,15 @@ class VioBackend {
                                 const double& position_precision,
                                 gtsam::SharedNoiseModel* no_motion_prior_noise);
 
+  MonoDepthRawPacket::ConstPtr prepareMonoDepthPacketForBackend(
+      const MonoDepthRawPacket::ConstPtr& raw_packet,
+      const std::map<FrameId, gtsam::Pose3>& endpoint_body_poses) const;
+
+  void cacheMonoDepthRawPacket(
+      const MonoDepthRawPacket::ConstPtr& raw_packet);
+
+  void refreshMonoDepthWindowAfterOptimization();
+
   /// Private printers.
   void print() const;
 
@@ -608,6 +618,14 @@ class VioBackend {
   MonoDepthAlignment::UniquePtr mono_depth_alignment_;
   DenseMapModule::UniquePtr dense_map_module_;
   MonoDepthVGICPFactors::UniquePtr mono_depth_vgicp_factors_;
+  MonoDepthRawPacket::ConstPtr backend_mono_depth_packet_;
+  std::map<FrameId, MonoDepthRawPacket::ConstPtr>
+      mono_depth_canonical_packet_cache_;
+  std::map<FrameId, MonoDepthRawPacket::ConstPtr>
+      mono_depth_scaled_packet_cache_;
+  std::map<FrameId, gtsam::Pose3> mono_depth_endpoint_pose_cache_;
+
+  static constexpr std::size_t kMonoDepthPacketCacheSize = 256u;
 };
 
 }  // namespace VIO

@@ -80,6 +80,9 @@ class MonoVisionImuFrontend : public VisionImuFrontend {
   MonoFrontendOutput::UniquePtr bootstrapSpinMono(
       MonoFrontendInputPayload::UniquePtr&& input);
 
+  std::optional<gtsam::Pose3> predictCurrentBodyPose(
+      const GtsamPreintegrationType& pim) const;
+
   StatusMonoMeasurementsPtr processFrame(
       const Frame& cur_frame,
       const gtsam::Rot3& keyframe_R_ref_frame,
