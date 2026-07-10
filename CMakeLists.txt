@@ -191,8 +191,13 @@ endif()
 ############################### TESTS ##########################################
 option(KIMERA_BUILD_TESTS "Build Kimera-VIO tests" ON)
 if(KIMERA_BUILD_TESTS)
+  enable_testing()
   add_executable(testEdgeSelection tests/testEdgeSelection.cpp)
   target_link_libraries(testEdgeSelection PUBLIC kimera_vio::kimera_vio)
+
+  add_executable(testMonoDepthConfidence tests/testMonoDepthConfidence.cpp)
+  target_link_libraries(testMonoDepthConfidence PUBLIC kimera_vio::kimera_vio)
+  add_test(NAME testMonoDepthConfidence COMMAND testMonoDepthConfidence)
 endif()
 
 ############################### INSTALL/EXPORT #################################

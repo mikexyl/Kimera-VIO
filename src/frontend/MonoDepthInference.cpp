@@ -15,13 +15,14 @@
 namespace VIO {
 
 MonoDepthInference::MonoDepthInference(const MonoDepthParams& params)
-    : params_(params), mono_depth_(nullptr) {
+    : params_(params), mono_depth_(nullptr), buffered_keyframe_(std::nullopt) {
+  if (!std::isfinite(params_.min_confidence) ||
+      params_.min_confidence < 0.0) {
+    LOG(FATAL) << "mono_depth.min_confidence must be finite and non-negative, "
+               << "but got " << params_.min_confidence;
+  }
   if (!params_.enabled) {
     return;
-  }
-
-  if (params_.mode == MonoDepthMode::kMultiView) {
-    LOG(FATAL) << "mono_depth.mode=multi_view is not implemented yet.";
   }
 
 #ifdef HAVE_TENSORRT
@@ -37,14 +38,22 @@ MonoDepthInference::MonoDepthInference(const MonoDepthParams& params)
     xfeat::DepthAnythingV3TRT::Params trt_params;
     trt_params.engine_path = params_.engine_path;
     trt_params.verbose = params_.verbose;
-    mono_depth_ = std::make_unique<xfeat::DepthAnythingV3TRT>(trt_params);
+    auto da3 = std::make_unique<xfeat::DepthAnythingV3TRT>(trt_params);
+    if (da3->has_camera_inputs()) {
+      throw std::invalid_argument(
+          "Mono-depth integration requires an image-only DA3 engine; camera "
+          "input bindings are not supported");
+    }
+    mono_depth_ = std::move(da3);
   } catch (const std::exception& e) {
     LOG(FATAL) << "Failed to initialize DA3 mono depth: " << e.what();
   }
 
   CHECK(mono_depth_);
   LOG(INFO) << "Initialized DA3 mono depth inference with engine: "
-            << params_.engine_path;
+            << params_.engine_path << ", mode="
+            << monoDepthModeToString(params_.mode)
+            << ", min_confidence=" << params_.min_confidence;
 #else
   LOG(FATAL) << "Mono depth inference requires xfeat-cpp TensorRT support, "
                 "but HAVE_TENSORRT is not enabled.";
@@ -71,62 +80,74 @@ MonoDepthRawPacket::ConstPtr MonoDepthInference::inferKeyframe(
     return nullptr;
   }
 
-  if (params_.mode == MonoDepthMode::kMultiView) {
-    LOG(FATAL) << "mono_depth.mode=multi_view is not implemented yet.";
-  }
-
-  const cv::Mat bgr_image = toBgrImage(frame.img_);
-  if (bgr_image.empty()) {
-    LOG(ERROR) << "Skipping mono depth inference for an empty keyframe image.";
+  const std::optional<BufferedKeyframe> current = bufferKeyframe(frame);
+  if (!current.has_value()) {
     return nullptr;
   }
 
-  const auto& intrinsics = frame.cam_param_.intrinsics_;
-  xfeat::CameraIntrinsics xfeat_intrinsics;
-  xfeat_intrinsics.fx = intrinsics[0];
-  xfeat_intrinsics.fy = intrinsics[1];
-  xfeat_intrinsics.cx = intrinsics[2];
-  xfeat_intrinsics.cy = intrinsics[3];
-  xfeat_intrinsics.width = bgr_image.cols;
-  xfeat_intrinsics.height = bgr_image.rows;
-  if (xfeat_intrinsics.fx <= 0.0 || xfeat_intrinsics.fy <= 0.0) {
-    LOG(ERROR) << "Skipping mono depth inference because camera intrinsics are "
-                  "invalid.";
+  if (params_.mode == MonoDepthMode::kSingleView) {
+    xfeat::MonoDepthResult depth_result;
+    try {
+      depth_result = mono_depth_->infer(
+          current->image_bgr,
+          std::optional<xfeat::CameraIntrinsics>(
+              toXfeatIntrinsics(current->intrinsics)));
+    } catch (const std::exception& e) {
+      LOG(ERROR) << "DA3 single-view mono depth inference failed for keyframe "
+                 << current->keyframe_id << ": " << e.what();
+      return nullptr;
+    }
+    return buildPacket(*current, depth_result, false);
+  }
+
+  if (!buffered_keyframe_.has_value()) {
+    buffered_keyframe_ = current;
+    LOG(INFO) << "Primed DA3 two-view buffer with keyframe "
+              << current->keyframe_id;
     return nullptr;
   }
 
-  xfeat::MonoDepthResult depth_result;
+  BufferedKeyframe previous = std::move(*buffered_keyframe_);
+  // Advance before inference so a failed pair does not get retried and the
+  // next sampled keyframe still uses the newest available context view.
+  buffered_keyframe_ = current;
+
+  LOG(INFO) << "Running pose-free DA3 two-view pair ["
+            << previous.keyframe_id << ", " << current->keyframe_id << "]";
+  std::vector<xfeat::MonoDepthResult> depth_results;
   try {
-    depth_result = mono_depth_->infer(
-        bgr_image, std::optional<xfeat::CameraIntrinsics>(xfeat_intrinsics));
+    const std::vector<cv::Mat> images{previous.image_bgr, current->image_bgr};
+    const std::vector<xfeat::CameraIntrinsics> intrinsics{
+        toXfeatIntrinsics(previous.intrinsics),
+        toXfeatIntrinsics(current->intrinsics)};
+    depth_results = mono_depth_->infer_multi_view(images, intrinsics);
   } catch (const std::exception& e) {
-    LOG(ERROR) << "DA3 mono depth inference failed: " << e.what();
+    LOG(ERROR) << "DA3 two-view mono depth inference failed for pair ["
+               << previous.keyframe_id << ", " << current->keyframe_id
+               << "]: " << e.what();
     return nullptr;
   }
 
-  if (depth_result.depth.empty() || depth_result.depth.type() != CV_32FC1) {
-    LOG(ERROR) << "DA3 mono depth returned an empty or non-CV_32FC1 depth map.";
+  if (depth_results.size() != 2u) {
+    LOG(ERROR) << "DA3 two-view inference returned " << depth_results.size()
+               << " results for pair [" << previous.keyframe_id << ", "
+               << current->keyframe_id << "]; expected exactly 2.";
     return nullptr;
   }
 
-  auto packet = std::make_shared<MonoDepthRawPacket>();
-  packet->keyframe_id = *frame.keyframe_id_;
-  packet->timestamp = frame.timestamp_;
-  packet->source_image_bgr = bgr_image.clone();
-  packet->depth = depth_result.depth.clone();
-  packet->valid_mask = makeValidMask(packet->depth, depth_result.sky_mask);
-  packet->intrinsics.fx = xfeat_intrinsics.fx;
-  packet->intrinsics.fy = xfeat_intrinsics.fy;
-  packet->intrinsics.cx = xfeat_intrinsics.cx;
-  packet->intrinsics.cy = xfeat_intrinsics.cy;
-  packet->intrinsics.width = xfeat_intrinsics.width;
-  packet->intrinsics.height = xfeat_intrinsics.height;
-  packet->weight_image =
-      makeWeightImage(packet->depth, packet->valid_mask, packet->intrinsics);
-  packet->body_T_cam = frame.cam_param_.body_Pose_cam_;
-  packet->keypoints = frame.keypoints_;
-  packet->landmark_ids = frame.landmarks_;
-  packet->metadata = depth_result.metadata;
+  MonoDepthRawPacket::ConstPtr packet =
+      buildPacket(*current, depth_results[1], true);
+  if (packet) {
+    LOG(INFO) << "DA3 pair [" << previous.keyframe_id << ", "
+              << current->keyframe_id << "] emitted keyframe "
+              << packet->keyframe_id << " (view_index="
+              << packet->metadata.view_index << ", view_count="
+              << packet->metadata.view_count << ", confidence_threshold="
+              << packet->confidence_threshold << ", accepted="
+              << packet->confidence_accepted_pixels << ", rejected="
+              << packet->confidence_rejected_pixels << ", retained="
+              << packet->confidence_retained_fraction << ")";
+  }
   return packet;
 }
 
@@ -148,8 +169,116 @@ cv::Mat MonoDepthInference::toBgrImage(const cv::Mat& image) {
   return bgr_image;
 }
 
-cv::Mat MonoDepthInference::makeValidMask(const cv::Mat& depth,
-                                          const cv::Mat& sky_mask) {
+std::optional<MonoDepthInference::BufferedKeyframe>
+MonoDepthInference::bufferKeyframe(const Frame& frame) {
+  const cv::Mat bgr_image = toBgrImage(frame.img_);
+  if (bgr_image.empty()) {
+    LOG(ERROR) << "Skipping mono depth inference for an empty or unsupported "
+                  "keyframe image.";
+    return std::nullopt;
+  }
+
+  BufferedKeyframe buffered;
+  buffered.keyframe_id = *frame.keyframe_id_;
+  buffered.timestamp = frame.timestamp_;
+  buffered.image_bgr = bgr_image.clone();
+  buffered.intrinsics.fx = frame.cam_param_.intrinsics_[0];
+  buffered.intrinsics.fy = frame.cam_param_.intrinsics_[1];
+  buffered.intrinsics.cx = frame.cam_param_.intrinsics_[2];
+  buffered.intrinsics.cy = frame.cam_param_.intrinsics_[3];
+  buffered.intrinsics.width = bgr_image.cols;
+  buffered.intrinsics.height = bgr_image.rows;
+  if (!std::isfinite(buffered.intrinsics.fx) ||
+      !std::isfinite(buffered.intrinsics.fy) ||
+      buffered.intrinsics.fx <= 0.0 || buffered.intrinsics.fy <= 0.0) {
+    LOG(ERROR) << "Skipping mono depth inference because camera intrinsics are "
+                  "invalid.";
+    return std::nullopt;
+  }
+  buffered.body_T_cam = frame.cam_param_.body_Pose_cam_;
+  buffered.keypoints = frame.keypoints_;
+  buffered.landmark_ids = frame.landmarks_;
+  return buffered;
+}
+
+xfeat::CameraIntrinsics MonoDepthInference::toXfeatIntrinsics(
+    const MonoDepthIntrinsics& intrinsics) {
+  xfeat::CameraIntrinsics converted;
+  converted.fx = intrinsics.fx;
+  converted.fy = intrinsics.fy;
+  converted.cx = intrinsics.cx;
+  converted.cy = intrinsics.cy;
+  converted.width = intrinsics.width;
+  converted.height = intrinsics.height;
+  return converted;
+}
+
+MonoDepthConfidenceFilterResult makeMonoDepthConfidenceFilter(
+    const cv::Size& expected_size,
+    const cv::Mat& confidence,
+    const double min_confidence) {
+  if (!std::isfinite(min_confidence) || min_confidence < 0.0) {
+    throw std::invalid_argument(
+        "Mono-depth confidence threshold must be finite and non-negative");
+  }
+
+  MonoDepthConfidenceFilterResult result;
+  result.filtering_enabled = min_confidence > 0.0;
+  if (expected_size.width <= 0 || expected_size.height <= 0) {
+    result.retained_fraction = 0.0;
+    result.error = "expected confidence size is empty";
+    return result;
+  }
+
+  const std::size_t pixel_count =
+      static_cast<std::size_t>(expected_size.area());
+  result.mask = cv::Mat(expected_size, CV_8UC1, cv::Scalar(0));
+  result.confidence_valid =
+      !confidence.empty() && confidence.type() == CV_32FC1 &&
+      confidence.size() == expected_size;
+
+  if (!result.filtering_enabled) {
+    result.mask.setTo(255u);
+    result.accepted_pixels = pixel_count;
+    result.retained_fraction = 1.0;
+    return result;
+  }
+
+  if (!result.confidence_valid) {
+    result.rejected_pixels = pixel_count;
+    result.retained_fraction = 0.0;
+    if (confidence.empty()) {
+      result.error = "confidence map is missing";
+    } else if (confidence.type() != CV_32FC1) {
+      result.error = "confidence map is not CV_32FC1";
+    } else {
+      result.error = "confidence map shape does not match depth";
+    }
+    return result;
+  }
+
+  const float threshold = static_cast<float>(min_confidence);
+  for (int v = 0; v < confidence.rows; ++v) {
+    const float* confidence_row = confidence.ptr<float>(v);
+    uint8_t* mask_row = result.mask.ptr<uint8_t>(v);
+    for (int u = 0; u < confidence.cols; ++u) {
+      const float value = confidence_row[u];
+      if (std::isfinite(value) && value >= threshold) {
+        mask_row[u] = 255u;
+        ++result.accepted_pixels;
+      }
+    }
+  }
+  result.rejected_pixels = pixel_count - result.accepted_pixels;
+  result.retained_fraction =
+      static_cast<double>(result.accepted_pixels) /
+      static_cast<double>(pixel_count);
+  return result;
+}
+
+cv::Mat makeMonoDepthValidMask(const cv::Mat& depth,
+                               const cv::Mat& sky_mask,
+                               const cv::Mat& confidence_mask) {
   CHECK(!depth.empty());
   CHECK_EQ(depth.type(), CV_32FC1);
 
@@ -157,20 +286,94 @@ cv::Mat MonoDepthInference::makeValidMask(const cv::Mat& depth,
   const bool has_sky_mask =
       !sky_mask.empty() && sky_mask.type() == CV_8UC1 &&
       sky_mask.rows >= depth.rows && sky_mask.cols >= depth.cols;
+  const bool use_confidence_mask = !confidence_mask.empty();
+  const bool has_confidence_mask =
+      use_confidence_mask && confidence_mask.type() == CV_8UC1 &&
+      confidence_mask.size() == depth.size();
+  if (use_confidence_mask && !has_confidence_mask) {
+    LOG(ERROR) << "Rejecting all mono-depth pixels because the confidence "
+                  "mask is malformed or shape-incompatible.";
+    return valid_mask;
+  }
 
   for (int v = 0; v < depth.rows; ++v) {
     const float* depth_row = depth.ptr<float>(v);
     const uint8_t* sky_row = has_sky_mask ? sky_mask.ptr<uint8_t>(v) : nullptr;
+    const uint8_t* confidence_row =
+        has_confidence_mask ? confidence_mask.ptr<uint8_t>(v) : nullptr;
     uint8_t* valid_row = valid_mask.ptr<uint8_t>(v);
     for (int u = 0; u < depth.cols; ++u) {
       const float z = depth_row[u];
       const bool sky = sky_row != nullptr && sky_row[u] != 0u;
-      if (std::isfinite(z) && z > 0.0f && !sky) {
+      const bool confidence_valid =
+          confidence_row == nullptr || confidence_row[u] != 0u;
+      if (std::isfinite(z) && z > 0.0f && !sky && confidence_valid) {
         valid_row[u] = 255u;
       }
     }
   }
   return valid_mask;
+}
+
+MonoDepthRawPacket::ConstPtr MonoDepthInference::buildPacket(
+    const BufferedKeyframe& frame,
+    const xfeat::MonoDepthResult& depth_result,
+    const bool apply_confidence_filter) const {
+  if (depth_result.depth.empty() || depth_result.depth.type() != CV_32FC1) {
+    LOG(ERROR) << "DA3 mono depth returned an empty or non-CV_32FC1 depth map "
+               << "for keyframe " << frame.keyframe_id;
+    return nullptr;
+  }
+
+  auto packet = std::make_shared<MonoDepthRawPacket>();
+  packet->keyframe_id = frame.keyframe_id;
+  packet->timestamp = frame.timestamp;
+  packet->source_image_bgr = frame.image_bgr.clone();
+  packet->depth = depth_result.depth.clone();
+  packet->intrinsics = frame.intrinsics;
+  packet->body_T_cam = frame.body_T_cam;
+  packet->keypoints = frame.keypoints;
+  packet->landmark_ids = frame.landmark_ids;
+  packet->metadata = depth_result.metadata;
+  if (apply_confidence_filter) {
+    packet->metadata.view_index = 1;
+    packet->metadata.view_count = 2;
+  }
+
+  const double threshold =
+      apply_confidence_filter ? params_.min_confidence : 0.0;
+  const MonoDepthConfidenceFilterResult confidence_filter =
+      makeMonoDepthConfidenceFilter(
+          packet->depth.size(), depth_result.confidence, threshold);
+  packet->confidence_filtering_enabled =
+      confidence_filter.filtering_enabled;
+  packet->confidence_valid = confidence_filter.confidence_valid;
+  packet->confidence_threshold = threshold;
+  packet->confidence_accepted_pixels = confidence_filter.accepted_pixels;
+  packet->confidence_rejected_pixels = confidence_filter.rejected_pixels;
+  packet->confidence_retained_fraction = confidence_filter.retained_fraction;
+  packet->confidence_error = confidence_filter.error;
+
+  if (confidence_filter.filtering_enabled &&
+      !confidence_filter.confidence_valid) {
+    LOG(ERROR) << "Rejecting all mono-depth pixels for keyframe "
+               << frame.keyframe_id << ": " << confidence_filter.error;
+  }
+
+  packet->valid_mask = makeMonoDepthValidMask(
+      packet->depth, depth_result.sky_mask, confidence_filter.mask);
+  packet->weight_image =
+      makeWeightImage(packet->depth, packet->valid_mask, packet->intrinsics);
+
+  packet->confidence_visualization_enabled =
+      apply_confidence_filter && params_.visualize_confidence;
+  if (packet->confidence_visualization_enabled) {
+    if (confidence_filter.confidence_valid) {
+      packet->confidence = depth_result.confidence.clone();
+    }
+    packet->confidence_mask = confidence_filter.mask.clone();
+  }
+  return packet;
 }
 
 Eigen::Vector3d MonoDepthInference::backprojectDepthPixel(

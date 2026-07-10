@@ -197,6 +197,10 @@ void VioParams::print() const {
   LOG(INFO) << "Mono depth enabled: " << mono_depth_params_.enabled;
   LOG(INFO) << "Mono depth mode: "
             << monoDepthModeToString(mono_depth_params_.mode);
+  LOG(INFO) << "Mono depth minimum confidence: "
+            << mono_depth_params_.min_confidence;
+  LOG(INFO) << "Mono depth confidence visualization: "
+            << mono_depth_params_.visualize_confidence;
   LOG(INFO) << "Mono depth align scale with landmarks: "
             << mono_depth_params_.align_scale_with_landmarks;
   LOG(INFO) << "Dense map enabled: " << dense_map_params_.enabled;

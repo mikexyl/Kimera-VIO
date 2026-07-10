@@ -64,12 +64,12 @@ struct MonoDepthParams {
   double depth_weight_range_power = 2.0;
   double depth_weight_range_min = 0.05;
   bool visualize_weights = false;
+  double min_confidence = 1.1;
+  bool visualize_confidence = false;
   float point_radius = 0.005f;
   bool verbose = false;
   bool align_scale_with_landmarks = false;
   MonoDepthMode mode = MonoDepthMode::kSingleView;
-  int view_count = 1;
-  int view_stride = 1;
 
   bool operator==(const MonoDepthParams& rhs) const {
     return enabled == rhs.enabled && engine_path == rhs.engine_path &&
@@ -88,10 +88,11 @@ struct MonoDepthParams {
            depth_weight_range_power == rhs.depth_weight_range_power &&
            depth_weight_range_min == rhs.depth_weight_range_min &&
            visualize_weights == rhs.visualize_weights &&
+           min_confidence == rhs.min_confidence &&
+           visualize_confidence == rhs.visualize_confidence &&
            point_radius == rhs.point_radius && verbose == rhs.verbose &&
            align_scale_with_landmarks == rhs.align_scale_with_landmarks &&
-           mode == rhs.mode && view_count == rhs.view_count &&
-           view_stride == rhs.view_stride;
+           mode == rhs.mode;
   }
 };
 
@@ -114,6 +115,16 @@ struct MonoDepthRawPacket {
   cv::Mat depth;
   cv::Mat valid_mask;
   cv::Mat weight_image;
+  cv::Mat confidence;
+  cv::Mat confidence_mask;
+  bool confidence_visualization_enabled = false;
+  bool confidence_filtering_enabled = false;
+  bool confidence_valid = false;
+  double confidence_threshold = 0.0;
+  std::size_t confidence_accepted_pixels = 0u;
+  std::size_t confidence_rejected_pixels = 0u;
+  double confidence_retained_fraction = 1.0;
+  std::string confidence_error;
   MonoDepthIntrinsics intrinsics;
   gtsam::Pose3 body_T_cam;
   KeypointsCV keypoints;
