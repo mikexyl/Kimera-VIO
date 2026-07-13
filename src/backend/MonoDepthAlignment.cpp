@@ -4,9 +4,13 @@
 #include <gtsam/inference/Symbol.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <iomanip>
 #include <iterator>
 #include <limits>
+#include <opencv2/imgproc.hpp>
+#include <sstream>
 
 #include "kimera-vio/common/MonoDepthUtils.h"
 
@@ -18,6 +22,191 @@ Eigen::Vector4f weightToColor(const double weight) {
   const float low = static_cast<float>(255.0 * (1.0 - w));
   const float high = static_cast<float>(255.0 * w);
   return Eigen::Vector4f(low, high, 0.0f, 210.0f);
+}
+
+cv::Scalar landmarkScaleSampleColor(
+    const MonoDepthLandmarkScaleSample& sample) {
+  switch (sample.status) {
+    case MonoDepthLandmarkScaleSampleStatus::kFlatInlier: {
+      const double weight = std::clamp(sample.flatness_weight, 0.0, 1.0);
+      return cv::Scalar(0.0, 255.0, 255.0 * (1.0 - weight));
+    }
+    case MonoDepthLandmarkScaleSampleStatus::kDepthEdgeRejected:
+      return cv::Scalar(0.0, 0.0, 255.0);
+    case MonoDepthLandmarkScaleSampleStatus::kFlatnessSupportRejected:
+      return cv::Scalar(255.0, 255.0, 0.0);
+    case MonoDepthLandmarkScaleSampleStatus::kLogRatioOutlier:
+      return cv::Scalar(255.0, 0.0, 255.0);
+  }
+  return cv::Scalar(180.0, 180.0, 180.0);
+}
+
+void drawLandmarkScaleLegendRow(cv::Mat* image,
+                                const int y,
+                                const cv::Scalar& color,
+                                const std::string& text,
+                                const double font_scale,
+                                const int marker_radius) {
+  CHECK_NOTNULL(image);
+  const int marker_x = 12 + marker_radius;
+  cv::circle(*image,
+             cv::Point(marker_x, y - marker_radius / 2),
+             marker_radius + 1,
+             cv::Scalar(0.0, 0.0, 0.0),
+             cv::FILLED,
+             cv::LINE_AA);
+  cv::circle(*image,
+             cv::Point(marker_x, y - marker_radius / 2),
+             marker_radius,
+             color,
+             cv::FILLED,
+             cv::LINE_AA);
+  cv::putText(*image,
+              text,
+              cv::Point(marker_x + 2 * marker_radius + 6, y),
+              cv::FONT_HERSHEY_SIMPLEX,
+              font_scale,
+              cv::Scalar(255.0, 255.0, 255.0),
+              1,
+              cv::LINE_AA);
+}
+
+cv::Mat makeLandmarkScaleAlignmentVisualization(
+    const MonoDepthRawPacket& packet) {
+  cv::Mat visualization;
+  if (packet.source_image_bgr.type() == CV_8UC3) {
+    visualization = packet.source_image_bgr.clone();
+  } else if (packet.source_image_bgr.type() == CV_8UC1) {
+    cv::cvtColor(packet.source_image_bgr, visualization, cv::COLOR_GRAY2BGR);
+  } else {
+    return visualization;
+  }
+
+  const auto& alignment = packet.scale_alignment;
+  std::array<std::size_t, 4u> status_counts{};
+  std::size_t downweighted_inliers = 0u;
+  const int marker_radius = std::clamp(visualization.cols / 320, 3, 7);
+  for (const MonoDepthLandmarkScaleSample& sample :
+       alignment.landmark_samples) {
+    const std::size_t status_index = static_cast<std::size_t>(sample.status);
+    if (status_index < status_counts.size()) {
+      ++status_counts[status_index];
+    }
+    if (sample.status == MonoDepthLandmarkScaleSampleStatus::kFlatInlier &&
+        sample.flatness_weight < 0.95) {
+      ++downweighted_inliers;
+    }
+    if (!std::isfinite(sample.keypoint.x) ||
+        !std::isfinite(sample.keypoint.y)) {
+      continue;
+    }
+    const cv::Point center(static_cast<int>(std::lround(sample.keypoint.x)),
+                           static_cast<int>(std::lround(sample.keypoint.y)));
+    if (center.x < 0 || center.y < 0 || center.x >= visualization.cols ||
+        center.y >= visualization.rows) {
+      continue;
+    }
+    cv::circle(visualization,
+               center,
+               marker_radius + 2,
+               cv::Scalar(0.0, 0.0, 0.0),
+               cv::FILLED,
+               cv::LINE_AA);
+    cv::circle(visualization,
+               center,
+               marker_radius,
+               landmarkScaleSampleColor(sample),
+               cv::FILLED,
+               cv::LINE_AA);
+  }
+
+  const double font_scale =
+      std::clamp(static_cast<double>(visualization.cols) / 1800.0, 0.42, 0.72);
+  const int line_height = std::max(20, static_cast<int>(32.0 * font_scale));
+  const int legend_height = std::min(visualization.rows, 7 * line_height + 10);
+  const int legend_width = std::min(visualization.cols, 620);
+  if (legend_height <= 0 || legend_width <= 0) {
+    return visualization;
+  }
+  const cv::Rect legend_rect(0, 0, legend_width, legend_height);
+  cv::Mat legend_roi = visualization(legend_rect);
+  cv::Mat dark_background(
+      legend_roi.size(), legend_roi.type(), cv::Scalar(15, 15, 15));
+  cv::addWeighted(dark_background, 0.72, legend_roi, 0.28, 0.0, legend_roi);
+
+  std::ostringstream header;
+  header << "landmark scale frame " << packet.keyframe_id << " | "
+         << (alignment.valid ? "valid" : "REJECTED") << " | scale "
+         << std::fixed << std::setprecision(3) << alignment.absolute_scale;
+  cv::putText(visualization,
+              header.str(),
+              cv::Point(10, line_height),
+              cv::FONT_HERSHEY_SIMPLEX,
+              font_scale,
+              alignment.valid ? cv::Scalar(255.0, 255.0, 255.0)
+                              : cv::Scalar(80.0, 80.0, 255.0),
+              1,
+              cv::LINE_AA);
+
+  const auto count =
+      [&status_counts](const MonoDepthLandmarkScaleSampleStatus status) {
+        return status_counts[static_cast<std::size_t>(status)];
+      };
+  const std::size_t flat_inlier_count =
+      count(MonoDepthLandmarkScaleSampleStatus::kFlatInlier);
+  drawLandmarkScaleLegendRow(
+      &visualization,
+      2 * line_height,
+      cv::Scalar(0.0, 255.0, 0.0),
+      "flat inlier / high weight: " +
+          std::to_string(flat_inlier_count - downweighted_inliers),
+      font_scale,
+      marker_radius);
+  drawLandmarkScaleLegendRow(
+      &visualization,
+      3 * line_height,
+      cv::Scalar(0.0, 255.0, 255.0),
+      "flat inlier / downweighted: " + std::to_string(downweighted_inliers),
+      font_scale,
+      marker_radius);
+  drawLandmarkScaleLegendRow(
+      &visualization,
+      4 * line_height,
+      cv::Scalar(0.0, 0.0, 255.0),
+      "depth edge rejected: " +
+          std::to_string(
+              count(MonoDepthLandmarkScaleSampleStatus::kDepthEdgeRejected)),
+      font_scale,
+      marker_radius);
+  drawLandmarkScaleLegendRow(
+      &visualization,
+      5 * line_height,
+      cv::Scalar(255.0, 255.0, 0.0),
+      "flatness support unavailable: " +
+          std::to_string(count(
+              MonoDepthLandmarkScaleSampleStatus::kFlatnessSupportRejected)),
+      font_scale,
+      marker_radius);
+  drawLandmarkScaleLegendRow(
+      &visualization,
+      6 * line_height,
+      cv::Scalar(255.0, 0.0, 255.0),
+      "log-ratio outlier: " +
+          std::to_string(
+              count(MonoDepthLandmarkScaleSampleStatus::kLogRatioOutlier)),
+      font_scale,
+      marker_radius);
+  if (!alignment.valid && !alignment.failure_reason.empty()) {
+    cv::putText(visualization,
+                alignment.failure_reason,
+                cv::Point(10, 7 * line_height),
+                cv::FONT_HERSHEY_SIMPLEX,
+                font_scale,
+                cv::Scalar(80.0, 80.0, 255.0),
+                1,
+                cv::LINE_AA);
+  }
+  return visualization;
 }
 
 }  // namespace
@@ -56,12 +245,11 @@ MonoDepthMapOutput::ConstPtr MonoDepthAlignment::process(
   }
   const std::optional<FrameId> insert_frame_id = pending_insert_frame_id_;
 
-  MonoDepthMapOutput::ConstPtr output = buildMapOutput(
-      smoother_frame_ids,
-      state,
-      world_T_smoother,
-      insert_frame_id,
-      icp_only_result);
+  MonoDepthMapOutput::ConstPtr output = buildMapOutput(smoother_frame_ids,
+                                                       state,
+                                                       world_T_smoother,
+                                                       insert_frame_id,
+                                                       icp_only_result);
   if (insert_frame_id.has_value() && output &&
       !output->keyframe_cloud.empty()) {
     last_processed_frame_id_ = *insert_frame_id;
@@ -266,6 +454,7 @@ MonoDepthMapOutput::ConstPtr MonoDepthAlignment::buildMapOutput(
   bool has_window_packet = false;
   FrameId latest_window_frame_id = 0u;
   Timestamp latest_window_timestamp = 0u;
+  MonoDepthRawPacket::ConstPtr selected_visualization_packet;
 
   for (const FrameId frame_id : smoother_frame_ids) {
     const auto raw_it = raw_packet_cache_.find(frame_id);
@@ -282,6 +471,7 @@ MonoDepthMapOutput::ConstPtr MonoDepthAlignment::buildMapOutput(
     }
     output->selected_scale_alignment_frame_id = frame_id;
     output->selected_scale_alignment = packet.scale_alignment;
+    selected_visualization_packet = raw_it->second;
     latest_window_frame_id = packet.keyframe_id;
     latest_window_timestamp = packet.timestamp;
     has_window_packet = true;
@@ -334,39 +524,57 @@ MonoDepthMapOutput::ConstPtr MonoDepthAlignment::buildMapOutput(
     }
   }
 
+  if (params_.visualize_landmark_scale_alignment &&
+      selected_visualization_packet &&
+      selected_visualization_packet->scale_alignment.method ==
+          MonoDepthScaleAlignmentMethod::kLandmarks) {
+    output->landmark_scale_alignment_visualization_bgr =
+        makeLandmarkScaleAlignmentVisualization(*selected_visualization_packet);
+  }
+
   // This is a diagnostic cloud, so retain a finite optimizer candidate even
   // when the post-update correspondence refresh makes the objective worse.
   // The validity scalar remains false in that case.
   if (output->icp_only.enabled && output->icp_only.solution_available) {
-    for (const FrameId frame_id : smoother_frame_ids) {
-      const auto raw_it = raw_packet_cache_.find(frame_id);
-      const auto pose_it = output->icp_only.body_poses.find(frame_id);
-      if (raw_it == raw_packet_cache_.end() || !raw_it->second ||
-          pose_it == output->icp_only.body_poses.end()) {
-        continue;
-      }
+    if (output->icp_only.da3_overlap_fusion) {
+      // This cloud already lives in the arbitrary coordinate system anchored
+      // by the first DA3 pair.  Applying world_T_smoother here would reinsert
+      // a VIO pose into an intentionally DA3-only diagnostic.
+      output->icp_only_window_cloud = output->icp_only.da3_overlap_cloud;
+      output->icp_only_window_colors = output->icp_only.da3_overlap_colors;
+      output->icp_only_window_keyframes =
+          output->icp_only.da3_retained_keyframe_count;
+    } else {
+      for (const FrameId frame_id : smoother_frame_ids) {
+        const auto raw_it = raw_packet_cache_.find(frame_id);
+        const auto pose_it = output->icp_only.body_poses.find(frame_id);
+        if (raw_it == raw_packet_cache_.end() || !raw_it->second ||
+            pose_it == output->icp_only.body_poses.end()) {
+          continue;
+        }
 
-      const MonoDepthRawPacket& packet = *raw_it->second;
-      const gtsam::Pose3 smoother_T_cam =
-          pose_it->second.compose(packet.body_T_cam);
-      const gtsam::Pose3 world_T_cam =
-          world_T_smoother.compose(smoother_T_cam);
-      Point3Vector frame_points;
-      RgbaColorVector frame_colors;
-      backprojectPacket(
-          packet, world_T_cam, &frame_points, &frame_colors, nullptr);
-      if (frame_points.empty()) {
-        continue;
+        const MonoDepthRawPacket& packet = *raw_it->second;
+        const gtsam::Pose3 smoother_T_cam =
+            pose_it->second.compose(packet.body_T_cam);
+        const gtsam::Pose3 world_T_cam =
+            world_T_smoother.compose(smoother_T_cam);
+        Point3Vector frame_points;
+        RgbaColorVector frame_colors;
+        backprojectPacket(
+            packet, world_T_cam, &frame_points, &frame_colors, nullptr);
+        if (frame_points.empty()) {
+          continue;
+        }
+        ++output->icp_only_window_keyframes;
+        output->icp_only_window_cloud.insert(
+            output->icp_only_window_cloud.end(),
+            std::make_move_iterator(frame_points.begin()),
+            std::make_move_iterator(frame_points.end()));
+        output->icp_only_window_colors.insert(
+            output->icp_only_window_colors.end(),
+            std::make_move_iterator(frame_colors.begin()),
+            std::make_move_iterator(frame_colors.end()));
       }
-      ++output->icp_only_window_keyframes;
-      output->icp_only_window_cloud.insert(
-          output->icp_only_window_cloud.end(),
-          std::make_move_iterator(frame_points.begin()),
-          std::make_move_iterator(frame_points.end()));
-      output->icp_only_window_colors.insert(
-          output->icp_only_window_colors.end(),
-          std::make_move_iterator(frame_colors.begin()),
-          std::make_move_iterator(frame_colors.end()));
     }
   }
 

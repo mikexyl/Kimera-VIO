@@ -106,7 +106,8 @@ class MonoDepthInference {
       const BufferedKeyframe& frame,
       const xfeat::MonoDepthResult& depth_result,
       bool apply_confidence_filter,
-      const std::optional<Da3PairInfo>& pair_info = std::nullopt) const;
+      const std::optional<Da3PairInfo>& pair_info = std::nullopt,
+      const MonoDepthRawPacket::ConstPtr& da3_context_packet = nullptr) const;
 
  private:
   MonoDepthParams params_;

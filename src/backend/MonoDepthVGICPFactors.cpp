@@ -30,6 +30,31 @@ double elapsedMs(
 }
 
 constexpr int kVgicpLogEveryN = 10;
+constexpr std::size_t kMinDa3OverlapSamples = 32u;
+
+double median(std::vector<double> values) {
+  if (values.empty()) {
+    return std::numeric_limits<double>::quiet_NaN();
+  }
+  const std::size_t middle = values.size() / 2u;
+  std::nth_element(values.begin(), values.begin() + middle, values.end());
+  const double upper = values[middle];
+  if (values.size() % 2u != 0u) {
+    return upper;
+  }
+  const double lower =
+      *std::max_element(values.begin(), values.begin() + middle);
+  return 0.5 * (lower + upper);
+}
+
+bool isFinitePose(const gtsam::Pose3& pose) {
+  return pose.rotation().matrix().allFinite() && pose.translation().allFinite();
+}
+
+gtsam::Pose3 scalePoseTranslation(const gtsam::Pose3& pose,
+                                  const double scale) {
+  return gtsam::Pose3(pose.rotation(), scale * pose.translation());
+}
 
 }  // namespace
 
@@ -58,6 +83,20 @@ void MonoDepthVGICPFactors::addFactors(
   CHECK_NOTNULL(delete_slots);
   CHECK_NOTNULL(new_factors);
   if (!backend_params_.vgicp_factors_enabled_) {
+    return;
+  }
+
+  if (backend_params_.vgicp_icp_only_da3_overlap_fusion_) {
+    cacheDa3OverlapPair(raw_packet);
+    pruneDa3OverlapWindow(collectActivePoseFrameIds(state, new_values));
+    LOG_EVERY_N(INFO, kVgicpLogEveryN)
+        << "DA3 overlap-only diagnostic: pairs="
+        << da3_overlap_fusion_.pair_count
+        << ", fused_views_total=" << da3_overlap_fusion_.fused_view_count
+        << ", retained_views=" << da3_overlap_fusion_.window_views.size()
+        << ", window_points=" << da3OverlapWindowPointCount()
+        << ", component_resets=" << da3_overlap_fusion_.component_reset_count
+        << ". No ICP factors were constructed or added.";
     return;
   }
 
@@ -231,6 +270,13 @@ MonoDepthICPOnlyResult MonoDepthVGICPFactors::optimizeIcpOnly(
     return result;
   }
 
+  if (backend_params_.vgicp_icp_only_da3_overlap_fusion_) {
+    const gtsam::Values no_new_values;
+    pruneDa3OverlapWindow(
+        collectActivePoseFrameIds(state, no_new_values));
+    return makeDa3OverlapResult();
+  }
+
   const auto total_tic = utils::Timer::tic();
   const gtsam::Values no_new_values;
   const std::vector<FrameId> active_frame_ids =
@@ -246,8 +292,7 @@ MonoDepthICPOnlyResult MonoDepthVGICPFactors::optimizeIcpOnly(
   std::map<FrameId, std::set<FrameId>> adjacency;
   for (const FramePair& pair : accepted_factor_pairs_) {
     if (!ensureDenseFrame(pair.first) || !ensureDenseFrame(pair.second) ||
-        !hasUsableDenseFrame(pair.first) ||
-        !hasUsableDenseFrame(pair.second)) {
+        !hasUsableDenseFrame(pair.first) || !hasUsableDenseFrame(pair.second)) {
       continue;
     }
     const gtsam::Symbol target_key(kPoseSymbolChar, pair.first);
@@ -311,9 +356,7 @@ MonoDepthICPOnlyResult MonoDepthVGICPFactors::optimizeIcpOnly(
     }
     const gtsam::Symbol anchor_key(kPoseSymbolChar, anchor_id);
     graph.emplace_shared<gtsam::PriorFactor<gtsam::Pose3>>(
-        anchor_key,
-        initial_values.at<gtsam::Pose3>(anchor_key),
-        anchor_noise);
+        anchor_key, initial_values.at<gtsam::Pose3>(anchor_key), anchor_noise);
     ++result.anchor_count;
   }
 
@@ -321,12 +364,10 @@ MonoDepthICPOnlyResult MonoDepthVGICPFactors::optimizeIcpOnly(
     result.initial_error = graph.error(initial_values);
     gtsam::LevenbergMarquardtParams params =
         gtsam::LevenbergMarquardtParams::CeresDefaults();
-    params.setMaxIterations(
-        backend_params_.vgicp_icp_only_max_iterations_);
+    params.setMaxIterations(backend_params_.vgicp_icp_only_max_iterations_);
     params.setVerbosity("SILENT");
     params.setVerbosityLM("SILENT");
-    gtsam::LevenbergMarquardtOptimizer optimizer(
-        graph, initial_values, params);
+    gtsam::LevenbergMarquardtOptimizer optimizer(graph, initial_values, params);
     const gtsam::Values optimized_values = optimizer.optimize();
     result.iterations = optimizer.iterations();
     result.final_error = graph.error(optimized_values);
@@ -339,14 +380,12 @@ MonoDepthICPOnlyResult MonoDepthVGICPFactors::optimizeIcpOnly(
     for (const auto& frame_and_neighbors : adjacency) {
       const FrameId frame_id = frame_and_neighbors.first;
       const gtsam::Symbol key(kPoseSymbolChar, frame_id);
-      const gtsam::Pose3& initial_pose =
-          initial_values.at<gtsam::Pose3>(key);
+      const gtsam::Pose3& initial_pose = initial_values.at<gtsam::Pose3>(key);
       const gtsam::Pose3& optimized_pose =
           optimized_values.at<gtsam::Pose3>(key);
       const gtsam::Pose3 correction = initial_pose.between(optimized_pose);
-      result.max_translation_delta_m =
-          std::max(result.max_translation_delta_m,
-                   correction.translation().norm());
+      result.max_translation_delta_m = std::max(
+          result.max_translation_delta_m, correction.translation().norm());
       result.max_rotation_delta_deg =
           std::max(result.max_rotation_delta_deg,
                    gtsam::Rot3::Logmap(correction.rotation()).norm() *
@@ -371,20 +410,410 @@ MonoDepthICPOnlyResult MonoDepthVGICPFactors::optimizeIcpOnly(
   LOG_EVERY_N(INFO, kVgicpLogEveryN)
       << "Mono-depth ICP-only optimization: valid=" << result.valid
       << ", solution_available=" << result.solution_available
-      << ", factors=" << result.factor_count
-      << ", poses=" << result.pose_count
+      << ", factors=" << result.factor_count << ", poses=" << result.pose_count
       << ", anchors=" << result.anchor_count
       << ", iterations=" << result.iterations
       << ", error=" << result.initial_error << " -> " << result.final_error
       << ", ratio=" << result.error_ratio
-      << ", max translation correction="
-      << result.max_translation_delta_m << " m"
+      << ", max translation correction=" << result.max_translation_delta_m
+      << " m"
       << ", max rotation correction=" << result.max_rotation_delta_deg
       << " deg, optimization_ms=" << result.optimization_ms
-      << (result.failure_reason.empty()
-              ? std::string()
-              : ", failure=" + result.failure_reason);
+      << (result.failure_reason.empty() ? std::string()
+                                        : ", failure=" + result.failure_reason);
   return result;
+}
+
+void MonoDepthVGICPFactors::cacheDa3OverlapPair(
+    const MonoDepthRawPacket::ConstPtr& raw_packet) {
+  if (!raw_packet || !raw_packet->da3_context_packet ||
+      !raw_packet->da3_context_keyframe_id.has_value() ||
+      !raw_packet->da3_context_cam_T_current_cam.has_value()) {
+    return;
+  }
+
+  const MonoDepthRawPacket::ConstPtr& context_packet =
+      raw_packet->da3_context_packet;
+  const FramePair pair{*raw_packet->da3_context_keyframe_id,
+                       raw_packet->keyframe_id};
+  if (context_packet->keyframe_id != pair.first || pair.first == pair.second) {
+    LOG(ERROR) << "Rejecting malformed DA3 overlap pair [" << pair.first << ", "
+               << pair.second << "]";
+    return;
+  }
+  if (da3_overlap_fusion_.initialized &&
+      da3_overlap_fusion_.last_pair == pair) {
+    return;
+  }
+  if (!isFinitePose(*raw_packet->da3_context_cam_T_current_cam)) {
+    LOG(ERROR) << "Rejecting DA3 overlap pair [" << pair.first << ", "
+               << pair.second << "] because its predicted pose is invalid.";
+    return;
+  }
+
+  bool continue_component =
+      da3_overlap_fusion_.initialized &&
+      da3_overlap_fusion_.last_current_frame_id == pair.first &&
+      da3_overlap_fusion_.last_current_packet;
+  Da3OverlapScaleEstimate overlap;
+  if (continue_component) {
+    overlap = estimateDa3OverlapScale(*da3_overlap_fusion_.last_current_packet,
+                                      *context_packet);
+    continue_component = overlap.valid;
+  }
+
+  if (!continue_component && da3_overlap_fusion_.initialized) {
+    const std::size_t reset_count =
+        da3_overlap_fusion_.component_reset_count + 1u;
+    LOG(WARNING) << "Resetting DA3 overlap component at pair [" << pair.first
+                 << ", " << pair.second << "]"
+                 << (overlap.failure_reason.empty()
+                         ? ": pair is not consecutive"
+                         : ": " + overlap.failure_reason);
+    da3_overlap_fusion_ = Da3OverlapFusionState();
+    da3_overlap_fusion_.component_reset_count = reset_count;
+  }
+
+  const double pair_scale =
+      continue_component
+          ? da3_overlap_fusion_.last_pair_scale * overlap.scale_ratio
+          : 1.0;
+  if (!std::isfinite(pair_scale) || pair_scale <= 0.0) {
+    LOG(ERROR) << "Rejecting DA3 overlap pair [" << pair.first << ", "
+               << pair.second << "] because its chained scale is invalid.";
+    return;
+  }
+
+  const gtsam::Pose3 chain_T_context =
+      continue_component ? da3_overlap_fusion_.chain_T_last_current
+                         : gtsam::Pose3();
+  const gtsam::Pose3 context_T_current = scalePoseTranslation(
+      *raw_packet->da3_context_cam_T_current_cam, pair_scale);
+  const gtsam::Pose3 chain_T_current =
+      chain_T_context.compose(context_T_current);
+  if (!isFinitePose(chain_T_current)) {
+    LOG(ERROR) << "Rejecting DA3 overlap pair [" << pair.first << ", "
+               << pair.second
+               << "] because its chained camera pose is invalid.";
+    return;
+  }
+
+  Da3OverlapViewCloud context_view;
+  context_view.frame_id = pair.first;
+  const std::size_t context_candidates = appendDa3OverlapView(
+      *context_packet,
+      pair_scale,
+      chain_T_context,
+      &context_view.points,
+      &context_view.colors);
+  Da3OverlapViewCloud current_view;
+  current_view.frame_id = pair.second;
+  const std::size_t current_candidates = appendDa3OverlapView(
+      *raw_packet,
+      pair_scale,
+      chain_T_current,
+      &current_view.points,
+      &current_view.colors);
+  if (context_candidates == 0u && current_candidates == 0u) {
+    LOG(ERROR) << "Rejecting DA3 overlap pair [" << pair.first << ", "
+               << pair.second << "] because neither view produced points.";
+    return;
+  }
+
+  if (context_candidates > 0u) {
+    da3_overlap_fusion_.window_views.push_back(std::move(context_view));
+  }
+  if (current_candidates > 0u) {
+    da3_overlap_fusion_.window_views.push_back(std::move(current_view));
+  }
+
+  da3_overlap_fusion_.initialized = true;
+  da3_overlap_fusion_.last_pair = pair;
+  da3_overlap_fusion_.last_current_frame_id = pair.second;
+  da3_overlap_fusion_.last_current_packet = raw_packet;
+  da3_overlap_fusion_.chain_T_last_current = chain_T_current;
+  da3_overlap_fusion_.last_pair_scale = pair_scale;
+  ++da3_overlap_fusion_.pair_count;
+  da3_overlap_fusion_.fused_view_count +=
+      static_cast<std::size_t>(context_candidates > 0u) +
+      static_cast<std::size_t>(current_candidates > 0u);
+  da3_overlap_fusion_.last_overlap_candidate_count = overlap.candidate_count;
+  da3_overlap_fusion_.last_overlap_inlier_count = overlap.inlier_count;
+  da3_overlap_fusion_.last_overlap_log_rmse = overlap.log_rmse;
+
+  LOG(INFO) << "DA3 overlap fused pair [" << pair.first << ", " << pair.second
+            << "]: scale=" << pair_scale
+            << (continue_component
+                    ? ", overlap_ratio=" + std::to_string(overlap.scale_ratio)
+                    : ", component_anchor=identity")
+            << ", overlap_inliers=" << overlap.inlier_count << "/"
+            << overlap.candidate_count
+            << ", overlap_log_rmse=" << overlap.log_rmse << ", appended_views="
+            << static_cast<std::size_t>(context_candidates > 0u) +
+                   static_cast<std::size_t>(current_candidates > 0u)
+            << ", retained_views=" << da3_overlap_fusion_.window_views.size()
+            << ", window_points=" << da3OverlapWindowPointCount()
+            << ". ICP disabled.";
+}
+
+MonoDepthVGICPFactors::Da3OverlapScaleEstimate
+MonoDepthVGICPFactors::estimateDa3OverlapScale(
+    const MonoDepthRawPacket& previous_current,
+    const MonoDepthRawPacket& next_context) const {
+  Da3OverlapScaleEstimate result;
+  if (previous_current.keyframe_id != next_context.keyframe_id) {
+    result.failure_reason = "overlap packets do not describe the same image";
+    return result;
+  }
+  if (previous_current.depth.empty() || next_context.depth.empty() ||
+      previous_current.depth.type() != CV_32FC1 ||
+      next_context.depth.type() != CV_32FC1 ||
+      previous_current.depth.size() != next_context.depth.size() ||
+      previous_current.depth_support_mask.empty() ||
+      next_context.depth_support_mask.empty() ||
+      previous_current.depth_support_mask.type() != CV_8UC1 ||
+      next_context.depth_support_mask.type() != CV_8UC1 ||
+      previous_current.depth_support_mask.size() !=
+          previous_current.depth.size() ||
+      next_context.depth_support_mask.size() != next_context.depth.size()) {
+    result.failure_reason = "overlap depth or support-mask geometry is invalid";
+    return result;
+  }
+
+  const int stride = std::max(1, mono_depth_params_.visualization_point_stride);
+  std::vector<double> log_ratios;
+  const std::size_t reserve = static_cast<std::size_t>(
+      ((previous_current.depth.rows + stride - 1) / stride) *
+      ((previous_current.depth.cols + stride - 1) / stride));
+  log_ratios.reserve(reserve);
+  for (int v = 0; v < previous_current.depth.rows; v += stride) {
+    const float* previous_depth = previous_current.depth.ptr<float>(v);
+    const float* context_depth = next_context.depth.ptr<float>(v);
+    const uint8_t* previous_support =
+        previous_current.depth_support_mask.ptr<uint8_t>(v);
+    const uint8_t* context_support =
+        next_context.depth_support_mask.ptr<uint8_t>(v);
+    for (int u = 0; u < previous_current.depth.cols; u += stride) {
+      if (previous_support[u] == 0u || context_support[u] == 0u) {
+        continue;
+      }
+      const double previous_z = static_cast<double>(previous_depth[u]);
+      const double context_z = static_cast<double>(context_depth[u]);
+      if (!std::isfinite(previous_z) || !std::isfinite(context_z) ||
+          previous_z <= 0.0 || context_z <= 0.0) {
+        continue;
+      }
+      log_ratios.push_back(std::log(previous_z / context_z));
+    }
+  }
+  result.candidate_count = log_ratios.size();
+  if (log_ratios.size() < kMinDa3OverlapSamples) {
+    result.failure_reason = "insufficient same-image depth overlap";
+    return result;
+  }
+
+  const double initial_median = median(log_ratios);
+  std::vector<double> absolute_residuals;
+  absolute_residuals.reserve(log_ratios.size());
+  for (const double log_ratio : log_ratios) {
+    absolute_residuals.push_back(std::abs(log_ratio - initial_median));
+  }
+  const double mad = median(absolute_residuals);
+  const double inlier_threshold = std::max(1e-3, 3.0 * 1.4826 * mad);
+  std::vector<double> inliers;
+  inliers.reserve(log_ratios.size());
+  for (const double log_ratio : log_ratios) {
+    if (std::abs(log_ratio - initial_median) <= inlier_threshold) {
+      inliers.push_back(log_ratio);
+    }
+  }
+  result.inlier_count = inliers.size();
+  if (inliers.size() < kMinDa3OverlapSamples) {
+    result.failure_reason = "insufficient robust same-image depth overlap";
+    return result;
+  }
+
+  const double robust_log_ratio = median(inliers);
+  double squared_error_sum = 0.0;
+  for (const double log_ratio : inliers) {
+    const double residual = log_ratio - robust_log_ratio;
+    squared_error_sum += residual * residual;
+  }
+  result.log_rmse =
+      std::sqrt(squared_error_sum / static_cast<double>(inliers.size()));
+  result.scale_ratio = std::exp(robust_log_ratio);
+  result.valid = std::isfinite(result.scale_ratio) &&
+                 result.scale_ratio > 0.0 && std::isfinite(result.log_rmse);
+  if (!result.valid) {
+    result.scale_ratio = 1.0;
+    result.failure_reason = "robust overlap scale is invalid";
+  }
+  return result;
+}
+
+std::size_t MonoDepthVGICPFactors::appendDa3OverlapView(
+    const MonoDepthRawPacket& packet,
+    const double scale,
+    const gtsam::Pose3& chain_T_cam,
+    Point3Vector* points,
+    RgbaColorVector* colors) const {
+  CHECK_NOTNULL(points);
+  CHECK_NOTNULL(colors);
+  if (!std::isfinite(scale) || scale <= 0.0 ||
+      !packet.source_image_is_undistorted || packet.depth.empty() ||
+      packet.depth.type() != CV_32FC1 || packet.depth_support_mask.empty() ||
+      packet.depth_support_mask.type() != CV_8UC1 ||
+      packet.source_image_bgr.empty() ||
+      packet.source_image_bgr.type() != CV_8UC3) {
+    return 0u;
+  }
+  const double fx = packet.intrinsics.fx;
+  const double fy = packet.intrinsics.fy;
+  const double cx = packet.intrinsics.cx;
+  const double cy = packet.intrinsics.cy;
+  if (!std::isfinite(fx) || !std::isfinite(fy) || fx <= 0.0 || fy <= 0.0) {
+    return 0u;
+  }
+  const int max_points =
+      std::max(0, mono_depth_params_.visualization_max_points_per_keyframe);
+  if (max_points == 0) {
+    return 0u;
+  }
+  const int stride = std::max(1, mono_depth_params_.visualization_point_stride);
+  const int rows = std::min({packet.depth.rows,
+                             packet.depth_support_mask.rows,
+                             packet.source_image_bgr.rows});
+  const int cols = std::min({packet.depth.cols,
+                             packet.depth_support_mask.cols,
+                             packet.source_image_bgr.cols});
+
+  Point3Vector candidates;
+  RgbaColorVector candidate_colors;
+  candidates.reserve(static_cast<std::size_t>(((rows + stride - 1) / stride) *
+                                              ((cols + stride - 1) / stride)));
+  candidate_colors.reserve(candidates.capacity());
+  for (int v = 0; v < rows; v += stride) {
+    const float* depth_row = packet.depth.ptr<float>(v);
+    const uint8_t* support_row = packet.depth_support_mask.ptr<uint8_t>(v);
+    const cv::Vec3b* color_row = packet.source_image_bgr.ptr<cv::Vec3b>(v);
+    for (int u = 0; u < cols; u += stride) {
+      if (support_row[u] == 0u) {
+        continue;
+      }
+      const double z = scale * static_cast<double>(depth_row[u]);
+      if (!std::isfinite(z) || z <= 0.0) {
+        continue;
+      }
+      const Point3 chain_point = chain_T_cam.transformFrom(
+          Point3((static_cast<double>(u) - cx) * z / fx,
+                 (static_cast<double>(v) - cy) * z / fy,
+                 z));
+      if (!chain_point.allFinite()) {
+        continue;
+      }
+      candidates.push_back(chain_point);
+      const cv::Vec3b& bgr = color_row[u];
+      candidate_colors.emplace_back(static_cast<float>(bgr[2]),
+                                    static_cast<float>(bgr[1]),
+                                    static_cast<float>(bgr[0]),
+                                    180.0f);
+    }
+  }
+
+  const std::size_t candidate_count = candidates.size();
+  const std::size_t selected_count =
+      std::min(candidate_count, static_cast<std::size_t>(max_points));
+  points->reserve(points->size() + selected_count);
+  colors->reserve(colors->size() + selected_count);
+  for (std::size_t i = 0u; i < selected_count; ++i) {
+    const std::size_t index =
+        selected_count == candidate_count
+            ? i
+            : std::min(candidate_count - 1u,
+                       (i * candidate_count) / selected_count);
+    points->push_back(candidates[index]);
+    colors->push_back(candidate_colors[index]);
+  }
+  return candidate_count;
+}
+
+MonoDepthICPOnlyResult MonoDepthVGICPFactors::makeDa3OverlapResult() const {
+  MonoDepthICPOnlyResult result;
+  result.enabled = backend_params_.vgicp_icp_only_enabled_;
+  result.da3_overlap_fusion = true;
+  const std::size_t window_point_count = da3OverlapWindowPointCount();
+  result.solution_available =
+      da3_overlap_fusion_.initialized && window_point_count > 0u;
+  result.valid = result.solution_available;
+  result.failure_reason = result.valid
+                              ? std::string()
+                              : "no chained DA3 overlap component is available";
+  result.factor_count = 0u;
+  std::set<FrameId> retained_keyframe_ids;
+  for (const Da3OverlapViewCloud& view :
+       da3_overlap_fusion_.window_views) {
+    retained_keyframe_ids.insert(view.frame_id);
+  }
+  result.pose_count = retained_keyframe_ids.size();
+  result.anchor_count = result.solution_available ? 1u : 0u;
+  result.iterations = 0u;
+  result.initial_error = 0.0;
+  result.final_error = 0.0;
+  result.error_ratio = 1.0;
+  result.da3_pair_count = da3_overlap_fusion_.pair_count;
+  result.da3_fused_view_count = da3_overlap_fusion_.fused_view_count;
+  result.da3_retained_view_count = da3_overlap_fusion_.window_views.size();
+  result.da3_retained_keyframe_count = retained_keyframe_ids.size();
+  result.da3_component_reset_count = da3_overlap_fusion_.component_reset_count;
+  result.da3_overlap_candidate_count =
+      da3_overlap_fusion_.last_overlap_candidate_count;
+  result.da3_overlap_inlier_count =
+      da3_overlap_fusion_.last_overlap_inlier_count;
+  result.da3_overlap_log_rmse = da3_overlap_fusion_.last_overlap_log_rmse;
+  result.da3_last_pair_scale = da3_overlap_fusion_.last_pair_scale;
+  result.da3_overlap_cloud.reserve(window_point_count);
+  result.da3_overlap_colors.reserve(window_point_count);
+  for (const Da3OverlapViewCloud& view :
+       da3_overlap_fusion_.window_views) {
+    result.da3_overlap_cloud.insert(result.da3_overlap_cloud.end(),
+                                    view.points.begin(),
+                                    view.points.end());
+    result.da3_overlap_colors.insert(result.da3_overlap_colors.end(),
+                                     view.colors.begin(),
+                                     view.colors.end());
+  }
+  return result;
+}
+
+void MonoDepthVGICPFactors::pruneDa3OverlapWindow(
+    const std::vector<FrameId>& active_frame_ids) {
+  // An empty key set is useful in pose-independence unit tests and does not
+  // provide a meaningful smoother window to prune against. Production
+  // smoother updates always carry active pose keys.
+  if (active_frame_ids.empty()) {
+    return;
+  }
+  const std::set<FrameId> active_frames(active_frame_ids.begin(),
+                                        active_frame_ids.end());
+  auto& views = da3_overlap_fusion_.window_views;
+  views.erase(
+      std::remove_if(
+          views.begin(),
+          views.end(),
+          [&active_frames](const Da3OverlapViewCloud& view) {
+            return active_frames.find(view.frame_id) == active_frames.end();
+          }),
+      views.end());
+}
+
+std::size_t MonoDepthVGICPFactors::da3OverlapWindowPointCount() const {
+  return std::accumulate(
+      da3_overlap_fusion_.window_views.begin(),
+      da3_overlap_fusion_.window_views.end(),
+      std::size_t{0u},
+      [](const std::size_t count, const Da3OverlapViewCloud& view) {
+        return count + view.points.size();
+      });
 }
 
 void MonoDepthVGICPFactors::replaceRawPackets(
@@ -829,13 +1258,12 @@ bool MonoDepthVGICPFactors::isPairAlreadyTracked(const FramePair& pair) const {
          pending_factor_pairs_.find(pair) != pending_factor_pairs_.end();
 }
 
-gtsam::NonlinearFactor::shared_ptr
-MonoDepthVGICPFactors::makeMatchingFactor(const FramePair& pair) const {
+gtsam::NonlinearFactor::shared_ptr MonoDepthVGICPFactors::makeMatchingFactor(
+    const FramePair& pair) const {
   const auto target_it = dense_frames_.find(pair.first);
   const auto source_it = dense_frames_.find(pair.second);
   if (target_it == dense_frames_.end() || source_it == dense_frames_.end() ||
-      !hasUsableDenseFrame(pair.first) ||
-      !hasUsableDenseFrame(pair.second)) {
+      !hasUsableDenseFrame(pair.first) || !hasUsableDenseFrame(pair.second)) {
     return nullptr;
   }
 

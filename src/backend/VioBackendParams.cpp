@@ -195,6 +195,9 @@ bool BackendParams::parseYAMLVioBackendParams(const YamlParser& yaml_parser) {
   getYamlParamIfPresent(
       yaml_parser, "vgicp_icp_only_enabled", &vgicp_icp_only_enabled_);
   getYamlParamIfPresent(yaml_parser,
+                        "vgicp_icp_only_da3_overlap_fusion",
+                        &vgicp_icp_only_da3_overlap_fusion_);
+  getYamlParamIfPresent(yaml_parser,
                         "vgicp_icp_only_max_iterations",
                         &vgicp_icp_only_max_iterations_);
   getYamlParamIfPresent(yaml_parser,
@@ -224,6 +227,9 @@ bool BackendParams::parseYAMLVioBackendParams(const YamlParser& yaml_parser) {
 
   CHECK(!vgicp_icp_only_enabled_ || vgicp_factors_enabled_)
       << "vgicp_icp_only_enabled requires vgicp_factors_enabled";
+  CHECK(!vgicp_icp_only_da3_overlap_fusion_ || vgicp_icp_only_enabled_)
+      << "vgicp_icp_only_da3_overlap_fusion requires "
+         "vgicp_icp_only_enabled";
   CHECK_GT(vgicp_icp_only_max_iterations_, 0);
   CHECK_GE(vgicp_min_shared_tracks_, 0);
   CHECK_GE(vgicp_max_edges_per_keyframe_, 0);
@@ -285,8 +291,9 @@ bool BackendParams::equalsVioBackendParams(const BackendParams& vp2,
       (max_lmk_reproj_error_to_keep_ == vp2.max_lmk_reproj_error_to_keep_) &&
       (vgicp_factors_enabled_ == vp2.vgicp_factors_enabled_) &&
       (vgicp_icp_only_enabled_ == vp2.vgicp_icp_only_enabled_) &&
-      (vgicp_icp_only_max_iterations_ ==
-       vp2.vgicp_icp_only_max_iterations_) &&
+      (vgicp_icp_only_da3_overlap_fusion_ ==
+       vp2.vgicp_icp_only_da3_overlap_fusion_) &&
+      (vgicp_icp_only_max_iterations_ == vp2.vgicp_icp_only_max_iterations_) &&
       (vgicp_use_weighted_icp_factor_ == vp2.vgicp_use_weighted_icp_factor_) &&
       (vgicp_min_shared_tracks_ == vp2.vgicp_min_shared_tracks_) &&
       (vgicp_max_edges_per_keyframe_ == vp2.vgicp_max_edges_per_keyframe_) &&
@@ -378,6 +385,8 @@ void BackendParams::printVioBackendParams() const {
       vgicp_factors_enabled_,
       "VGICP ICP-only Diagnostic Enabled",
       vgicp_icp_only_enabled_,
+      "ICP-only DA3 Overlap Fusion",
+      vgicp_icp_only_da3_overlap_fusion_,
       "VGICP ICP-only Max Iterations",
       vgicp_icp_only_max_iterations_,
       "VGICP Use Weighted ICP Factor",

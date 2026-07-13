@@ -251,17 +251,15 @@ BackendOutput::UniquePtr VioBackend::spinOnce(const BackendInput& input) {
     gtsam::Pose3 W_P_smoother = W_P_cur * smoother_P_cur.inverse();
     MonoDepthICPOnlyResult mono_depth_icp_only_result;
     const MonoDepthICPOnlyResult* mono_depth_icp_only_result_ptr = nullptr;
-    if (mono_depth_vgicp_factors_ &&
-        backend_params_.vgicp_icp_only_enabled_) {
+    if (mono_depth_vgicp_factors_ && backend_params_.vgicp_icp_only_enabled_) {
       mono_depth_icp_only_result =
           mono_depth_vgicp_factors_->optimizeIcpOnly(state_);
       mono_depth_icp_only_result_ptr = &mono_depth_icp_only_result;
     }
     MonoDepthMapOutput::ConstPtr mono_depth_map_output =
         mono_depth_alignment_
-            ? mono_depth_alignment_->process(state_,
-                                             W_P_smoother,
-                                             mono_depth_icp_only_result_ptr)
+            ? mono_depth_alignment_->process(
+                  state_, W_P_smoother, mono_depth_icp_only_result_ptr)
             : nullptr;
     DenseMapOutput::ConstPtr dense_map_output = nullptr;
     if (dense_map_module_ && mono_depth_map_output &&
@@ -355,6 +353,20 @@ void VioBackend::refreshMonoDepthWindowAfterOptimization(
   std::map<FrameId, MonoDepthRawPacket::ConstPtr> refreshed_packets;
   std::size_t valid_packets = 0u;
   std::size_t rejected_packets = 0u;
+  double landmark_raw_candidates = 0.0;
+  double landmark_flat_candidates = 0.0;
+  double landmark_edge_rejections = 0.0;
+  double landmark_flatness_support_rejections = 0.0;
+  double landmark_flatness_weight_sum = 0.0;
+  const auto accumulate_metric = [](const MonoDepthScaleAlignmentResult& result,
+                                    const std::string& name,
+                                    double* total) {
+    CHECK_NOTNULL(total);
+    const auto metric_it = result.metrics.find(name);
+    if (metric_it != result.metrics.end()) {
+      *total += metric_it->second;
+    }
+  };
   for (const auto& frame_and_packet : mono_depth_canonical_packet_cache_) {
     if (!frame_and_packet.second) {
       continue;
@@ -363,6 +375,18 @@ void VioBackend::refreshMonoDepthWindowAfterOptimization(
         *frame_and_packet.second, optimized_body_poses, optimized_landmarks};
     const MonoDepthScaleAlignmentResult result =
         mono_depth_scale_aligner_->align(input);
+    if (result.method == MonoDepthScaleAlignmentMethod::kLandmarks) {
+      landmark_flat_candidates += static_cast<double>(result.candidate_count);
+      accumulate_metric(
+          result, "landmark_raw_candidate_count", &landmark_raw_candidates);
+      accumulate_metric(
+          result, "depth_edge_rejected_count", &landmark_edge_rejections);
+      accumulate_metric(result,
+                        "flatness_support_rejected_count",
+                        &landmark_flatness_support_rejections);
+      accumulate_metric(
+          result, "flatness_weight_sum", &landmark_flatness_weight_sum);
+    }
     MonoDepthRawPacket::ConstPtr aligned_packet;
     const auto previous_packet_it =
         mono_depth_scaled_packet_cache_.find(frame_and_packet.first);
@@ -403,7 +427,11 @@ void VioBackend::refreshMonoDepthWindowAfterOptimization(
       << ", local_window_packets=" << mono_depth_scaled_packet_cache_.size()
       << ", valid=" << valid_packets << ", rejected=" << rejected_packets
       << ", optimized_poses=" << optimized_body_poses.size()
-      << ", optimized_landmarks=" << optimized_landmarks.size();
+      << ", optimized_landmarks=" << optimized_landmarks.size()
+      << ", landmark_pairs(raw/flat/edge_rejected/support_rejected)="
+      << landmark_raw_candidates << "/" << landmark_flat_candidates << "/"
+      << landmark_edge_rejections << "/" << landmark_flatness_support_rejections
+      << ", landmark_flatness_weight_sum=" << landmark_flatness_weight_sum;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1346,7 +1374,15 @@ bool VioBackend::optimize(
                             new_imu_prior_and_other_factors_.end());
 
   if (mono_depth_vgicp_factors_) {
-    mono_depth_vgicp_factors_->addFactors(nullptr,
+    // The DA3-overlap prototype deliberately consumes the canonical two-view
+    // result before any VIO/landmark scale is applied.  The normal ICP path
+    // continues to receive packets only through the post-smoother aligned
+    // cache.
+    const MonoDepthRawPacket::ConstPtr da3_overlap_packet =
+        backend_params_.vgicp_icp_only_da3_overlap_fusion_
+            ? mono_depth_raw_packet
+            : nullptr;
+    mono_depth_vgicp_factors_->addFactors(da3_overlap_packet,
                                           state_,
                                           new_values_,
                                           feature_tracks_,

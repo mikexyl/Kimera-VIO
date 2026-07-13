@@ -69,6 +69,31 @@ inline void validateMonoDepthScaleAlignmentConfiguration(
   }
 }
 
+enum class MonoDepthLandmarkScaleSampleStatus {
+  kFlatInlier = 0,
+  kDepthEdgeRejected = 1,
+  kFlatnessSupportRejected = 2,
+  kLogRatioOutlier = 3,
+};
+
+struct MonoDepthLandmarkScaleSample {
+  LandmarkId landmark_id = -1;
+  cv::Point2f keypoint;
+  double relative_depth_variation = -1.0;
+  double flatness_weight = 0.0;
+  double log_depth_ratio = 0.0;
+  MonoDepthLandmarkScaleSampleStatus status =
+      MonoDepthLandmarkScaleSampleStatus::kFlatInlier;
+
+  bool operator==(const MonoDepthLandmarkScaleSample& rhs) const {
+    return landmark_id == rhs.landmark_id && keypoint.x == rhs.keypoint.x &&
+           keypoint.y == rhs.keypoint.y &&
+           relative_depth_variation == rhs.relative_depth_variation &&
+           flatness_weight == rhs.flatness_weight &&
+           log_depth_ratio == rhs.log_depth_ratio && status == rhs.status;
+  }
+};
+
 struct MonoDepthScaleAlignmentResult {
   MonoDepthScaleAlignmentMethod method = MonoDepthScaleAlignmentMethod::kNone;
   bool valid = false;
@@ -78,6 +103,7 @@ struct MonoDepthScaleAlignmentResult {
   std::size_t inlier_count = 0u;
   double log_rmse = 0.0;
   std::map<std::string, double> metrics;
+  std::vector<MonoDepthLandmarkScaleSample> landmark_samples;
 
   bool operator==(const MonoDepthScaleAlignmentResult& rhs) const {
     return method == rhs.method && valid == rhs.valid &&
@@ -85,7 +111,7 @@ struct MonoDepthScaleAlignmentResult {
            failure_reason == rhs.failure_reason &&
            candidate_count == rhs.candidate_count &&
            inlier_count == rhs.inlier_count && log_rmse == rhs.log_rmse &&
-           metrics == rhs.metrics;
+           metrics == rhs.metrics && landmark_samples == rhs.landmark_samples;
   }
 
   bool operator!=(const MonoDepthScaleAlignmentResult& rhs) const {
@@ -138,12 +164,23 @@ struct MonoDepthParams {
   double depth_weight_range_power = 2.0;
   double depth_weight_range_min = 0.05;
   bool visualize_weights = false;
+  bool visualize_landmark_scale_alignment = false;
+  // Experimental isolated diagnostic: run DA3 on consecutive keyframes and
+  // chain pair reconstructions through their duplicate middle image. No
+  // odometry pose is used by DA3 overlap alignment or fusion; metric odometry
+  // is consulted only to apply min_keyframe_distance_m consistently.
+  bool icp_only_da3_overlap_fusion = false;
   double min_confidence = 1.1;
   bool visualize_confidence = false;
   float point_radius = 0.005f;
   bool verbose = false;
   MonoDepthScaleAlignmentMethod scale_alignment_method =
       MonoDepthScaleAlignmentMethod::kNone;
+  // Landmark-scale samples are weighted by local depth flatness. The
+  // variation is scale-invariant: max(neighbor, center) /
+  // min(neighbor, center) - 1. Samples at or above the cutoff are rejected.
+  int landmark_scale_flatness_radius = 4;
+  double landmark_scale_max_relative_depth_variation = 0.15;
   MonoDepthMode mode = MonoDepthMode::kSingleView;
 
   bool operator==(const MonoDepthParams& rhs) const {
@@ -163,10 +200,17 @@ struct MonoDepthParams {
            depth_weight_range_power == rhs.depth_weight_range_power &&
            depth_weight_range_min == rhs.depth_weight_range_min &&
            visualize_weights == rhs.visualize_weights &&
+           visualize_landmark_scale_alignment ==
+               rhs.visualize_landmark_scale_alignment &&
+           icp_only_da3_overlap_fusion == rhs.icp_only_da3_overlap_fusion &&
            min_confidence == rhs.min_confidence &&
            visualize_confidence == rhs.visualize_confidence &&
            point_radius == rhs.point_radius && verbose == rhs.verbose &&
            scale_alignment_method == rhs.scale_alignment_method &&
+           landmark_scale_flatness_radius ==
+               rhs.landmark_scale_flatness_radius &&
+           landmark_scale_max_relative_depth_variation ==
+               rhs.landmark_scale_max_relative_depth_variation &&
            mode == rhs.mode;
   }
 };
@@ -188,6 +232,10 @@ struct MonoDepthRawPacket {
   Timestamp timestamp = 0;
   cv::Mat source_image_bgr;
   cv::Mat depth;
+  // Sky and undistortion filtering only.  Unlike valid_mask, this mask does
+  // not apply the per-run confidence threshold, so two predictions of the
+  // same DA3 view can still be compared when their confidence differs.
+  cv::Mat depth_support_mask;
   cv::Mat valid_mask;
   cv::Mat weight_image;
   cv::Mat confidence;
@@ -206,6 +254,10 @@ struct MonoDepthRawPacket {
   std::optional<FrameId> da3_context_keyframe_id;
   std::optional<gtsam::Pose3> da3_context_body_T_cam;
   std::optional<gtsam::Pose3> da3_context_cam_T_current_cam;
+  // The first view returned by the same two-view DA3 invocation.  The packet
+  // itself is the second view.  Keeping both views exposes the duplicate
+  // middle image shared by consecutive invocations.
+  MonoDepthRawPacket::ConstPtr da3_context_packet;
   MonoDepthScaleAlignmentResult scale_alignment;
   MonoDepthIntrinsics intrinsics;
   gtsam::Pose3 body_T_cam;
@@ -236,6 +288,22 @@ struct MonoDepthICPOnlyResult {
   double max_rotation_delta_deg = 0.0;
   double optimization_ms = 0.0;
   std::map<FrameId, gtsam::Pose3> body_poses;
+
+  // Experimental DA3-only alternative carried through the existing isolated
+  // ICP diagnostic path.  It chains consecutive two-view predictions using
+  // their duplicate middle image and never consumes VIO/odometry poses.
+  bool da3_overlap_fusion = false;
+  std::size_t da3_pair_count = 0u;
+  std::size_t da3_fused_view_count = 0u;
+  std::size_t da3_retained_view_count = 0u;
+  std::size_t da3_retained_keyframe_count = 0u;
+  std::size_t da3_component_reset_count = 0u;
+  std::size_t da3_overlap_candidate_count = 0u;
+  std::size_t da3_overlap_inlier_count = 0u;
+  double da3_overlap_log_rmse = 0.0;
+  double da3_last_pair_scale = 1.0;
+  Point3Vector da3_overlap_cloud;
+  RgbaColorVector da3_overlap_colors;
 };
 
 struct MonoDepthMapOutput {
@@ -246,6 +314,7 @@ struct MonoDepthMapOutput {
   Timestamp target_timestamp = 0;
   FrameId selected_scale_alignment_frame_id = 0u;
   MonoDepthScaleAlignmentResult selected_scale_alignment;
+  cv::Mat landmark_scale_alignment_visualization_bgr;
   std::map<FrameId, MonoDepthScaleAlignmentResult> scale_alignments;
   std::size_t valid_scale_alignment_packets = 0u;
   std::size_t rejected_scale_alignment_packets = 0u;

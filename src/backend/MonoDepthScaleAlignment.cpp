@@ -1,6 +1,7 @@
 #include "kimera-vio/backend/MonoDepthScaleAlignment.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <limits>
 #include <string>
@@ -16,6 +17,12 @@ constexpr double kMinDisplacement = 1e-6;
 constexpr std::size_t kMinLandmarkPairs = 8u;
 constexpr double kLandmarkRatioInlierFactor = 2.0;
 
+struct WeightedLogDepthRatio {
+  double log_ratio = 0.0;
+  double flatness_weight = 0.0;
+  std::size_t diagnostic_index = 0u;
+};
+
 MonoDepthScaleAlignmentResult makeResult(
     const MonoDepthScaleAlignmentMethod method) {
   MonoDepthScaleAlignmentResult result;
@@ -23,16 +30,31 @@ MonoDepthScaleAlignmentResult makeResult(
   return result;
 }
 
-double medianValue(std::vector<double> values) {
-  const std::size_t middle = values.size() / 2u;
-  std::nth_element(values.begin(), values.begin() + middle, values.end());
-  double median = values[middle];
-  if (values.size() % 2u == 0u) {
-    std::nth_element(
-        values.begin(), values.begin() + middle - 1u, values.end());
-    median = 0.5 * (median + values[middle - 1u]);
+double weightedMedianLogRatio(std::vector<WeightedLogDepthRatio> candidates) {
+  std::sort(
+      candidates.begin(),
+      candidates.end(),
+      [](const WeightedLogDepthRatio& lhs, const WeightedLogDepthRatio& rhs) {
+        return lhs.log_ratio < rhs.log_ratio;
+      });
+  double total_weight = 0.0;
+  for (const auto& candidate : candidates) {
+    total_weight += candidate.flatness_weight;
   }
-  return median;
+
+  const double half_weight = 0.5 * total_weight;
+  double cumulative_weight = 0.0;
+  for (std::size_t i = 0u; i < candidates.size(); ++i) {
+    cumulative_weight += candidates[i].flatness_weight;
+    if (cumulative_weight < half_weight) {
+      continue;
+    }
+    if (cumulative_weight == half_weight && i + 1u < candidates.size()) {
+      return 0.5 * (candidates[i].log_ratio + candidates[i + 1u].log_ratio);
+    }
+    return candidates[i].log_ratio;
+  }
+  return std::numeric_limits<double>::quiet_NaN();
 }
 
 bool sampleDepthBilinear(const cv::Mat& depth,
@@ -74,6 +96,62 @@ bool sampleDepthBilinear(const cv::Mat& depth,
   *sampled_depth = (1.0f - wx) * (1.0f - wy) * z00 + wx * (1.0f - wy) * z01 +
                    (1.0f - wx) * wy * z10 + wx * wy * z11;
   return true;
+}
+
+bool computeDepthFlatnessWeight(const cv::Mat& depth,
+                                const cv::Mat& valid_mask,
+                                const cv::Point2f& px,
+                                const float center_depth,
+                                const int radius,
+                                const double max_relative_depth_variation,
+                                double* relative_depth_variation,
+                                double* flatness_weight) {
+  if (relative_depth_variation == nullptr || flatness_weight == nullptr ||
+      !std::isfinite(center_depth) || center_depth <= 0.0f || radius < 1 ||
+      !std::isfinite(max_relative_depth_variation) ||
+      max_relative_depth_variation <= 0.0) {
+    return false;
+  }
+
+  const std::array<cv::Point2f, 8u> kDirections{cv::Point2f{-1.0f, -1.0f},
+                                                cv::Point2f{0.0f, -1.0f},
+                                                cv::Point2f{1.0f, -1.0f},
+                                                cv::Point2f{-1.0f, 0.0f},
+                                                cv::Point2f{1.0f, 0.0f},
+                                                cv::Point2f{-1.0f, 1.0f},
+                                                cv::Point2f{0.0f, 1.0f},
+                                                cv::Point2f{1.0f, 1.0f}};
+  double max_variation = 0.0;
+  for (const cv::Point2f& direction : kDirections) {
+    const cv::Point2f neighbor_px = px + static_cast<float>(radius) * direction;
+    float neighbor_depth = 0.0f;
+    if (!sampleDepthBilinear(depth, valid_mask, neighbor_px, &neighbor_depth)) {
+      return false;
+    }
+    const double min_depth = std::min(static_cast<double>(center_depth),
+                                      static_cast<double>(neighbor_depth));
+    const double max_depth = std::max(static_cast<double>(center_depth),
+                                      static_cast<double>(neighbor_depth));
+    if (!std::isfinite(min_depth) || !std::isfinite(max_depth) ||
+        min_depth <= 0.0) {
+      return false;
+    }
+    max_variation = std::max(max_variation, max_depth / min_depth - 1.0);
+  }
+
+  *relative_depth_variation = max_variation;
+  if (max_variation >= max_relative_depth_variation) {
+    *flatness_weight = 0.0;
+    return true;
+  }
+
+  // Tukey's biweight gives flat regions nearly unit weight, smoothly
+  // suppresses samples approaching a depth discontinuity, and reaches exactly
+  // zero at the configured cutoff.
+  const double normalized = max_variation / max_relative_depth_variation;
+  const double one_minus_squared = 1.0 - normalized * normalized;
+  *flatness_weight = one_minus_squared * one_minus_squared;
+  return std::isfinite(*flatness_weight) && *flatness_weight > 0.0;
 }
 
 class NoScaleAligner final : public MonoDepthScaleAligner {
@@ -158,7 +236,22 @@ class RelativePoseScaleAligner final : public MonoDepthScaleAligner {
 class LandmarkScaleAligner final : public MonoDepthScaleAligner {
  public:
   explicit LandmarkScaleAligner(const MonoDepthParams& params)
-      : min_depth_m_(params.min_depth_m), max_depth_m_(params.max_depth_m) {}
+      : min_depth_m_(params.min_depth_m),
+        max_depth_m_(params.max_depth_m),
+        flatness_radius_(params.landmark_scale_flatness_radius),
+        max_relative_depth_variation_(
+            params.landmark_scale_max_relative_depth_variation) {
+    if (flatness_radius_ < 1) {
+      throw std::invalid_argument(
+          "mono_depth.landmark_scale_flatness_radius must be at least 1");
+    }
+    if (!std::isfinite(max_relative_depth_variation_) ||
+        max_relative_depth_variation_ <= 0.0) {
+      throw std::invalid_argument(
+          "mono_depth.landmark_scale_max_relative_depth_variation must be "
+          "finite and positive");
+    }
+  }
 
   MonoDepthScaleAlignmentMethod method() const override {
     return MonoDepthScaleAlignmentMethod::kLandmarks;
@@ -210,10 +303,18 @@ class LandmarkScaleAligner final : public MonoDepthScaleAligner {
     const gtsam::Pose3 cam_T_smoother =
         pose_it->second.compose(packet.body_T_cam).inverse();
 
-    std::vector<double> log_ratios;
+    std::vector<WeightedLogDepthRatio> candidates;
     const std::size_t feature_count =
         std::min(packet.keypoints.size(), packet.landmark_ids.size());
-    log_ratios.reserve(feature_count);
+    candidates.reserve(feature_count);
+    result.landmark_samples.reserve(feature_count);
+    std::size_t raw_candidate_count = 0u;
+    std::size_t flatness_support_rejected_count = 0u;
+    std::size_t depth_edge_rejected_count = 0u;
+    double candidate_weight_sum = 0.0;
+    double candidate_squared_weight_sum = 0.0;
+    double variation_sum = 0.0;
+    double max_observed_variation = 0.0;
     for (std::size_t i = 0u; i < feature_count; ++i) {
       const LandmarkId landmark_id = packet.landmark_ids[i];
       if (landmark_id == -1) {
@@ -239,39 +340,132 @@ class LandmarkScaleAligner final : public MonoDepthScaleAligner {
                                &predicted_depth)) {
         continue;
       }
-      log_ratios.push_back(std::log(landmark_depth) -
-                           std::log(static_cast<double>(predicted_depth)));
+      ++raw_candidate_count;
+      const double log_depth_ratio =
+          std::log(landmark_depth) -
+          std::log(static_cast<double>(predicted_depth));
+
+      double relative_depth_variation = 0.0;
+      double flatness_weight = 0.0;
+      if (!computeDepthFlatnessWeight(packet.depth,
+                                      packet.valid_mask,
+                                      packet.keypoints[i],
+                                      predicted_depth,
+                                      flatness_radius_,
+                                      max_relative_depth_variation_,
+                                      &relative_depth_variation,
+                                      &flatness_weight)) {
+        ++flatness_support_rejected_count;
+        result.landmark_samples.push_back(
+            {landmark_id,
+             packet.keypoints[i],
+             -1.0,
+             0.0,
+             log_depth_ratio,
+             MonoDepthLandmarkScaleSampleStatus::kFlatnessSupportRejected});
+        continue;
+      }
+      max_observed_variation =
+          std::max(max_observed_variation, relative_depth_variation);
+      if (flatness_weight <= 0.0) {
+        ++depth_edge_rejected_count;
+        result.landmark_samples.push_back(
+            {landmark_id,
+             packet.keypoints[i],
+             relative_depth_variation,
+             0.0,
+             log_depth_ratio,
+             MonoDepthLandmarkScaleSampleStatus::kDepthEdgeRejected});
+        continue;
+      }
+
+      const std::size_t diagnostic_index = result.landmark_samples.size();
+      result.landmark_samples.push_back(
+          {landmark_id,
+           packet.keypoints[i],
+           relative_depth_variation,
+           flatness_weight,
+           log_depth_ratio,
+           MonoDepthLandmarkScaleSampleStatus::kFlatInlier});
+      candidates.push_back(
+          {log_depth_ratio, flatness_weight, diagnostic_index});
+      candidate_weight_sum += flatness_weight;
+      candidate_squared_weight_sum += flatness_weight * flatness_weight;
+      variation_sum += relative_depth_variation;
     }
 
-    result.candidate_count = log_ratios.size();
-    if (log_ratios.size() < kMinLandmarkPairs) {
-      result.failure_reason = "insufficient landmark depth pairs";
+    result.candidate_count = candidates.size();
+    result.metrics["landmark_raw_candidate_count"] =
+        static_cast<double>(raw_candidate_count);
+    result.metrics["flatness_support_rejected_count"] =
+        static_cast<double>(flatness_support_rejected_count);
+    result.metrics["depth_edge_rejected_count"] =
+        static_cast<double>(depth_edge_rejected_count);
+    result.metrics["flatness_weight_sum"] = candidate_weight_sum;
+    result.metrics["flatness_effective_sample_size"] =
+        candidate_squared_weight_sum > 0.0
+            ? candidate_weight_sum * candidate_weight_sum /
+                  candidate_squared_weight_sum
+            : 0.0;
+    result.metrics["mean_relative_depth_variation"] =
+        candidates.empty()
+            ? 0.0
+            : variation_sum / static_cast<double>(candidates.size());
+    result.metrics["max_relative_depth_variation"] = max_observed_variation;
+    result.metrics["flatness_radius_pixels"] =
+        static_cast<double>(flatness_radius_);
+    result.metrics["flatness_cutoff_relative_depth_variation"] =
+        max_relative_depth_variation_;
+    if (candidates.size() < kMinLandmarkPairs) {
+      if (raw_candidate_count < kMinLandmarkPairs) {
+        result.failure_reason = "insufficient landmark depth pairs";
+      } else if (depth_edge_rejected_count > 0u) {
+        result.failure_reason =
+            "insufficient flat-surface landmark depth pairs";
+      } else {
+        result.failure_reason = "insufficient landmark depth flatness support";
+      }
       return result;
     }
 
-    const double median_log_ratio = medianValue(log_ratios);
+    const double median_log_ratio = weightedMedianLogRatio(candidates);
     result.metrics["median_log_depth_ratio"] = median_log_ratio;
+    result.metrics["weighted_median_log_depth_ratio"] = median_log_ratio;
     if (!std::isfinite(median_log_ratio)) {
-      result.failure_reason = "median landmark log-depth ratio is invalid";
+      result.failure_reason =
+          "weighted median landmark log-depth ratio is invalid";
       return result;
     }
 
     const double log_inlier_threshold = std::log(kLandmarkRatioInlierFactor);
-    double sum_log_ratio = 0.0;
-    for (const double log_ratio : log_ratios) {
-      if (std::abs(log_ratio - median_log_ratio) > log_inlier_threshold) {
+    double inlier_weight_sum = 0.0;
+    double inlier_squared_weight_sum = 0.0;
+    double weighted_log_ratio_sum = 0.0;
+    for (const auto& candidate : candidates) {
+      if (std::abs(candidate.log_ratio - median_log_ratio) >
+          log_inlier_threshold) {
+        result.landmark_samples[candidate.diagnostic_index].status =
+            MonoDepthLandmarkScaleSampleStatus::kLogRatioOutlier;
         continue;
       }
-      sum_log_ratio += log_ratio;
+      weighted_log_ratio_sum += candidate.flatness_weight * candidate.log_ratio;
+      inlier_weight_sum += candidate.flatness_weight;
+      inlier_squared_weight_sum +=
+          candidate.flatness_weight * candidate.flatness_weight;
       ++result.inlier_count;
     }
-    if (result.inlier_count < kMinLandmarkPairs) {
+    result.metrics["inlier_weight_sum"] = inlier_weight_sum;
+    result.metrics["inlier_effective_sample_size"] =
+        inlier_squared_weight_sum > 0.0
+            ? inlier_weight_sum * inlier_weight_sum / inlier_squared_weight_sum
+            : 0.0;
+    if (result.inlier_count < kMinLandmarkPairs ||
+        !std::isfinite(inlier_weight_sum) || inlier_weight_sum <= 0.0) {
       result.failure_reason = "insufficient inlier landmark depth pairs";
       return result;
     }
 
-    const double log_scale =
-        sum_log_ratio / static_cast<double>(result.inlier_count);
+    const double log_scale = weighted_log_ratio_sum / inlier_weight_sum;
     result.absolute_scale = std::exp(log_scale);
     result.metrics["estimated_absolute_scale"] = result.absolute_scale;
     // DA3 depth is scale-ambiguous, so the absolute multiplier has no useful
@@ -283,16 +477,17 @@ class LandmarkScaleAligner final : public MonoDepthScaleAligner {
       return result;
     }
 
-    double squared_log_error = 0.0;
-    for (const double log_ratio : log_ratios) {
-      if (std::abs(log_ratio - median_log_ratio) > log_inlier_threshold) {
+    double weighted_squared_log_error = 0.0;
+    for (const auto& candidate : candidates) {
+      if (std::abs(candidate.log_ratio - median_log_ratio) >
+          log_inlier_threshold) {
         continue;
       }
-      const double residual = log_scale - log_ratio;
-      squared_log_error += residual * residual;
+      const double residual = log_scale - candidate.log_ratio;
+      weighted_squared_log_error +=
+          candidate.flatness_weight * residual * residual;
     }
-    result.log_rmse =
-        std::sqrt(squared_log_error / static_cast<double>(result.inlier_count));
+    result.log_rmse = std::sqrt(weighted_squared_log_error / inlier_weight_sum);
     result.valid = true;
     result.metrics["scale_frozen"] = 1.0;
     frozen_results_[frame_id] = result;
@@ -302,6 +497,8 @@ class LandmarkScaleAligner final : public MonoDepthScaleAligner {
  private:
   double min_depth_m_;
   double max_depth_m_;
+  int flatness_radius_;
+  double max_relative_depth_variation_;
   mutable std::map<FrameId, MonoDepthScaleAlignmentResult> frozen_results_;
 };
 

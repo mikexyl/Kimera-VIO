@@ -205,6 +205,14 @@ void VioParams::print() const {
   LOG(INFO) << "Mono depth scale alignment method: "
             << monoDepthScaleAlignmentMethodToString(
                    mono_depth_params_.scale_alignment_method);
+  LOG(INFO) << "Mono depth landmark-scale visualization: "
+            << mono_depth_params_.visualize_landmark_scale_alignment;
+  LOG(INFO) << "Mono depth ICP-only DA3 overlap fusion: "
+            << mono_depth_params_.icp_only_da3_overlap_fusion;
+  LOG(INFO) << "Mono depth landmark-scale flatness radius [px]: "
+            << mono_depth_params_.landmark_scale_flatness_radius;
+  LOG(INFO) << "Mono depth landmark-scale maximum relative depth variation: "
+            << mono_depth_params_.landmark_scale_max_relative_depth_variation;
   LOG(INFO) << "Dense map enabled: " << dense_map_params_.enabled;
   LOG(INFO) << "Dense map backend: "
             << denseMapBackendToString(dense_map_params_.backend);

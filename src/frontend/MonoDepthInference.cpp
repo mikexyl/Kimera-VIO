@@ -137,6 +137,14 @@ MonoDepthInference::MonoDepthInference(const MonoDepthParams& params,
             << ", scale_alignment_method="
             << monoDepthScaleAlignmentMethodToString(
                    params_.scale_alignment_method)
+            << ", visualize_landmark_scale_alignment="
+            << params_.visualize_landmark_scale_alignment
+            << ", icp_only_da3_overlap_fusion="
+            << params_.icp_only_da3_overlap_fusion
+            << ", landmark_scale_flatness_radius="
+            << params_.landmark_scale_flatness_radius
+            << ", landmark_scale_max_relative_depth_variation="
+            << params_.landmark_scale_max_relative_depth_variation
             << ", min_confidence=" << params_.min_confidence
             << ", min_keyframe_distance_m=" << params_.min_keyframe_distance_m
             << ", input_geometry=undistorted_pinhole";
@@ -159,8 +167,10 @@ MonoDepthRawPacket::ConstPtr MonoDepthInference::inferKeyframe(
   if (params_.mode == MonoDepthMode::kMultiView &&
       !odometry_world_T_body.has_value()) {
     LOG_EVERY_N(WARNING, 30)
-        << "Holding DA3 two-view inference at keyframe " << *frame.keyframe_id_
-        << " because a metric odometry pose is unavailable.";
+        << "Holding DA3 two-view inference at keyframe "
+        << *frame.keyframe_id_
+        << " because a metric odometry pose is unavailable for keyframe "
+           "distance gating.";
     return nullptr;
   }
 
@@ -192,6 +202,7 @@ MonoDepthRawPacket::ConstPtr MonoDepthInference::inferKeyframe(
     return nullptr;
   }
 
+  MonoDepthPairDistanceGateResult distance_gate;
   CHECK(buffered_keyframe_->odometry_world_T_body.has_value());
   CHECK(current->odometry_world_T_body.has_value());
   const gtsam::Pose3 odometry_world_T_context_cam =
@@ -199,7 +210,7 @@ MonoDepthRawPacket::ConstPtr MonoDepthInference::inferKeyframe(
           buffered_keyframe_->body_T_cam);
   const gtsam::Pose3 odometry_world_T_current_cam =
       current->odometry_world_T_body->compose(current->body_T_cam);
-  const MonoDepthPairDistanceGateResult distance_gate =
+  distance_gate =
       evaluateMonoDepthPairDistanceGate(odometry_world_T_context_cam,
                                         odometry_world_T_current_cam,
                                         params_.min_keyframe_distance_m);
@@ -223,11 +234,21 @@ MonoDepthRawPacket::ConstPtr MonoDepthInference::inferKeyframe(
   // next distance-gated pair uses the newest accepted context view.
   buffered_keyframe_ = current;
 
-  LOG(INFO) << "Running pose-free DA3 two-view pair [" << previous.keyframe_id
-            << ", " << current->keyframe_id
-            << "] with odometry endpoint camera displacement "
-            << distance_gate.camera_displacement_m << " m (threshold "
-            << params_.min_keyframe_distance_m << " m)";
+  if (params_.icp_only_da3_overlap_fusion) {
+    LOG(INFO) << "Running pose-free DA3 overlap pair [" << previous.keyframe_id
+              << ", " << current->keyframe_id
+              << "] selected at odometry endpoint camera displacement "
+              << distance_gate.camera_displacement_m << " m (threshold "
+              << params_.min_keyframe_distance_m
+              << " m). Odometry is used only for keyframe selection, not "
+                 "DA3 overlap alignment or fusion.";
+  } else {
+    LOG(INFO) << "Running pose-free DA3 two-view pair [" << previous.keyframe_id
+              << ", " << current->keyframe_id
+              << "] with odometry endpoint camera displacement "
+              << distance_gate.camera_displacement_m << " m (threshold "
+              << params_.min_keyframe_distance_m << " m)";
+  }
   std::vector<xfeat::MonoDepthResult> depth_results;
   try {
     const std::vector<cv::Mat> images{previous.image_bgr, current->image_bgr};
@@ -261,8 +282,18 @@ MonoDepthRawPacket::ConstPtr MonoDepthInference::inferKeyframe(
                   "depth scaling will fail closed.";
   }
 
+  // Preserve both views.  Consecutive invocations [A, B] and [B, C] then
+  // contain two independent depth predictions for the exact same B image.
+  const MonoDepthRawPacket::ConstPtr context_packet =
+      buildPacket(previous, depth_results[0], false);
+  if (!context_packet) {
+    LOG(ERROR) << "DA3 pair [" << previous.keyframe_id << ", "
+               << current->keyframe_id
+               << "] could not preserve its context-view depth packet.";
+    return nullptr;
+  }
   MonoDepthRawPacket::ConstPtr packet =
-      buildPacket(*current, depth_results[1], true, pair_info);
+      buildPacket(*current, depth_results[1], true, pair_info, context_packet);
   if (packet) {
     LOG(INFO) << "DA3 pair [" << previous.keyframe_id << ", "
               << current->keyframe_id << "] emitted keyframe "
@@ -273,8 +304,7 @@ MonoDepthRawPacket::ConstPtr MonoDepthInference::inferKeyframe(
               << ", accepted=" << packet->confidence_accepted_pixels
               << ", rejected=" << packet->confidence_rejected_pixels
               << ", retained=" << packet->confidence_retained_fraction
-              << ", undistortion_valid="
-              << packet->image_geometry_valid_pixels
+              << ", undistortion_valid=" << packet->image_geometry_valid_pixels
               << ", undistortion_rejected="
               << packet->image_geometry_rejected_pixels << ")";
   }
@@ -532,7 +562,8 @@ MonoDepthRawPacket::ConstPtr MonoDepthInference::buildPacket(
     const BufferedKeyframe& frame,
     const xfeat::MonoDepthResult& depth_result,
     const bool apply_confidence_filter,
-    const std::optional<Da3PairInfo>& pair_info) const {
+    const std::optional<Da3PairInfo>& pair_info,
+    const MonoDepthRawPacket::ConstPtr& da3_context_packet) const {
   if (depth_result.depth.empty() || depth_result.depth.type() != CV_32FC1) {
     LOG(ERROR) << "DA3 mono depth returned an empty or non-CV_32FC1 depth map "
                << "for keyframe " << frame.keyframe_id;
@@ -560,9 +591,8 @@ MonoDepthRawPacket::ConstPtr MonoDepthInference::buildPacket(
   packet->keypoints = frame.keypoints;
   packet->landmark_ids = frame.landmark_ids;
   packet->metadata = depth_result.metadata;
+  packet->da3_context_packet = da3_context_packet;
   if (apply_confidence_filter) {
-    packet->metadata.view_index = 1;
-    packet->metadata.view_count = 2;
     if (pair_info.has_value()) {
       packet->da3_context_keyframe_id = pair_info->context_keyframe_id;
       packet->da3_context_body_T_cam = pair_info->context_body_T_cam;
@@ -595,6 +625,11 @@ MonoDepthRawPacket::ConstPtr MonoDepthInference::buildPacket(
       static_cast<std::size_t>(cv::countNonZero(frame.image_geometry_mask));
   packet->image_geometry_rejected_pixels =
       frame.image_geometry_mask.total() - packet->image_geometry_valid_pixels;
+  packet->depth_support_mask =
+      makeMonoDepthValidMask(packet->depth,
+                             depth_result.sky_mask,
+                             cv::Mat(),
+                             frame.image_geometry_mask);
   packet->valid_mask = makeMonoDepthValidMask(packet->depth,
                                               depth_result.sky_mask,
                                               confidence_filter.mask,
