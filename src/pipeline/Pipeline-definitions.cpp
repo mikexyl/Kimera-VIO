@@ -26,10 +26,10 @@ namespace VIO {
 
 decltype(VioParams::kPipelineFilename) constexpr VioParams::kPipelineFilename;
 decltype(VioParams::kImuFilename) constexpr VioParams::kImuFilename;
-decltype(
-    VioParams::kLeftCameraFilename) constexpr VioParams::kLeftCameraFilename;
-decltype(
-    VioParams::kRightCameraFilename) constexpr VioParams::kRightCameraFilename;
+decltype(VioParams::kLeftCameraFilename) constexpr VioParams::
+    kLeftCameraFilename;
+decltype(VioParams::kRightCameraFilename) constexpr VioParams::
+    kRightCameraFilename;
 decltype(VioParams::kFrontendFilename) constexpr VioParams::kFrontendFilename;
 decltype(VioParams::kBackendFilename) constexpr VioParams::kBackendFilename;
 decltype(VioParams::kLcdFilename) constexpr VioParams::kLcdFilename;
@@ -64,7 +64,6 @@ VioParams::VioParams(const std::string& params_folder_path,
                     ? sensor_folder_path + '/' + kOdometryFilename
                     : "",
                 !params_folder_path.empty()) {}
-
 
 VioParams::VioParams(const std::string& pipeline_params_filepath,
                      const std::string& imu_params_filepath,
@@ -203,8 +202,9 @@ void VioParams::print() const {
             << mono_depth_params_.min_confidence;
   LOG(INFO) << "Mono depth confidence visualization: "
             << mono_depth_params_.visualize_confidence;
-  LOG(INFO) << "Mono depth align scale with landmarks: "
-            << mono_depth_params_.align_scale_with_landmarks;
+  LOG(INFO) << "Mono depth scale alignment method: "
+            << monoDepthScaleAlignmentMethodToString(
+                   mono_depth_params_.scale_alignment_method);
   LOG(INFO) << "Dense map enabled: " << dense_map_params_.enabled;
   LOG(INFO) << "Dense map backend: "
             << denseMapBackendToString(dense_map_params_.backend);

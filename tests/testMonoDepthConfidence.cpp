@@ -1,21 +1,21 @@
 #include <glog/logging.h>
-#include <opencv2/core.hpp>
 
 #include <cmath>
 #include <cstdlib>
 #include <iostream>
 #include <limits>
+#include <opencv2/core.hpp>
 #include <stdexcept>
 
 #include "kimera-vio/common/MonoDepthUtils.h"
 #include "kimera-vio/frontend/MonoDepthInference.h"
 
-#define EXPECT_TRUE(condition, message)                                 \
-  do {                                                                  \
-    if (!(condition)) {                                                 \
-      std::cerr << "[FAIL] " << (message) << "\n";                    \
-      return EXIT_FAILURE;                                              \
-    }                                                                   \
+#define EXPECT_TRUE(condition, message)            \
+  do {                                             \
+    if (!(condition)) {                            \
+      std::cerr << "[FAIL] " << (message) << "\n"; \
+      return EXIT_FAILURE;                         \
+    }                                              \
   } while (false)
 
 namespace {
@@ -45,11 +45,9 @@ int testThresholdBoundaryAndNonFiniteValues() {
 
 int testMissingAndMalformedConfidenceFailClosed() {
   const cv::Size size(3, 2);
-  const auto missing =
-      VIO::makeMonoDepthConfidenceFilter(size, cv::Mat(), 1.1);
+  const auto missing = VIO::makeMonoDepthConfidenceFilter(size, cv::Mat(), 1.1);
   EXPECT_TRUE(!missing.confidence_valid, "missing confidence is diagnosed");
-  EXPECT_TRUE(missing.accepted_pixels == 0u &&
-                  missing.rejected_pixels == 6u,
+  EXPECT_TRUE(missing.accepted_pixels == 0u && missing.rejected_pixels == 6u,
               "missing confidence rejects every pixel");
   EXPECT_TRUE(cv::countNonZero(missing.mask) == 0,
               "missing confidence produces an all-zero mask");
@@ -57,8 +55,7 @@ int testMissingAndMalformedConfidenceFailClosed() {
   const cv::Mat wrong_type(size, CV_8UC1, cv::Scalar(2));
   const auto malformed =
       VIO::makeMonoDepthConfidenceFilter(size, wrong_type, 1.1);
-  EXPECT_TRUE(!malformed.confidence_valid,
-              "non-float confidence is diagnosed");
+  EXPECT_TRUE(!malformed.confidence_valid, "non-float confidence is diagnosed");
   EXPECT_TRUE(cv::countNonZero(malformed.mask) == 0,
               "malformed confidence fails closed");
 
@@ -79,12 +76,11 @@ int testMissingAndMalformedConfidenceFailClosed() {
 }
 
 int testDisabledFilteringAndSingleViewBehavior() {
-  const cv::Mat depth =
-      (cv::Mat_<float>(1, 5) << 2.0f,
-       0.0f,
-       std::numeric_limits<float>::quiet_NaN(),
-       4.0f,
-       5.0f);
+  const cv::Mat depth = (cv::Mat_<float>(1, 5) << 2.0f,
+                         0.0f,
+                         std::numeric_limits<float>::quiet_NaN(),
+                         4.0f,
+                         5.0f);
   const cv::Mat sky = (cv::Mat_<uint8_t>(1, 5) << 0u, 0u, 0u, 255u, 0u);
   const cv::Mat baseline = VIO::makeMonoDepthValidMask(depth, sky);
 
@@ -97,8 +93,9 @@ int testDisabledFilteringAndSingleViewBehavior() {
               "disabled filtering retains every confidence position");
   const cv::Mat with_disabled_filter =
       VIO::makeMonoDepthValidMask(depth, sky, disabled.mask);
-  EXPECT_TRUE(cv::countNonZero(baseline != with_disabled_filter) == 0,
-              "disabled filtering leaves single-view depth/sky validity unchanged");
+  EXPECT_TRUE(
+      cv::countNonZero(baseline != with_disabled_filter) == 0,
+      "disabled filtering leaves single-view depth/sky validity unchanged");
   EXPECT_TRUE(cv::countNonZero(baseline) == 2,
               "baseline still rejects zero, NaN, and sky pixels");
   return EXIT_SUCCESS;
@@ -125,53 +122,10 @@ int testInvalidThresholdsAreRejected() {
   return EXIT_SUCCESS;
 }
 
-int testPoseScaleUsesEndpointCameraDisplacement() {
-  const double pi = std::acos(-1.0);
-  const gtsam::Pose3 da3_context_T_current(
-      gtsam::Rot3(), gtsam::Point3(2.0, 0.0, 0.0));
-
-  // Quarter-circle endpoint poses. The traveled arc is pi/2, while the
-  // camera-center chord between timestamps is sqrt(2). Only the chord is used.
-  const gtsam::Pose3 odometry_world_T_context(
-      gtsam::Rot3::Rz(pi / 2.0), gtsam::Point3(1.0, 0.0, 0.0));
-  const gtsam::Pose3 odometry_world_T_current(
-      gtsam::Rot3::Rz(pi), gtsam::Point3(0.0, 1.0, 0.0));
-
-  const auto estimate = VIO::estimateMonoDepthPoseScale(
-      da3_context_T_current,
-      odometry_world_T_context,
-      odometry_world_T_current);
-  EXPECT_TRUE(estimate.valid, "non-zero endpoint displacements are valid");
-  EXPECT_TRUE(std::abs(estimate.odometry_camera_displacement -
-                       std::sqrt(2.0)) < 1e-12,
-              "odometry displacement is the endpoint chord, not arc length");
-  EXPECT_TRUE(std::abs(estimate.da3_camera_displacement - 2.0) < 1e-12,
-              "DA3 displacement comes from the predicted relative pose");
-  EXPECT_TRUE(std::abs(estimate.depth_scale - std::sqrt(2.0) / 2.0) <
-                  1e-12,
-              "depth scale is odometry chord divided by DA3 displacement");
-
-  const auto zero_da3 = VIO::estimateMonoDepthPoseScale(
-      gtsam::Pose3(),
-      odometry_world_T_context,
-      odometry_world_T_current);
-  EXPECT_TRUE(!zero_da3.valid, "zero DA3 displacement is rejected");
-
-  const auto zero_odometry = VIO::estimateMonoDepthPoseScale(
-      da3_context_T_current,
-      odometry_world_T_context,
-      odometry_world_T_context);
-  EXPECT_TRUE(!zero_odometry.valid,
-              "zero odometry endpoint displacement is rejected");
-  return EXIT_SUCCESS;
-}
-
 int testPoseScaleAlwaysStartsFromCanonicalDepth() {
   const cv::Mat canonical_depth(1, 2, CV_32FC1, cv::Scalar(2.0f));
-  const cv::Mat first_refresh =
-      VIO::scaleMonoDepthImage(canonical_depth, 3.0);
-  const cv::Mat second_refresh =
-      VIO::scaleMonoDepthImage(canonical_depth, 4.0);
+  const cv::Mat first_refresh = VIO::scaleMonoDepthImage(canonical_depth, 3.0);
+  const cv::Mat second_refresh = VIO::scaleMonoDepthImage(canonical_depth, 4.0);
 
   EXPECT_TRUE(!first_refresh.empty() && !second_refresh.empty(),
               "valid scales produce depth images");
@@ -220,27 +174,21 @@ int testWeightImageUsesDa3Resolution() {
 }
 
 int testLowResolutionWeightSampling() {
-  const cv::Mat weights =
-      (cv::Mat_<float>(2, 2) << 0.1f, 0.2f, 0.3f, 0.4f);
+  const cv::Mat weights = (cv::Mat_<float>(2, 2) << 0.1f, 0.2f, 0.3f, 0.4f);
   const cv::Size depth_size(4, 4);
-  EXPECT_TRUE(std::abs(VIO::sampleMonoDepthWeight(
-                           weights, depth_size, 0, 0) -
+  EXPECT_TRUE(std::abs(VIO::sampleMonoDepthWeight(weights, depth_size, 0, 0) -
                        0.1f) < 1e-6f,
               "top-left depth pixels map to the top-left weight");
-  EXPECT_TRUE(std::abs(VIO::sampleMonoDepthWeight(
-                           weights, depth_size, 3, 0) -
+  EXPECT_TRUE(std::abs(VIO::sampleMonoDepthWeight(weights, depth_size, 3, 0) -
                        0.2f) < 1e-6f,
               "top-right depth pixels map to the top-right weight");
-  EXPECT_TRUE(std::abs(VIO::sampleMonoDepthWeight(
-                           weights, depth_size, 0, 3) -
+  EXPECT_TRUE(std::abs(VIO::sampleMonoDepthWeight(weights, depth_size, 0, 3) -
                        0.3f) < 1e-6f,
               "bottom-left depth pixels map to the bottom-left weight");
-  EXPECT_TRUE(std::abs(VIO::sampleMonoDepthWeight(
-                           weights, depth_size, 3, 3) -
+  EXPECT_TRUE(std::abs(VIO::sampleMonoDepthWeight(weights, depth_size, 3, 3) -
                        0.4f) < 1e-6f,
               "bottom-right depth pixels map to the bottom-right weight");
-  EXPECT_TRUE(std::abs(VIO::sampleMonoDepthWeight(
-                           cv::Mat(), depth_size, 2, 2) -
+  EXPECT_TRUE(std::abs(VIO::sampleMonoDepthWeight(cv::Mat(), depth_size, 2, 2) -
                        1.0f) < 1e-6f,
               "missing weights retain the legacy unit-weight fallback");
   return EXIT_SUCCESS;
@@ -248,10 +196,10 @@ int testLowResolutionWeightSampling() {
 
 int testPairDistanceGateUsesEndpointCameraChord() {
   const double pi = std::acos(-1.0);
-  const gtsam::Pose3 world_T_context_cam(
-      gtsam::Rot3::Rz(pi / 2.0), gtsam::Point3(1.0, 0.0, 0.0));
-  const gtsam::Pose3 world_T_current_cam(
-      gtsam::Rot3::Rz(pi), gtsam::Point3(0.0, 1.0, 0.0));
+  const gtsam::Pose3 world_T_context_cam(gtsam::Rot3::Rz(pi / 2.0),
+                                         gtsam::Point3(1.0, 0.0, 0.0));
+  const gtsam::Pose3 world_T_current_cam(gtsam::Rot3::Rz(pi),
+                                         gtsam::Point3(0.0, 1.0, 0.0));
   const double chord = std::sqrt(2.0);
 
   const auto boundary = VIO::evaluateMonoDepthPairDistanceGate(
@@ -278,8 +226,7 @@ int testPairDistanceGateUsesEndpointCameraChord() {
       world_T_context_cam,
       world_T_current_cam,
       std::numeric_limits<double>::quiet_NaN());
-  EXPECT_TRUE(!non_finite.valid,
-              "non-finite distance threshold is rejected");
+  EXPECT_TRUE(!non_finite.valid, "non-finite distance threshold is rejected");
   return EXIT_SUCCESS;
 }
 
@@ -294,7 +241,6 @@ int main(int argc, char** argv) {
   status |= testMissingAndMalformedConfidenceFailClosed();
   status |= testDisabledFilteringAndSingleViewBehavior();
   status |= testInvalidThresholdsAreRejected();
-  status |= testPoseScaleUsesEndpointCameraDisplacement();
   status |= testPoseScaleAlwaysStartsFromCanonicalDepth();
   status |= testWeightImageUsesDa3Resolution();
   status |= testLowResolutionWeightSampling();

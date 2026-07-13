@@ -190,37 +190,41 @@ bool BackendParams::parseYAMLVioBackendParams(const YamlParser& yaml_parser) {
   yaml_parser.getYamlParam("max_lmk_reproj_error_to_keep",
                            &max_lmk_reproj_error_to_keep_);
 
+  getYamlParamIfPresent(
+      yaml_parser, "vgicp_factors_enabled", &vgicp_factors_enabled_);
+  getYamlParamIfPresent(
+      yaml_parser, "vgicp_icp_only_enabled", &vgicp_icp_only_enabled_);
   getYamlParamIfPresent(yaml_parser,
-                        "vgicp_factors_enabled",
-                        &vgicp_factors_enabled_);
+                        "vgicp_icp_only_max_iterations",
+                        &vgicp_icp_only_max_iterations_);
   getYamlParamIfPresent(yaml_parser,
                         "vgicp_use_weighted_icp_factor",
                         &vgicp_use_weighted_icp_factor_);
-  getYamlParamIfPresent(yaml_parser,
-                        "vgicp_min_shared_tracks",
-                        &vgicp_min_shared_tracks_);
+  getYamlParamIfPresent(
+      yaml_parser, "vgicp_min_shared_tracks", &vgicp_min_shared_tracks_);
   getYamlParamIfPresent(yaml_parser,
                         "vgicp_max_edges_per_keyframe",
                         &vgicp_max_edges_per_keyframe_);
   getYamlParamIfPresent(yaml_parser,
                         "vgicp_downsample_resolution",
                         &vgicp_downsample_resolution_);
-  getYamlParamIfPresent(yaml_parser,
-                        "vgicp_voxel_resolution",
-                        &vgicp_voxel_resolution_);
-  getYamlParamIfPresent(yaml_parser,
-                        "vgicp_covariance_neighbors",
-                        &vgicp_covariance_neighbors_);
-  getYamlParamIfPresent(yaml_parser,
-                        "vgicp_num_threads",
-                        &vgicp_num_threads_);
+  getYamlParamIfPresent(
+      yaml_parser, "vgicp_voxel_resolution", &vgicp_voxel_resolution_);
+  getYamlParamIfPresent(
+      yaml_parser, "vgicp_covariance_neighbors", &vgicp_covariance_neighbors_);
+  getYamlParamIfPresent(yaml_parser, "vgicp_num_threads", &vgicp_num_threads_);
   getYamlParamIfPresent(yaml_parser,
                         "vgicp_min_points_per_keyframe",
                         &vgicp_min_points_per_keyframe_);
   getYamlParamIfPresent(yaml_parser,
                         "vgicp_max_correspondence_distance",
                         &vgicp_max_correspondence_distance_);
+  getYamlParamIfPresent(
+      yaml_parser, "vgicp_factor_weight", &vgicp_factor_weight_);
 
+  CHECK(!vgicp_icp_only_enabled_ || vgicp_factors_enabled_)
+      << "vgicp_icp_only_enabled requires vgicp_factors_enabled";
+  CHECK_GT(vgicp_icp_only_max_iterations_, 0);
   CHECK_GE(vgicp_min_shared_tracks_, 0);
   CHECK_GE(vgicp_max_edges_per_keyframe_, 0);
   CHECK_GT(vgicp_downsample_resolution_, 0.0);
@@ -228,6 +232,7 @@ bool BackendParams::parseYAMLVioBackendParams(const YamlParser& yaml_parser) {
   CHECK_GT(vgicp_covariance_neighbors_, 0);
   CHECK_GT(vgicp_num_threads_, 0);
   CHECK_GE(vgicp_min_points_per_keyframe_, 0);
+  CHECK_GT(vgicp_factor_weight_, 0.0);
 
   return true;
 }
@@ -279,20 +284,21 @@ bool BackendParams::equalsVioBackendParams(const BackendParams& vp2,
        vp2.min_num_obs_per_landmark_to_keep_) &&
       (max_lmk_reproj_error_to_keep_ == vp2.max_lmk_reproj_error_to_keep_) &&
       (vgicp_factors_enabled_ == vp2.vgicp_factors_enabled_) &&
-      (vgicp_use_weighted_icp_factor_ ==
-       vp2.vgicp_use_weighted_icp_factor_) &&
+      (vgicp_icp_only_enabled_ == vp2.vgicp_icp_only_enabled_) &&
+      (vgicp_icp_only_max_iterations_ ==
+       vp2.vgicp_icp_only_max_iterations_) &&
+      (vgicp_use_weighted_icp_factor_ == vp2.vgicp_use_weighted_icp_factor_) &&
       (vgicp_min_shared_tracks_ == vp2.vgicp_min_shared_tracks_) &&
-      (vgicp_max_edges_per_keyframe_ ==
-       vp2.vgicp_max_edges_per_keyframe_) &&
-      (fabs(vgicp_downsample_resolution_ -
-            vp2.vgicp_downsample_resolution_) <= tol) &&
+      (vgicp_max_edges_per_keyframe_ == vp2.vgicp_max_edges_per_keyframe_) &&
+      (fabs(vgicp_downsample_resolution_ - vp2.vgicp_downsample_resolution_) <=
+       tol) &&
       (fabs(vgicp_voxel_resolution_ - vp2.vgicp_voxel_resolution_) <= tol) &&
       (vgicp_covariance_neighbors_ == vp2.vgicp_covariance_neighbors_) &&
       (vgicp_num_threads_ == vp2.vgicp_num_threads_) &&
-      (vgicp_min_points_per_keyframe_ ==
-       vp2.vgicp_min_points_per_keyframe_) &&
+      (vgicp_min_points_per_keyframe_ == vp2.vgicp_min_points_per_keyframe_) &&
       (fabs(vgicp_max_correspondence_distance_ -
-            vp2.vgicp_max_correspondence_distance_) <= tol);
+            vp2.vgicp_max_correspondence_distance_) <= tol) &&
+      (fabs(vgicp_factor_weight_ - vp2.vgicp_factor_weight_) <= tol);
 }
 
 void BackendParams::printVioBackendParams() const {
@@ -370,6 +376,10 @@ void BackendParams::printVioBackendParams() const {
       "",
       "VGICP Factors Enabled",
       vgicp_factors_enabled_,
+      "VGICP ICP-only Diagnostic Enabled",
+      vgicp_icp_only_enabled_,
+      "VGICP ICP-only Max Iterations",
+      vgicp_icp_only_max_iterations_,
       "VGICP Use Weighted ICP Factor",
       vgicp_use_weighted_icp_factor_,
       "VGICP Min Shared Tracks",
@@ -387,7 +397,9 @@ void BackendParams::printVioBackendParams() const {
       "VGICP Min Points Per Keyframe",
       vgicp_min_points_per_keyframe_,
       "VGICP Max Correspondence Distance",
-      vgicp_max_correspondence_distance_);
+      vgicp_max_correspondence_distance_,
+      "VGICP Total Factor Weight",
+      vgicp_factor_weight_);
   LOG(INFO) << out.str();
   LOG(INFO) << "** Backend Iinitialization Parameters **\n"
             << "initial_ground_truth_state_: ";

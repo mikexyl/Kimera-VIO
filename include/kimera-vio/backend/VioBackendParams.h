@@ -156,6 +156,9 @@ class BackendParams : public PipelineParams {
 
   //! Dense mono-depth VGICP factors.
   bool vgicp_factors_enabled_ = false;
+  //! Keep ICP out of the VIO smoother and optimize a diagnostic pose graph.
+  bool vgicp_icp_only_enabled_ = false;
+  int vgicp_icp_only_max_iterations_ = 30;
   bool vgicp_use_weighted_icp_factor_ = true;
   int vgicp_min_shared_tracks_ = 30;
   int vgicp_max_edges_per_keyframe_ = 6;
@@ -165,6 +168,7 @@ class BackendParams : public PipelineParams {
   int vgicp_num_threads_ = 1;
   int vgicp_min_points_per_keyframe_ = 300;
   double vgicp_max_correspondence_distance_ = 1.0;
+  double vgicp_factor_weight_ = 1.0;
 };
 
 }  // namespace VIO

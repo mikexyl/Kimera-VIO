@@ -8,8 +8,10 @@
 #include <array>
 #include <cctype>
 #include <cstddef>
+#include <map>
 #include <opencv2/core.hpp>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -19,6 +21,77 @@
 namespace VIO {
 
 enum class MonoDepthMode { kSingleView = 0, kMultiView = 1 };
+
+enum class MonoDepthScaleAlignmentMethod {
+  kNone = 0,
+  kRelativePose = 1,
+  kLandmarks = 2,
+};
+
+inline std::string monoDepthScaleAlignmentMethodToString(
+    const MonoDepthScaleAlignmentMethod method) {
+  switch (method) {
+    case MonoDepthScaleAlignmentMethod::kNone:
+      return "none";
+    case MonoDepthScaleAlignmentMethod::kRelativePose:
+      return "relative_pose";
+    case MonoDepthScaleAlignmentMethod::kLandmarks:
+      return "landmarks";
+  }
+  throw std::invalid_argument("Unknown mono-depth scale alignment method: " +
+                              std::to_string(static_cast<int>(method)));
+}
+
+inline MonoDepthScaleAlignmentMethod monoDepthScaleAlignmentMethodFromString(
+    const std::string& method) {
+  if (method == "none") {
+    return MonoDepthScaleAlignmentMethod::kNone;
+  }
+  if (method == "relative_pose") {
+    return MonoDepthScaleAlignmentMethod::kRelativePose;
+  }
+  if (method == "landmarks") {
+    return MonoDepthScaleAlignmentMethod::kLandmarks;
+  }
+  throw std::invalid_argument(
+      "Unsupported mono_depth.scale_alignment_method: " + method +
+      ". Expected exactly one of: none, relative_pose, landmarks.");
+}
+
+inline void validateMonoDepthScaleAlignmentConfiguration(
+    const MonoDepthMode mode,
+    const MonoDepthScaleAlignmentMethod method) {
+  if (mode == MonoDepthMode::kSingleView &&
+      method == MonoDepthScaleAlignmentMethod::kRelativePose) {
+    throw std::invalid_argument(
+        "mono_depth.scale_alignment_method=relative_pose requires "
+        "mono_depth.mode=multi_view");
+  }
+}
+
+struct MonoDepthScaleAlignmentResult {
+  MonoDepthScaleAlignmentMethod method = MonoDepthScaleAlignmentMethod::kNone;
+  bool valid = false;
+  double absolute_scale = 1.0;
+  std::string failure_reason;
+  std::size_t candidate_count = 0u;
+  std::size_t inlier_count = 0u;
+  double log_rmse = 0.0;
+  std::map<std::string, double> metrics;
+
+  bool operator==(const MonoDepthScaleAlignmentResult& rhs) const {
+    return method == rhs.method && valid == rhs.valid &&
+           absolute_scale == rhs.absolute_scale &&
+           failure_reason == rhs.failure_reason &&
+           candidate_count == rhs.candidate_count &&
+           inlier_count == rhs.inlier_count && log_rmse == rhs.log_rmse &&
+           metrics == rhs.metrics;
+  }
+
+  bool operator!=(const MonoDepthScaleAlignmentResult& rhs) const {
+    return !(*this == rhs);
+  }
+};
 
 inline std::string monoDepthModeToString(const MonoDepthMode mode) {
   switch (mode) {
@@ -69,7 +142,8 @@ struct MonoDepthParams {
   bool visualize_confidence = false;
   float point_radius = 0.005f;
   bool verbose = false;
-  bool align_scale_with_landmarks = false;
+  MonoDepthScaleAlignmentMethod scale_alignment_method =
+      MonoDepthScaleAlignmentMethod::kNone;
   MonoDepthMode mode = MonoDepthMode::kSingleView;
 
   bool operator==(const MonoDepthParams& rhs) const {
@@ -92,7 +166,7 @@ struct MonoDepthParams {
            min_confidence == rhs.min_confidence &&
            visualize_confidence == rhs.visualize_confidence &&
            point_radius == rhs.point_radius && verbose == rhs.verbose &&
-           align_scale_with_landmarks == rhs.align_scale_with_landmarks &&
+           scale_alignment_method == rhs.scale_alignment_method &&
            mode == rhs.mode;
   }
 };
@@ -126,20 +200,39 @@ struct MonoDepthRawPacket {
   std::size_t confidence_rejected_pixels = 0u;
   double confidence_retained_fraction = 1.0;
   std::string confidence_error;
-  bool da3_pose_scale_required = false;
   std::optional<FrameId> da3_context_keyframe_id;
   std::optional<gtsam::Pose3> da3_context_body_T_cam;
   std::optional<gtsam::Pose3> da3_context_cam_T_current_cam;
-  bool da3_pose_scale_valid = false;
-  double da3_camera_displacement = 0.0;
-  double odometry_camera_displacement = 0.0;
-  double da3_pose_depth_scale = 1.0;
-  std::string da3_pose_scale_error;
+  MonoDepthScaleAlignmentResult scale_alignment;
   MonoDepthIntrinsics intrinsics;
   gtsam::Pose3 body_T_cam;
   KeypointsCV keypoints;
   LandmarkIds landmark_ids;
   xfeat::MonoDepthMetadata metadata;
+};
+
+// Result of the optional diagnostic pose-only optimization.  This graph is
+// initialized from the VIO smoother poses and contains only mono-depth ICP
+// factors plus one gauge-fixing pose prior per connected component.  Its poses
+// never feed back into the VIO smoother, landmarks, or depth scale alignment.
+struct MonoDepthICPOnlyResult {
+  EIGEN_MAKE_ALIGNED_OPERATOR_NEW
+
+  bool enabled = false;
+  bool solution_available = false;
+  bool valid = false;
+  std::string failure_reason;
+  std::size_t factor_count = 0u;
+  std::size_t pose_count = 0u;
+  std::size_t anchor_count = 0u;
+  std::size_t iterations = 0u;
+  double initial_error = 0.0;
+  double final_error = 0.0;
+  double error_ratio = 1.0;
+  double max_translation_delta_m = 0.0;
+  double max_rotation_delta_deg = 0.0;
+  double optimization_ms = 0.0;
+  std::map<FrameId, gtsam::Pose3> body_poses;
 };
 
 struct MonoDepthMapOutput {
@@ -148,20 +241,21 @@ struct MonoDepthMapOutput {
 
   FrameId target_frame_id = 0u;
   Timestamp target_timestamp = 0;
-  double scale = 1.0;
-  double scale_log_rmse = 0.0;
-  std::size_t scale_candidate_pairs = 0u;
-  std::size_t scale_inlier_pairs = 0u;
-  bool da3_pose_scale_valid = false;
-  double da3_camera_displacement = 0.0;
-  double odometry_camera_displacement = 0.0;
-  double da3_pose_depth_scale = 1.0;
+  FrameId selected_scale_alignment_frame_id = 0u;
+  MonoDepthScaleAlignmentResult selected_scale_alignment;
+  std::map<FrameId, MonoDepthScaleAlignmentResult> scale_alignments;
+  std::size_t valid_scale_alignment_packets = 0u;
+  std::size_t rejected_scale_alignment_packets = 0u;
   Point3Vector keyframe_cloud;
   RgbaColorVector keyframe_colors;
   Point3Vector window_cloud;
   RgbaColorVector window_colors;
   RgbaColorVector window_weight_colors;
   std::size_t window_keyframes = 0u;
+  MonoDepthICPOnlyResult icp_only;
+  Point3Vector icp_only_window_cloud;
+  RgbaColorVector icp_only_window_colors;
+  std::size_t icp_only_window_keyframes = 0u;
   float point_radius = 0.005f;
 };
 

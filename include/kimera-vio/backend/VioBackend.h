@@ -52,10 +52,11 @@
 #include <unordered_map>
 
 #include "kimera-vio/backend/DenseMap.h"
+#include "kimera-vio/backend/MonoDepthAlignment.h"
+#include "kimera-vio/backend/MonoDepthScaleAlignment.h"
 #include "kimera-vio/backend/MonoDepthVGICPFactors.h"
 #include "kimera-vio/backend/VioBackend-definitions.h"
 #include "kimera-vio/backend/VioBackendParams.h"
-#include "kimera-vio/backend/MonoDepthAlignment.h"
 #include "kimera-vio/factors/PointPlaneFactor.h"
 #include "kimera-vio/frontend/OdometryParams.h"
 #include "kimera-vio/frontend/StereoVisionImuFrontend-definitions.h"
@@ -304,13 +305,13 @@ class VioBackend {
    * @param extra_factor_slots_to_delete
    * @return False if optimization failed, true otherwise
    */
-  bool optimize(const Timestamp& timestamp_kf_nsec,
-                const FrameId& cur_id,
-                const size_t& max_iterations,
-                const gtsam::FactorIndices& extra_factor_slots_to_delete =
-                    gtsam::FactorIndices(),
-                const MonoDepthRawPacket::ConstPtr& mono_depth_raw_packet =
-                    nullptr);
+  bool optimize(
+      const Timestamp& timestamp_kf_nsec,
+      const FrameId& cur_id,
+      const size_t& max_iterations,
+      const gtsam::FactorIndices& extra_factor_slots_to_delete =
+          gtsam::FactorIndices(),
+      const MonoDepthRawPacket::ConstPtr& mono_depth_raw_packet = nullptr);
   /// Printers.
   void printFeatureTracks() const;
 
@@ -411,14 +412,10 @@ class VioBackend {
                                 const double& position_precision,
                                 gtsam::SharedNoiseModel* no_motion_prior_noise);
 
-  MonoDepthRawPacket::ConstPtr prepareMonoDepthPacketForBackend(
-      const MonoDepthRawPacket::ConstPtr& raw_packet,
-      const std::map<FrameId, gtsam::Pose3>& endpoint_body_poses) const;
+  void cacheMonoDepthRawPacket(const MonoDepthRawPacket::ConstPtr& raw_packet);
 
-  void cacheMonoDepthRawPacket(
-      const MonoDepthRawPacket::ConstPtr& raw_packet);
-
-  void refreshMonoDepthWindowAfterOptimization();
+  void refreshMonoDepthWindowAfterOptimization(
+      const PointsWithIdMap& optimized_landmarks);
 
   /// Private printers.
   void print() const;
@@ -615,15 +612,15 @@ class VioBackend {
   //! Logger.
   const bool log_output_ = {false};
   std::unique_ptr<BackendLogger> logger_;
+  MonoDepthScaleAligner::UniquePtr mono_depth_scale_aligner_;
   MonoDepthAlignment::UniquePtr mono_depth_alignment_;
   DenseMapModule::UniquePtr dense_map_module_;
   MonoDepthVGICPFactors::UniquePtr mono_depth_vgicp_factors_;
-  MonoDepthRawPacket::ConstPtr backend_mono_depth_packet_;
   std::map<FrameId, MonoDepthRawPacket::ConstPtr>
       mono_depth_canonical_packet_cache_;
   std::map<FrameId, MonoDepthRawPacket::ConstPtr>
       mono_depth_scaled_packet_cache_;
-  std::map<FrameId, gtsam::Pose3> mono_depth_endpoint_pose_cache_;
+  bool mono_depth_refresh_pending_ = false;
 
   static constexpr std::size_t kMonoDepthPacketCacheSize = 256u;
 };

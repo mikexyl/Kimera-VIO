@@ -5,63 +5,23 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
-
 #include <opencv2/imgproc.hpp>
 
 namespace VIO {
 namespace {
 
-Eigen::Vector3d backprojectDepthPixel(
-    const int u,
-    const int v,
-    const float z,
-    const MonoDepthIntrinsics& intrinsics) {
-  return Eigen::Vector3d(
-      (static_cast<double>(u) - intrinsics.cx) * static_cast<double>(z) /
-          intrinsics.fx,
-      (static_cast<double>(v) - intrinsics.cy) * static_cast<double>(z) /
-          intrinsics.fy,
-      static_cast<double>(z));
+Eigen::Vector3d backprojectDepthPixel(const int u,
+                                      const int v,
+                                      const float z,
+                                      const MonoDepthIntrinsics& intrinsics) {
+  return Eigen::Vector3d((static_cast<double>(u) - intrinsics.cx) *
+                             static_cast<double>(z) / intrinsics.fx,
+                         (static_cast<double>(v) - intrinsics.cy) *
+                             static_cast<double>(z) / intrinsics.fy,
+                         static_cast<double>(z));
 }
 
 }  // namespace
-
-MonoDepthPoseScaleEstimate estimateMonoDepthPoseScale(
-    const gtsam::Pose3& da3_context_cam_T_current_cam,
-    const gtsam::Pose3& odometry_world_T_context_cam,
-    const gtsam::Pose3& odometry_world_T_current_cam) {
-  constexpr double kMinDisplacement = 1e-6;
-
-  MonoDepthPoseScaleEstimate estimate;
-  estimate.da3_camera_displacement =
-      da3_context_cam_T_current_cam.translation().norm();
-  const gtsam::Pose3 odometry_context_cam_T_current_cam =
-      odometry_world_T_context_cam.between(odometry_world_T_current_cam);
-  estimate.odometry_camera_displacement =
-      odometry_context_cam_T_current_cam.translation().norm();
-
-  if (!std::isfinite(estimate.da3_camera_displacement) ||
-      estimate.da3_camera_displacement <= kMinDisplacement) {
-    estimate.error = "DA3 camera-center displacement is invalid or zero";
-    return estimate;
-  }
-  if (!std::isfinite(estimate.odometry_camera_displacement) ||
-      estimate.odometry_camera_displacement <= kMinDisplacement) {
-    estimate.error =
-        "odometry endpoint camera-center displacement is invalid or zero";
-    return estimate;
-  }
-
-  estimate.depth_scale = estimate.odometry_camera_displacement /
-                         estimate.da3_camera_displacement;
-  if (!std::isfinite(estimate.depth_scale) || estimate.depth_scale <= 0.0) {
-    estimate.depth_scale = 1.0;
-    estimate.error = "DA3 pose-derived depth scale is invalid";
-    return estimate;
-  }
-  estimate.valid = true;
-  return estimate;
-}
 
 cv::Mat scaleMonoDepthImage(const cv::Mat& canonical_depth,
                             const double depth_scale) {
@@ -107,8 +67,7 @@ cv::Mat makeMonoDepthWeightImage(const cv::Mat& depth,
     const uint8_t* valid_row = valid_mask.ptr<uint8_t>(v);
     float* weight_row = weights.ptr<float>(v);
     for (int u = radius; u < cols - radius; ++u) {
-      if (valid_row[u] == 0u ||
-          valid_mask.at<uint8_t>(v, u - radius) == 0u ||
+      if (valid_row[u] == 0u || valid_mask.at<uint8_t>(v, u - radius) == 0u ||
           valid_mask.at<uint8_t>(v, u + radius) == 0u ||
           valid_mask.at<uint8_t>(v - radius, u) == 0u ||
           valid_mask.at<uint8_t>(v + radius, u) == 0u) {
@@ -125,14 +84,12 @@ cv::Mat makeMonoDepthWeightImage(const cv::Mat& depth,
                depth_value >= params.min_depth_m &&
                depth_value <= params.max_depth_m;
       };
-      if (!depth_is_valid(z) || !depth_is_valid(z_l) ||
-          !depth_is_valid(z_r) || !depth_is_valid(z_u) ||
-          !depth_is_valid(z_d)) {
+      if (!depth_is_valid(z) || !depth_is_valid(z_l) || !depth_is_valid(z_r) ||
+          !depth_is_valid(z_u) || !depth_is_valid(z_d)) {
         continue;
       }
 
-      const Eigen::Vector3d p =
-          backprojectDepthPixel(u, v, z, intrinsics);
+      const Eigen::Vector3d p = backprojectDepthPixel(u, v, z, intrinsics);
       const Eigen::Vector3d p_l =
           backprojectDepthPixel(u - radius, v, z_l, intrinsics);
       const Eigen::Vector3d p_r =
@@ -160,11 +117,10 @@ cv::Mat makeMonoDepthWeightImage(const cv::Mat& depth,
           (1.0 - params.depth_weight_min) * grazing_confidence;
       const double range_weight =
           use_range_weight
-              ? std::clamp(
-                    std::pow(params.depth_weight_range_ref / point_norm,
-                             params.depth_weight_range_power),
-                    params.depth_weight_range_min,
-                    1.0)
+              ? std::clamp(std::pow(params.depth_weight_range_ref / point_norm,
+                                    params.depth_weight_range_power),
+                           params.depth_weight_range_min,
+                           1.0)
               : 1.0;
       weight_row[u] = static_cast<float>(
           std::clamp(grazing_weight * range_weight, 0.0, 1.0));
@@ -173,22 +129,19 @@ cv::Mat makeMonoDepthWeightImage(const cv::Mat& depth,
   return weights;
 }
 
-cv::Mat makeMonoDepthWeightImageAtSize(
-    const cv::Mat& depth,
-    const cv::Mat& valid_mask,
-    const MonoDepthIntrinsics& intrinsics,
-    const cv::Size& weight_size,
-    const MonoDepthParams& params) {
+cv::Mat makeMonoDepthWeightImageAtSize(const cv::Mat& depth,
+                                       const cv::Mat& valid_mask,
+                                       const MonoDepthIntrinsics& intrinsics,
+                                       const cv::Size& weight_size,
+                                       const MonoDepthParams& params) {
   CHECK(!depth.empty());
   CHECK_EQ(depth.type(), CV_32FC1);
 
-  const cv::Size bounded_size(
-      std::min(depth.cols, weight_size.width),
-      std::min(depth.rows, weight_size.height));
+  const cv::Size bounded_size(std::min(depth.cols, weight_size.width),
+                              std::min(depth.rows, weight_size.height));
   if (bounded_size.width <= 0 || bounded_size.height <= 0 ||
       bounded_size == depth.size()) {
-    return makeMonoDepthWeightImage(
-        depth, valid_mask, intrinsics, params);
+    return makeMonoDepthWeightImage(depth, valid_mask, intrinsics, params);
   }
 
   cv::Mat resized_depth;
@@ -196,12 +149,8 @@ cv::Mat makeMonoDepthWeightImageAtSize(
 
   cv::Mat resized_valid_mask;
   if (!valid_mask.empty() && valid_mask.type() == CV_8UC1) {
-    cv::resize(valid_mask,
-               resized_valid_mask,
-               bounded_size,
-               0.0,
-               0.0,
-               cv::INTER_AREA);
+    cv::resize(
+        valid_mask, resized_valid_mask, bounded_size, 0.0, 0.0, cv::INTER_AREA);
     // A low-resolution depth sample is valid only when its complete source
     // footprint is valid. This avoids mixing rejected confidence or sky pixels
     // into the surface normal used for weighting.
@@ -212,10 +161,8 @@ cv::Mat makeMonoDepthWeightImageAtSize(
                   cv::THRESH_BINARY);
   }
 
-  const double scale_x =
-      static_cast<double>(bounded_size.width) / depth.cols;
-  const double scale_y =
-      static_cast<double>(bounded_size.height) / depth.rows;
+  const double scale_x = static_cast<double>(bounded_size.width) / depth.cols;
+  const double scale_y = static_cast<double>(bounded_size.height) / depth.rows;
   MonoDepthIntrinsics resized_intrinsics = intrinsics;
   resized_intrinsics.fx *= scale_x;
   resized_intrinsics.fy *= scale_y;

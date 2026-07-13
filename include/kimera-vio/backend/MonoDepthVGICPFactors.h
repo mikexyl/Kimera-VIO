@@ -36,12 +36,20 @@ class MonoDepthVGICPFactors {
                   const gtsam::Values& state,
                   const gtsam::Values& new_values,
                   const FeatureTracks& feature_tracks,
+                  const gtsam::NonlinearFactorGraph& current_factors,
+                  gtsam::FactorIndices* delete_slots,
                   gtsam::NonlinearFactorGraph* new_factors);
 
   void replaceRawPackets(
       const std::map<FrameId, MonoDepthRawPacket::ConstPtr>& raw_packets);
 
   void notifySmootherUpdateResult(bool update_succeeded);
+
+  /**
+   * Optimize active poses using only the cached mono-depth ICP factors.
+   * The returned poses are diagnostic and never modify the supplied state.
+   */
+  MonoDepthICPOnlyResult optimizeIcpOnly(const gtsam::Values& state);
 
  private:
   struct DenseFrame {
@@ -90,6 +98,14 @@ class MonoDepthVGICPFactors {
 
   bool isPairAlreadyTracked(const FramePair& pair) const;
 
+  gtsam::NonlinearFactor::shared_ptr makeMatchingFactor(
+      const FramePair& pair) const;
+
+  std::size_t appendAcceptedFactorSlotsToDelete(
+      const gtsam::NonlinearFactorGraph& current_factors,
+      const std::set<FramePair>& refresh_pairs,
+      gtsam::FactorIndices* delete_slots) const;
+
   static FramePair orderedPair(const FrameId& frame_id_a,
                                const FrameId& frame_id_b);
 
@@ -100,6 +116,7 @@ class MonoDepthVGICPFactors {
   std::map<FrameId, DenseFrame> dense_frames_;
   std::set<FramePair> accepted_factor_pairs_;
   std::set<FramePair> pending_factor_pairs_;
+  std::set<FrameId> changed_frame_ids_;
 
   static constexpr std::size_t kRawPacketCacheSize = 256u;
 };

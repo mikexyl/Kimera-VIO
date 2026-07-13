@@ -2,16 +2,19 @@
 
 #include <glog/logging.h>
 #include <gtsam/inference/Symbol.h>
+#include <gtsam/nonlinear/LevenbergMarquardtOptimizer.h>
+#include <gtsam/slam/PriorFactor.h>
+
+#include <algorithm>
+#include <cmath>
 #include <gtsam_points/factors/integrated_vgicp_factor.hpp>
 #include <gtsam_points/factors/integrated_weighted_icp_factor.hpp>
 #include <gtsam_points/features/covariance_estimation.hpp>
 #include <gtsam_points/types/gaussian_voxelmap_cpu.hpp>
 #include <gtsam_points/types/point_cloud_cpu.hpp>
-
-#include <algorithm>
-#include <cmath>
 #include <limits>
 #include <numeric>
+#include <queue>
 
 #include "kimera-vio/common/MonoDepthUtils.h"
 #include "kimera-vio/utils/Timer.h"
@@ -40,6 +43,8 @@ MonoDepthVGICPFactors::MonoDepthVGICPFactors(
   CHECK_GT(backend_params_.vgicp_covariance_neighbors_, 0);
   CHECK_GT(backend_params_.vgicp_num_threads_, 0);
   CHECK_GT(backend_params_.vgicp_max_correspondence_distance_, 0.0);
+  CHECK_GT(backend_params_.vgicp_factor_weight_, 0.0);
+  CHECK_GT(backend_params_.vgicp_icp_only_max_iterations_, 0);
 }
 
 void MonoDepthVGICPFactors::addFactors(
@@ -47,7 +52,10 @@ void MonoDepthVGICPFactors::addFactors(
     const gtsam::Values& state,
     const gtsam::Values& new_values,
     const FeatureTracks& feature_tracks,
+    const gtsam::NonlinearFactorGraph& current_factors,
+    gtsam::FactorIndices* delete_slots,
     gtsam::NonlinearFactorGraph* new_factors) {
+  CHECK_NOTNULL(delete_slots);
   CHECK_NOTNULL(new_factors);
   if (!backend_params_.vgicp_factors_enabled_) {
     return;
@@ -65,6 +73,28 @@ void MonoDepthVGICPFactors::addFactors(
 
   const PairTrackCounts shared_track_counts =
       countSharedTracks(active_frame_ids, feature_tracks);
+
+  std::vector<CandidatePair> refresh_pairs;
+  std::size_t stale_factor_slots = 0u;
+  if (!changed_frame_ids_.empty()) {
+    std::set<FramePair> refresh_pair_set;
+    for (const FramePair& pair : accepted_factor_pairs_) {
+      if (changed_frame_ids_.find(pair.first) == changed_frame_ids_.end() &&
+          changed_frame_ids_.find(pair.second) == changed_frame_ids_.end()) {
+        continue;
+      }
+      const auto count_it = shared_track_counts.find(pair);
+      refresh_pairs.push_back(
+          {pair,
+           count_it == shared_track_counts.end() ? 0u : count_it->second});
+      refresh_pair_set.insert(pair);
+    }
+    if (!backend_params_.vgicp_icp_only_enabled_) {
+      stale_factor_slots = appendAcceptedFactorSlotsToDelete(
+          current_factors, refresh_pair_set, delete_slots);
+    }
+  }
+
   const std::vector<CandidatePair> track_gated_pairs =
       selectCandidatePairs(active_frame_ids, shared_track_counts, false);
   std::size_t max_shared_tracks = 0u;
@@ -73,6 +103,10 @@ void MonoDepthVGICPFactors::addFactors(
   }
 
   std::set<FrameId> frames_to_preprocess;
+  for (const CandidatePair& candidate : refresh_pairs) {
+    frames_to_preprocess.insert(candidate.pair.first);
+    frames_to_preprocess.insert(candidate.pair.second);
+  }
   for (const CandidatePair& candidate : track_gated_pairs) {
     frames_to_preprocess.insert(candidate.pair.first);
     frames_to_preprocess.insert(candidate.pair.second);
@@ -86,50 +120,78 @@ void MonoDepthVGICPFactors::addFactors(
           ? std::vector<CandidatePair>{}
           : selectCandidatePairs(active_frame_ids, shared_track_counts, true);
 
+  if (backend_params_.vgicp_icp_only_enabled_) {
+    for (const CandidatePair& candidate : candidate_pairs) {
+      pending_factor_pairs_.insert(candidate.pair);
+    }
+    LOG_EVERY_N(INFO, kVgicpLogEveryN)
+        << "Mono-depth ICP-only graph discovery: active_frames="
+        << active_frame_ids.size()
+        << ", raw_packets=" << raw_packet_cache_.size()
+        << ", cached_clouds=" << dense_frames_.size()
+        << ", shared_track_pairs=" << shared_track_counts.size()
+        << ", new_pairs=" << candidate_pairs.size()
+        << ", accepted_pairs=" << accepted_factor_pairs_.size()
+        << ", preprocess_ms=" << elapsedMs(total_tic)
+        << ". No ICP factors were added to the VIO smoother.";
+    return;
+  }
+
   std::size_t added_factors = 0u;
-  for (const CandidatePair& candidate : candidate_pairs) {
+  std::size_t refreshed_factors = 0u;
+  std::size_t unavailable_refresh_pairs = 0u;
+  const auto add_factor = [&](const CandidatePair& candidate,
+                              const bool is_refresh) {
     const FrameId target_id = candidate.pair.first;
     const FrameId source_id = candidate.pair.second;
     const auto target_it = dense_frames_.find(target_id);
     const auto source_it = dense_frames_.find(source_id);
-    if (target_it == dense_frames_.end() || source_it == dense_frames_.end()) {
-      continue;
+    if (target_it == dense_frames_.end() || source_it == dense_frames_.end() ||
+        !hasUsableDenseFrame(target_id) || !hasUsableDenseFrame(source_id)) {
+      return false;
     }
-
-    if (backend_params_.vgicp_use_weighted_icp_factor_) {
-      auto factor =
-          std::make_shared<gtsam_points::IntegratedWeightedICPFactor>(
-              gtsam::Symbol(kPoseSymbolChar, target_id),
-              gtsam::Symbol(kPoseSymbolChar, source_id),
-              target_it->second.cloud,
-              source_it->second.cloud);
-      factor->set_num_threads(backend_params_.vgicp_num_threads_);
-      factor->set_max_correspondence_distance(
-          backend_params_.vgicp_max_correspondence_distance_);
-      new_factors->push_back(factor);
-    } else {
-      auto factor = std::make_shared<gtsam_points::IntegratedVGICPFactor>(
-          gtsam::Symbol(kPoseSymbolChar, target_id),
-          gtsam::Symbol(kPoseSymbolChar, source_id),
-          target_it->second.voxelmap,
-          source_it->second.cloud);
-      factor->set_num_threads(backend_params_.vgicp_num_threads_);
-      factor->set_fused_cov_cache_mode(
-          gtsam_points::FusedCovCacheMode::COMPACT);
-      new_factors->push_back(factor);
+    const gtsam::NonlinearFactor::shared_ptr factor =
+        makeMatchingFactor(candidate.pair);
+    if (!factor) {
+      return false;
     }
-    pending_factor_pairs_.insert(candidate.pair);
+    new_factors->push_back(factor);
+    const double information_scale =
+        backend_params_.vgicp_factor_weight_ /
+        static_cast<double>(source_it->second.cloud->size());
+    if (!is_refresh) {
+      pending_factor_pairs_.insert(candidate.pair);
+    }
     ++added_factors;
+    if (is_refresh) {
+      ++refreshed_factors;
+    }
 
     VLOG(1) << "Added mono-depth "
-            << (backend_params_.vgicp_use_weighted_icp_factor_
-                    ? "weighted ICP"
-                    : "VGICP")
+            << (backend_params_.vgicp_use_weighted_icp_factor_ ? "weighted ICP"
+                                                               : "VGICP")
             << " factor x" << target_id << " -> x" << source_id << " with "
             << candidate.shared_tracks << " shared tracks, target points="
-            << target_it->second.downsampled_points << ", source points="
-            << source_it->second.downsampled_points
-            << ", source mean weight=" << source_it->second.mean_weight;
+            << target_it->second.downsampled_points
+            << ", source points=" << source_it->second.downsampled_points
+            << ", source mean weight=" << source_it->second.mean_weight
+            << ", total factor weight=" << backend_params_.vgicp_factor_weight_
+            << ", information scale=" << information_scale
+            << ", refreshed=" << is_refresh;
+    return true;
+  };
+
+  for (const CandidatePair& candidate : refresh_pairs) {
+    if (!add_factor(candidate, true)) {
+      ++unavailable_refresh_pairs;
+      VLOG(1) << "Removed stale mono-depth ICP factor x" << candidate.pair.first
+              << " -> x" << candidate.pair.second
+              << " without replacement because at least one refreshed cloud "
+                 "is unavailable.";
+    }
+  }
+  for (const CandidatePair& candidate : candidate_pairs) {
+    add_factor(candidate, false);
   }
 
   const double total_ms = elapsedMs(total_tic);
@@ -143,6 +205,9 @@ void MonoDepthVGICPFactors::addFactors(
       << ", track_gated_pairs=" << track_gated_pairs.size()
       << ", candidate_pairs=" << candidate_pairs.size()
       << ", added_factors=" << added_factors
+      << ", stale_factor_slots=" << stale_factor_slots
+      << ", refreshed_factors=" << refreshed_factors
+      << ", unavailable_refresh_pairs=" << unavailable_refresh_pairs
       << ", accepted_pairs=" << accepted_factor_pairs_.size()
       << ", preprocess_ms=" << total_ms;
 }
@@ -152,15 +217,202 @@ void MonoDepthVGICPFactors::notifySmootherUpdateResult(
   if (update_succeeded) {
     accepted_factor_pairs_.insert(pending_factor_pairs_.begin(),
                                   pending_factor_pairs_.end());
+    changed_frame_ids_.clear();
   }
   pending_factor_pairs_.clear();
 }
 
+MonoDepthICPOnlyResult MonoDepthVGICPFactors::optimizeIcpOnly(
+    const gtsam::Values& state) {
+  MonoDepthICPOnlyResult result;
+  result.enabled = backend_params_.vgicp_icp_only_enabled_;
+  if (!result.enabled) {
+    result.failure_reason = "ICP-only optimization is disabled";
+    return result;
+  }
+
+  const auto total_tic = utils::Timer::tic();
+  const gtsam::Values no_new_values;
+  const std::vector<FrameId> active_frame_ids =
+      collectActivePoseFrameIds(state, no_new_values);
+  pruneCaches(active_frame_ids);
+  for (const FrameId frame_id : active_frame_ids) {
+    const gtsam::Symbol key(kPoseSymbolChar, frame_id);
+    result.body_poses[frame_id] = state.at<gtsam::Pose3>(key);
+  }
+
+  std::vector<FramePair> usable_pairs;
+  usable_pairs.reserve(accepted_factor_pairs_.size());
+  std::map<FrameId, std::set<FrameId>> adjacency;
+  for (const FramePair& pair : accepted_factor_pairs_) {
+    if (!ensureDenseFrame(pair.first) || !ensureDenseFrame(pair.second) ||
+        !hasUsableDenseFrame(pair.first) ||
+        !hasUsableDenseFrame(pair.second)) {
+      continue;
+    }
+    const gtsam::Symbol target_key(kPoseSymbolChar, pair.first);
+    const gtsam::Symbol source_key(kPoseSymbolChar, pair.second);
+    if (!state.exists(target_key) || !state.exists(source_key)) {
+      continue;
+    }
+    usable_pairs.push_back(pair);
+    adjacency[pair.first].insert(pair.second);
+    adjacency[pair.second].insert(pair.first);
+  }
+
+  result.factor_count = usable_pairs.size();
+  result.pose_count = adjacency.size();
+  if (usable_pairs.empty()) {
+    result.failure_reason = "no usable accepted ICP pairs";
+    result.optimization_ms = elapsedMs(total_tic);
+    return result;
+  }
+
+  gtsam::NonlinearFactorGraph graph;
+  gtsam::Values initial_values;
+  for (const auto& frame_and_neighbors : adjacency) {
+    const gtsam::Symbol key(kPoseSymbolChar, frame_and_neighbors.first);
+    initial_values.insert(key, state.at<gtsam::Pose3>(key));
+  }
+  for (const FramePair& pair : usable_pairs) {
+    const gtsam::NonlinearFactor::shared_ptr factor = makeMatchingFactor(pair);
+    if (!factor) {
+      result.failure_reason = "failed to construct an accepted ICP factor";
+      result.optimization_ms = elapsedMs(total_tic);
+      return result;
+    }
+    graph.push_back(factor);
+  }
+
+  // Each connected component has an independent SE(3) gauge.  Pin its oldest
+  // pose to the VIO initialization, while leaving every other pose constrained
+  // only by ICP.
+  const gtsam::SharedNoiseModel anchor_noise =
+      gtsam::noiseModel::Isotropic::Sigma(6u, 1e-6);
+  std::set<FrameId> visited;
+  for (const auto& frame_and_neighbors : adjacency) {
+    const FrameId seed = frame_and_neighbors.first;
+    if (visited.find(seed) != visited.end()) {
+      continue;
+    }
+    FrameId anchor_id = seed;
+    std::queue<FrameId> frontier;
+    frontier.push(seed);
+    visited.insert(seed);
+    while (!frontier.empty()) {
+      const FrameId frame_id = frontier.front();
+      frontier.pop();
+      anchor_id = std::min(anchor_id, frame_id);
+      for (const FrameId neighbor : adjacency.at(frame_id)) {
+        if (visited.insert(neighbor).second) {
+          frontier.push(neighbor);
+        }
+      }
+    }
+    const gtsam::Symbol anchor_key(kPoseSymbolChar, anchor_id);
+    graph.emplace_shared<gtsam::PriorFactor<gtsam::Pose3>>(
+        anchor_key,
+        initial_values.at<gtsam::Pose3>(anchor_key),
+        anchor_noise);
+    ++result.anchor_count;
+  }
+
+  try {
+    result.initial_error = graph.error(initial_values);
+    gtsam::LevenbergMarquardtParams params =
+        gtsam::LevenbergMarquardtParams::CeresDefaults();
+    params.setMaxIterations(
+        backend_params_.vgicp_icp_only_max_iterations_);
+    params.setVerbosity("SILENT");
+    params.setVerbosityLM("SILENT");
+    gtsam::LevenbergMarquardtOptimizer optimizer(
+        graph, initial_values, params);
+    const gtsam::Values optimized_values = optimizer.optimize();
+    result.iterations = optimizer.iterations();
+    result.final_error = graph.error(optimized_values);
+    result.error_ratio = result.initial_error > 1e-12
+                             ? result.final_error / result.initial_error
+                             : 1.0;
+
+    constexpr double kRadiansToDegrees =
+        180.0 / 3.141592653589793238462643383279502884;
+    for (const auto& frame_and_neighbors : adjacency) {
+      const FrameId frame_id = frame_and_neighbors.first;
+      const gtsam::Symbol key(kPoseSymbolChar, frame_id);
+      const gtsam::Pose3& initial_pose =
+          initial_values.at<gtsam::Pose3>(key);
+      const gtsam::Pose3& optimized_pose =
+          optimized_values.at<gtsam::Pose3>(key);
+      const gtsam::Pose3 correction = initial_pose.between(optimized_pose);
+      result.max_translation_delta_m =
+          std::max(result.max_translation_delta_m,
+                   correction.translation().norm());
+      result.max_rotation_delta_deg =
+          std::max(result.max_rotation_delta_deg,
+                   gtsam::Rot3::Logmap(correction.rotation()).norm() *
+                       kRadiansToDegrees);
+      result.body_poses[frame_id] = optimized_pose;
+    }
+
+    result.solution_available = true;
+    result.valid = std::isfinite(result.initial_error) &&
+                   std::isfinite(result.final_error) &&
+                   std::isfinite(result.error_ratio) &&
+                   result.final_error <= result.initial_error + 1e-9;
+    if (!result.valid) {
+      result.failure_reason =
+          "ICP-only optimizer produced a non-finite or increasing objective";
+    }
+  } catch (const std::exception& exception) {
+    result.failure_reason = exception.what();
+  }
+  result.optimization_ms = elapsedMs(total_tic);
+
+  LOG_EVERY_N(INFO, kVgicpLogEveryN)
+      << "Mono-depth ICP-only optimization: valid=" << result.valid
+      << ", solution_available=" << result.solution_available
+      << ", factors=" << result.factor_count
+      << ", poses=" << result.pose_count
+      << ", anchors=" << result.anchor_count
+      << ", iterations=" << result.iterations
+      << ", error=" << result.initial_error << " -> " << result.final_error
+      << ", ratio=" << result.error_ratio
+      << ", max translation correction="
+      << result.max_translation_delta_m << " m"
+      << ", max rotation correction=" << result.max_rotation_delta_deg
+      << " deg, optimization_ms=" << result.optimization_ms
+      << (result.failure_reason.empty()
+              ? std::string()
+              : ", failure=" + result.failure_reason);
+  return result;
+}
+
 void MonoDepthVGICPFactors::replaceRawPackets(
     const std::map<FrameId, MonoDepthRawPacket::ConstPtr>& raw_packets) {
+  std::set<FrameId> changed_frame_ids;
+  for (const auto& frame_and_packet : raw_packet_cache_) {
+    const auto replacement_it = raw_packets.find(frame_and_packet.first);
+    if (replacement_it == raw_packets.end() ||
+        replacement_it->second.get() != frame_and_packet.second.get()) {
+      changed_frame_ids.insert(frame_and_packet.first);
+    }
+  }
+  for (const auto& frame_and_packet : raw_packets) {
+    const auto previous_it = raw_packet_cache_.find(frame_and_packet.first);
+    if (previous_it == raw_packet_cache_.end() ||
+        previous_it->second.get() != frame_and_packet.second.get()) {
+      changed_frame_ids.insert(frame_and_packet.first);
+    }
+  }
+
   raw_packet_cache_ = raw_packets;
-  dense_frames_.clear();
+  for (const FrameId frame_id : changed_frame_ids) {
+    dense_frames_.erase(frame_id);
+  }
+  changed_frame_ids_.insert(changed_frame_ids.begin(), changed_frame_ids.end());
   while (raw_packet_cache_.size() > kRawPacketCacheSize) {
+    changed_frame_ids_.insert(raw_packet_cache_.begin()->first);
+    dense_frames_.erase(raw_packet_cache_.begin()->first);
     raw_packet_cache_.erase(raw_packet_cache_.begin());
   }
 }
@@ -171,8 +423,14 @@ void MonoDepthVGICPFactors::cacheRawPacket(
     return;
   }
 
+  const auto previous_it = raw_packet_cache_.find(raw_packet->keyframe_id);
+  if (previous_it != raw_packet_cache_.end() &&
+      previous_it->second.get() == raw_packet.get()) {
+    return;
+  }
   raw_packet_cache_[raw_packet->keyframe_id] = raw_packet;
   dense_frames_.erase(raw_packet->keyframe_id);
+  changed_frame_ids_.insert(raw_packet->keyframe_id);
   while (raw_packet_cache_.size() > kRawPacketCacheSize) {
     dense_frames_.erase(raw_packet_cache_.begin()->first);
     raw_packet_cache_.erase(raw_packet_cache_.begin());
@@ -301,8 +559,10 @@ bool MonoDepthVGICPFactors::ensureDenseFrame(const FrameId& frame_id) {
   const double total_ms = elapsedMs(total_tic);
   LOG_EVERY_N(INFO, kVgicpLogEveryN)
       << "Cached mono-depth VGICP cloud: keyframe_id=" << frame_id
-      << ", da3_pose_depth_scale="
-      << raw_it->second->da3_pose_depth_scale
+      << ", scale_alignment_method="
+      << monoDepthScaleAlignmentMethodToString(
+             raw_it->second->scale_alignment.method)
+      << ", absolute_scale=" << raw_it->second->scale_alignment.absolute_scale
       << ", candidate_points=" << candidate_points
       << ", sampled_points=" << sampled_points
       << ", downsampled_points=" << cloud->size()
@@ -314,10 +574,9 @@ bool MonoDepthVGICPFactors::ensureDenseFrame(const FrameId& frame_id) {
 }
 
 std::shared_ptr<gtsam_points::PointCloudCPU>
-MonoDepthVGICPFactors::buildBodyFrameCloud(
-    const MonoDepthRawPacket& raw_packet,
-    std::size_t* candidate_points,
-    std::size_t* sampled_points) const {
+MonoDepthVGICPFactors::buildBodyFrameCloud(const MonoDepthRawPacket& raw_packet,
+                                           std::size_t* candidate_points,
+                                           std::size_t* sampled_points) const {
   CHECK_NOTNULL(candidate_points);
   CHECK_NOTNULL(sampled_points);
   *candidate_points = 0u;
@@ -352,9 +611,8 @@ MonoDepthVGICPFactors::buildBodyFrameCloud(
   std::vector<Eigen::Vector4d, Eigen::aligned_allocator<Eigen::Vector4d>>
       body_points;
   std::vector<double> intensities;
-  const std::size_t candidate_reserve =
-      static_cast<std::size_t>(((rows + stride - 1) / stride) *
-                               ((cols + stride - 1) / stride));
+  const std::size_t candidate_reserve = static_cast<std::size_t>(
+      ((rows + stride - 1) / stride) * ((cols + stride - 1) / stride));
   body_points.reserve(candidate_reserve);
   intensities.reserve(candidate_reserve);
 
@@ -390,8 +648,8 @@ MonoDepthVGICPFactors::buildBodyFrameCloud(
       if (!std::isfinite(weight) || weight <= 0.0) {
         continue;
       }
-      body_points.emplace_back(body_point.x(), body_point.y(), body_point.z(),
-                               1.0);
+      body_points.emplace_back(
+          body_point.x(), body_point.y(), body_point.z(), 1.0);
       intensities.push_back(std::clamp(weight, 0.0, 1.0));
     }
   }
@@ -436,8 +694,7 @@ MonoDepthVGICPFactors::buildBodyFrameCloud(
   return downsampled;
 }
 
-bool MonoDepthVGICPFactors::hasUsableDenseFrame(
-    const FrameId& frame_id) const {
+bool MonoDepthVGICPFactors::hasUsableDenseFrame(const FrameId& frame_id) const {
   const auto frame_it = dense_frames_.find(frame_id);
   if (frame_it == dense_frames_.end()) {
     return false;
@@ -455,8 +712,7 @@ bool MonoDepthVGICPFactors::hasUsableDenseFrame(
   return dense_frame.voxelmap && dense_frame.cloud->has_covs();
 }
 
-MonoDepthVGICPFactors::PairTrackCounts
-MonoDepthVGICPFactors::countSharedTracks(
+MonoDepthVGICPFactors::PairTrackCounts MonoDepthVGICPFactors::countSharedTracks(
     const std::vector<FrameId>& active_frame_ids,
     const FeatureTracks& feature_tracks) const {
   const std::set<FrameId> active_frames(active_frame_ids.begin(),
@@ -526,13 +782,11 @@ MonoDepthVGICPFactors::selectCandidatePairs(
   for (const auto& pair_and_count : shared_track_counts) {
     const FramePair& pair = pair_and_count.first;
     const std::size_t shared_tracks = pair_and_count.second;
-    if (shared_tracks <
-            static_cast<std::size_t>(
-                backend_params_.vgicp_min_shared_tracks_) ||
+    if (shared_tracks < static_cast<std::size_t>(
+                            backend_params_.vgicp_min_shared_tracks_) ||
         isPairAlreadyTracked(pair) ||
-        (require_dense_frames &&
-         (!hasUsableDenseFrame(pair.first) ||
-          !hasUsableDenseFrame(pair.second)))) {
+        (require_dense_frames && (!hasUsableDenseFrame(pair.first) ||
+                                  !hasUsableDenseFrame(pair.second)))) {
       continue;
     }
     candidates.push_back({pair, shared_tracks});
@@ -564,10 +818,88 @@ MonoDepthVGICPFactors::selectCandidatePairs(
   return selected;
 }
 
-bool MonoDepthVGICPFactors::isPairAlreadyTracked(
-    const FramePair& pair) const {
+bool MonoDepthVGICPFactors::isPairAlreadyTracked(const FramePair& pair) const {
   return accepted_factor_pairs_.find(pair) != accepted_factor_pairs_.end() ||
          pending_factor_pairs_.find(pair) != pending_factor_pairs_.end();
+}
+
+gtsam::NonlinearFactor::shared_ptr
+MonoDepthVGICPFactors::makeMatchingFactor(const FramePair& pair) const {
+  const auto target_it = dense_frames_.find(pair.first);
+  const auto source_it = dense_frames_.find(pair.second);
+  if (target_it == dense_frames_.end() || source_it == dense_frames_.end() ||
+      !hasUsableDenseFrame(pair.first) ||
+      !hasUsableDenseFrame(pair.second)) {
+    return nullptr;
+  }
+
+  const gtsam::Symbol target_key(kPoseSymbolChar, pair.first);
+  const gtsam::Symbol source_key(kPoseSymbolChar, pair.second);
+  const double information_scale =
+      backend_params_.vgicp_factor_weight_ /
+      static_cast<double>(source_it->second.cloud->size());
+  if (backend_params_.vgicp_use_weighted_icp_factor_) {
+    auto factor = std::make_shared<gtsam_points::IntegratedWeightedICPFactor>(
+        target_key,
+        source_key,
+        target_it->second.cloud,
+        source_it->second.cloud);
+    factor->set_num_threads(backend_params_.vgicp_num_threads_);
+    factor->set_max_correspondence_distance(
+        backend_params_.vgicp_max_correspondence_distance_);
+    factor->set_information_scale(information_scale);
+    return factor;
+  }
+
+  auto factor = std::make_shared<gtsam_points::IntegratedVGICPFactor>(
+      target_key,
+      source_key,
+      target_it->second.voxelmap,
+      source_it->second.cloud);
+  factor->set_num_threads(backend_params_.vgicp_num_threads_);
+  factor->set_fused_cov_cache_mode(gtsam_points::FusedCovCacheMode::COMPACT);
+  factor->set_information_scale(information_scale);
+  return factor;
+}
+
+std::size_t MonoDepthVGICPFactors::appendAcceptedFactorSlotsToDelete(
+    const gtsam::NonlinearFactorGraph& current_factors,
+    const std::set<FramePair>& refresh_pairs,
+    gtsam::FactorIndices* delete_slots) const {
+  CHECK_NOTNULL(delete_slots);
+  std::size_t appended_slots = 0u;
+  for (std::size_t slot = 0u; slot < current_factors.size(); ++slot) {
+    if (!current_factors.exists(slot)) {
+      continue;
+    }
+    const gtsam::NonlinearFactor::shared_ptr& factor = current_factors.at(slot);
+    if (!factor ||
+        (dynamic_cast<const gtsam_points::IntegratedVGICPFactor*>(
+             factor.get()) == nullptr &&
+         dynamic_cast<const gtsam_points::IntegratedWeightedICPFactor*>(
+             factor.get()) == nullptr)) {
+      continue;
+    }
+
+    const gtsam::KeyVector& keys = factor->keys();
+    if (keys.size() != 2u) {
+      continue;
+    }
+    const gtsam::Symbol first(keys[0]);
+    const gtsam::Symbol second(keys[1]);
+    if (first.chr() != kPoseSymbolChar || second.chr() != kPoseSymbolChar) {
+      continue;
+    }
+    const FramePair pair = orderedPair(first.index(), second.index());
+    if (refresh_pairs.find(pair) == refresh_pairs.end() ||
+        std::find(delete_slots->begin(), delete_slots->end(), slot) !=
+            delete_slots->end()) {
+      continue;
+    }
+    delete_slots->push_back(slot);
+    ++appended_slots;
+  }
+  return appended_slots;
 }
 
 MonoDepthVGICPFactors::FramePair MonoDepthVGICPFactors::orderedPair(

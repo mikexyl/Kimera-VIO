@@ -198,6 +198,13 @@ if(KIMERA_BUILD_TESTS)
   add_executable(testMonoDepthConfidence tests/testMonoDepthConfidence.cpp)
   target_link_libraries(testMonoDepthConfidence PUBLIC kimera_vio::kimera_vio)
   add_test(NAME testMonoDepthConfidence COMMAND testMonoDepthConfidence)
+
+  add_executable(testMonoDepthScaleAlignment
+    tests/testMonoDepthScaleAlignment.cpp)
+  target_link_libraries(testMonoDepthScaleAlignment
+    PUBLIC kimera_vio::kimera_vio)
+  add_test(NAME testMonoDepthScaleAlignment
+    COMMAND testMonoDepthScaleAlignment)
 endif()
 
 ############################### INSTALL/EXPORT #################################
