@@ -582,6 +582,12 @@ MonoDepthVGICPFactors::buildBodyFrameCloud(const MonoDepthRawPacket& raw_packet,
   *candidate_points = 0u;
   *sampled_points = 0u;
 
+  if (!raw_packet.source_image_is_undistorted) {
+    LOG_EVERY_N(WARNING, 30)
+        << "Skipping mono-depth VGICP backprojection because the packet is "
+           "not in undistorted pinhole geometry.";
+    return nullptr;
+  }
   if (raw_packet.depth.empty() || raw_packet.depth.type() != CV_32FC1 ||
       raw_packet.valid_mask.empty() ||
       raw_packet.valid_mask.type() != CV_8UC1) {

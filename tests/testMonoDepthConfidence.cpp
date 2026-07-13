@@ -8,7 +8,9 @@
 #include <stdexcept>
 
 #include "kimera-vio/common/MonoDepthUtils.h"
+#include "kimera-vio/frontend/CameraParams.h"
 #include "kimera-vio/frontend/MonoDepthInference.h"
+#include "kimera-vio/frontend/UndistorterRectifier.h"
 
 #define EXPECT_TRUE(condition, message)            \
   do {                                             \
@@ -98,6 +100,116 @@ int testDisabledFilteringAndSingleViewBehavior() {
       "disabled filtering leaves single-view depth/sky validity unchanged");
   EXPECT_TRUE(cv::countNonZero(baseline) == 2,
               "baseline still rejects zero, NaN, and sky pixels");
+  return EXIT_SUCCESS;
+}
+
+int testUndistortedImageGeometryMaskIsEnforced() {
+  const cv::Size size(3, 2);
+  const cv::Mat depth(size, CV_32FC1, cv::Scalar(2.0f));
+  const cv::Mat geometry =
+      (cv::Mat_<uint8_t>(2, 3) << 255u, 0u, 255u, 255u, 255u, 255u);
+  const cv::Mat valid =
+      VIO::makeMonoDepthValidMask(depth, cv::Mat(), cv::Mat(), geometry);
+  EXPECT_TRUE(cv::countNonZero(valid) == 5,
+              "undistortion border pixels are rejected from dense depth");
+  EXPECT_TRUE(valid.at<uint8_t>(0, 1) == 0u,
+              "the rejected undistortion pixel remains invalid");
+
+  const cv::Mat malformed(1, 3, CV_8UC1, cv::Scalar(255u));
+  const cv::Mat rejected =
+      VIO::makeMonoDepthValidMask(depth, cv::Mat(), cv::Mat(), malformed);
+  EXPECT_TRUE(cv::countNonZero(rejected) == 0,
+              "a malformed geometry mask fails closed");
+  return EXIT_SUCCESS;
+}
+
+int testRectifiedFeaturesStayAlignedWithLandmarkIds() {
+  const VIO::StatusKeypointsCV keypoints{
+      {VIO::KeypointStatus::VALID, VIO::KeypointCV(1.0f, 2.0f)},
+      {VIO::KeypointStatus::NO_LEFT_RECT, VIO::KeypointCV(0.0f, 3.0f)},
+      {VIO::KeypointStatus::VALID, VIO::KeypointCV(4.0f, 5.0f)}};
+  const VIO::LandmarkIds landmark_ids{10, 11, -1};
+  const auto rectified =
+      VIO::makeMonoDepthRectifiedFeatures(keypoints, landmark_ids);
+  EXPECT_TRUE(rectified.valid, "matching feature arrays are accepted");
+  EXPECT_TRUE(rectified.keypoints.size() == landmark_ids.size() &&
+                  rectified.landmark_ids.size() == landmark_ids.size(),
+              "rectification preserves feature indexing");
+  EXPECT_TRUE(rectified.landmark_ids[0] == 10 &&
+                  rectified.landmark_ids[1] == -1 &&
+                  rectified.landmark_ids[2] == -1,
+              "only geometrically valid rectified keypoints retain landmarks");
+  EXPECT_TRUE(rectified.rejected_keypoints == 1u,
+              "invalid rectification is reported once");
+
+  const auto mismatched =
+      VIO::makeMonoDepthRectifiedFeatures(keypoints, VIO::LandmarkIds{10, 11});
+  EXPECT_TRUE(!mismatched.valid,
+              "mismatched keypoint and landmark arrays fail closed");
+  return EXIT_SUCCESS;
+}
+
+VIO::CameraParams makeTestCameraParams(
+    const VIO::DistortionModel distortion_model,
+    const std::vector<double>& coefficients) {
+  VIO::CameraParams camera;
+  camera.camera_model_ = VIO::CameraModel::PINHOLE;
+  camera.distortion_model_ = distortion_model;
+  camera.image_size_ = cv::Size(9, 9);
+  camera.intrinsics_ = {4.0, 4.0, 4.0, 4.0};
+  camera.distortion_coeff_ = coefficients;
+  VIO::CameraParams::convertIntrinsicsVectorToMatrix(camera.intrinsics_,
+                                                     &camera.K_);
+  VIO::CameraParams::convertDistortionVectorToMatrix(
+      camera.distortion_coeff_, &camera.distortion_coeff_mat_);
+  return camera;
+}
+
+int testUndistortedImageAndValidityUseTheSameRemap() {
+  cv::Mat image(9, 9, CV_8UC1);
+  for (int v = 0; v < image.rows; ++v) {
+    for (int u = 0; u < image.cols; ++u) {
+      image.at<uint8_t>(v, u) = static_cast<uint8_t>(v * image.cols + u);
+    }
+  }
+
+  const VIO::CameraParams identity_camera =
+      makeTestCameraParams(VIO::DistortionModel::NONE, {0.0, 0.0, 0.0, 0.0});
+  const cv::Mat rotation = cv::Mat::eye(3, 3, identity_camera.K_.type());
+  VIO::UndistorterRectifier identity_rectifier(
+      identity_camera.K_, identity_camera, rotation);
+  cv::Mat identity_image;
+  cv::Mat identity_mask;
+  identity_rectifier.undistortRectifyImage(
+      image, &identity_image, &identity_mask);
+  EXPECT_TRUE(cv::norm(identity_image, image, cv::NORM_INF) == 0.0,
+              "the no-distortion remap is an initialized identity map");
+  EXPECT_TRUE(cv::countNonZero(identity_mask) == image.rows * image.cols,
+              "identity undistortion keeps every source-supported pixel");
+  const VIO::KeypointsCV identity_keypoints{VIO::KeypointCV(1.0f, 2.0f),
+                                            VIO::KeypointCV(7.0f, 6.0f)};
+  VIO::KeypointsCV undistorted_identity_keypoints;
+  identity_rectifier.undistortRectifyKeypoints(identity_keypoints,
+                                               &undistorted_identity_keypoints);
+  EXPECT_TRUE(
+      cv::norm(identity_keypoints, undistorted_identity_keypoints) < 1e-6,
+      "no-distortion sparse keypoints retain their pixel geometry");
+
+  const VIO::CameraParams radial_camera =
+      makeTestCameraParams(VIO::DistortionModel::RADTAN, {0.5, 0.0, 0.0, 0.0});
+  VIO::UndistorterRectifier radial_rectifier(
+      radial_camera.K_, radial_camera, rotation);
+  cv::Mat undistorted_image;
+  cv::Mat valid_mask;
+  radial_rectifier.undistortRectifyImage(
+      image, &undistorted_image, &valid_mask);
+  EXPECT_TRUE(undistorted_image.size() == image.size() &&
+                  valid_mask.size() == image.size(),
+              "image and geometry mask share the undistorted pixel grid");
+  EXPECT_TRUE(valid_mask.at<uint8_t>(4, 4) == 255u,
+              "the optical center remains geometrically valid");
+  EXPECT_TRUE(cv::countNonZero(valid_mask) < image.rows * image.cols,
+              "out-of-source radial remap pixels are rejected");
   return EXIT_SUCCESS;
 }
 
@@ -240,6 +352,9 @@ int main(int argc, char** argv) {
   status |= testThresholdBoundaryAndNonFiniteValues();
   status |= testMissingAndMalformedConfidenceFailClosed();
   status |= testDisabledFilteringAndSingleViewBehavior();
+  status |= testUndistortedImageGeometryMaskIsEnforced();
+  status |= testRectifiedFeaturesStayAlignedWithLandmarkIds();
+  status |= testUndistortedImageAndValidityUseTheSameRemap();
   status |= testInvalidThresholdsAreRejected();
   status |= testPoseScaleAlwaysStartsFromCanonicalDepth();
   status |= testWeightImageUsesDa3Resolution();

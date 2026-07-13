@@ -51,10 +51,11 @@ MonoVisionImuFrontend::MonoVisionImuFrontend(
       keyframe_R_ref_frame_(gtsam::Rot3()),
       feature_detector_(nullptr),
       mono_camera_(camera),
-      mono_depth_inference_(mono_depth_params.enabled
-                                ? std::make_unique<MonoDepthInference>(
-                                      mono_depth_params)
-                                : nullptr) {
+      mono_depth_inference_(
+          mono_depth_params.enabled
+              ? std::make_unique<MonoDepthInference>(mono_depth_params,
+                                                     camera->getCamParams())
+              : nullptr) {
   CHECK(mono_camera_);
   edge_selection_params_.b_T_c = mono_camera_->getBodyPoseCam();
 

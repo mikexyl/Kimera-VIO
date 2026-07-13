@@ -19,7 +19,6 @@
 
 #include <opencv2/calib3d.hpp>
 #include <opencv2/core.hpp>
-
 #include <optional>
 
 #include "kimera-vio/frontend/CameraParams.h"
@@ -86,6 +85,18 @@ class UndistorterRectifier {
                              cv::Mat* undistorted_img) const;
 
   /**
+   * @brief Undistort an image and return the pixels whose interpolation
+   * footprint is fully supported by the source image.
+   *
+   * The validity mask is expressed in the undistorted output geometry and is
+   * therefore suitable for filtering dense predictions made from the output
+   * image.  It is CV_8UC1 with 255 for valid pixels and 0 elsewhere.
+   */
+  void undistortRectifyImage(const cv::Mat& img,
+                             cv::Mat* undistorted_img,
+                             cv::Mat* valid_mask) const;
+
+  /**
    * @brief undistortRectifyKeypoints Undistorts and rectifies a sparse set of
    * keypoints (instead of a whole image), using OpenCV undistortPoints.
    *
@@ -150,6 +161,7 @@ class UndistorterRectifier {
  protected:
   cv::Mat map_x_;
   cv::Mat map_y_;
+  cv::Mat valid_mask_;
 
   cv::Mat P_;
   cv::Mat R_;

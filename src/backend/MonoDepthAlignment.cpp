@@ -131,6 +131,12 @@ std::size_t MonoDepthAlignment::backprojectPacket(
     RgbaColorVector* weight_colors) const {
   CHECK(points != nullptr);
   CHECK(colors != nullptr);
+  if (!raw_packet.source_image_is_undistorted) {
+    LOG_EVERY_N(WARNING, 30)
+        << "Skipping mono-depth map backprojection because the packet is not "
+           "in undistorted pinhole geometry.";
+    return 0u;
+  }
   if (raw_packet.depth.empty() || raw_packet.depth.type() != CV_32FC1 ||
       raw_packet.valid_mask.empty() ||
       raw_packet.valid_mask.type() != CV_8UC1 ||

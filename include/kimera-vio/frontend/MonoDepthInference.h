@@ -8,7 +8,9 @@
 #include <string>
 
 #include "kimera-vio/common/MonoDepthTypes.h"
+#include "kimera-vio/frontend/CameraParams.h"
 #include "kimera-vio/frontend/Frame.h"
+#include "kimera-vio/frontend/UndistorterRectifier.h"
 #include "kimera-vio/utils/Macros.h"
 
 namespace VIO {
@@ -30,6 +32,14 @@ struct MonoDepthPairDistanceGateResult {
   std::string error;
 };
 
+struct MonoDepthRectifiedFeatures {
+  bool valid = false;
+  KeypointsCV keypoints;
+  LandmarkIds landmark_ids;
+  std::size_t rejected_keypoints = 0u;
+  std::string error;
+};
+
 MonoDepthConfidenceFilterResult makeMonoDepthConfidenceFilter(
     const cv::Size& expected_size,
     const cv::Mat& confidence,
@@ -37,7 +47,12 @@ MonoDepthConfidenceFilterResult makeMonoDepthConfidenceFilter(
 
 cv::Mat makeMonoDepthValidMask(const cv::Mat& depth,
                                const cv::Mat& sky_mask,
-                               const cv::Mat& confidence_mask = cv::Mat());
+                               const cv::Mat& confidence_mask = cv::Mat(),
+                               const cv::Mat& image_geometry_mask = cv::Mat());
+
+MonoDepthRectifiedFeatures makeMonoDepthRectifiedFeatures(
+    const StatusKeypointsCV& undistorted_keypoints,
+    const LandmarkIds& landmark_ids);
 
 MonoDepthPairDistanceGateResult evaluateMonoDepthPairDistanceGate(
     const gtsam::Pose3& odometry_world_T_context_cam,
@@ -50,7 +65,8 @@ class MonoDepthInference {
   KIMERA_POINTER_TYPEDEFS(MonoDepthInference);
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
-  explicit MonoDepthInference(const MonoDepthParams& params);
+  MonoDepthInference(const MonoDepthParams& params,
+                     const CameraParams& camera_params);
   ~MonoDepthInference() = default;
 
   MonoDepthRawPacket::ConstPtr inferKeyframe(
@@ -63,6 +79,7 @@ class MonoDepthInference {
     FrameId keyframe_id = 0u;
     Timestamp timestamp = 0;
     cv::Mat image_bgr;
+    cv::Mat image_geometry_mask;
     MonoDepthIntrinsics intrinsics;
     gtsam::Pose3 body_T_cam;
     std::optional<gtsam::Pose3> odometry_world_T_body;
@@ -77,9 +94,9 @@ class MonoDepthInference {
   };
 
   static cv::Mat toBgrImage(const cv::Mat& image);
-  static std::optional<BufferedKeyframe> bufferKeyframe(
+  std::optional<BufferedKeyframe> bufferKeyframe(
       const Frame& frame,
-      const std::optional<gtsam::Pose3>& odometry_world_T_body);
+      const std::optional<gtsam::Pose3>& odometry_world_T_body) const;
   static xfeat::CameraIntrinsics toXfeatIntrinsics(
       const MonoDepthIntrinsics& intrinsics);
   static std::optional<gtsam::Pose3> makeDa3ContextToCurrentPose(
@@ -93,6 +110,8 @@ class MonoDepthInference {
 
  private:
   MonoDepthParams params_;
+  CameraParams camera_params_;
+  UndistorterRectifier::UniquePtr image_undistorter_;
   std::unique_ptr<xfeat::MonoDepth> mono_depth_;
   mutable std::optional<BufferedKeyframe> buffered_keyframe_;
 };

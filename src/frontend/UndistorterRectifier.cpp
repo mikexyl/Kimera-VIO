@@ -14,6 +14,7 @@
 
 #include "kimera-vio/frontend/UndistorterRectifier.h"
 
+#include <cmath>
 #include <opencv2/calib3d.hpp>
 #include <opencv2/core.hpp>
 
@@ -26,8 +27,29 @@ namespace VIO {
 UndistorterRectifier::UndistorterRectifier(const cv::Mat& P,
                                            const CameraParams& cam_params,
                                            const cv::Mat& R)
-    : map_x_(), map_y_(), P_(P), R_(R), cam_params_(cam_params) {
+    : map_x_(), map_y_(), valid_mask_(), P_(P), R_(R), cam_params_(cam_params) {
   initUndistortRectifyMaps(cam_params, R, P, &map_x_, &map_y_);
+
+  if (!map_x_.empty() && !map_y_.empty()) {
+    CHECK_EQ(map_x_.size(), cam_params.image_size_);
+    CHECK_EQ(map_y_.size(), cam_params.image_size_);
+    valid_mask_ = cv::Mat(cam_params.image_size_, CV_8UC1, cv::Scalar(0));
+    for (int v = 0; v < map_x_.rows; ++v) {
+      const float* map_x_row = map_x_.ptr<float>(v);
+      const float* map_y_row = map_y_.ptr<float>(v);
+      uint8_t* valid_row = valid_mask_.ptr<uint8_t>(v);
+      for (int u = 0; u < map_x_.cols; ++u) {
+        const float source_u = map_x_row[u];
+        const float source_v = map_y_row[u];
+        if (std::isfinite(source_u) && std::isfinite(source_v) &&
+            source_u >= 0.0f && source_v >= 0.0f &&
+            source_u <= static_cast<float>(cam_params.image_size_.width - 1) &&
+            source_v <= static_cast<float>(cam_params.image_size_.height - 1)) {
+          valid_row[u] = 255u;
+        }
+      }
+    }
+  }
 }
 
 void UndistorterRectifier::UndistortRectifyKeypoints(
@@ -38,6 +60,14 @@ void UndistorterRectifier::UndistortRectifyKeypoints(
     std::optional<cv::Mat> P) {
   CHECK_NOTNULL(undistorted_keypoints)->clear();
   switch (cam_param.distortion_model_) {
+    case DistortionModel::NONE: {
+      cv::undistortPoints(keypoints,
+                          *undistorted_keypoints,
+                          cam_param.K_,
+                          cv::Mat(),
+                          R.value_or(cv::Mat()),
+                          P.value_or(cv::Mat()));
+    } break;
     case DistortionModel::RADTAN: {
       cv::undistortPoints(keypoints,
                           *undistorted_keypoints,
@@ -125,6 +155,16 @@ void UndistorterRectifier::undistortRectifyImage(
             remap_interpolation_type_,
             remap_use_constant_border_type_ ? cv::BORDER_CONSTANT
                                             : cv::BORDER_REPLICATE);
+}
+
+void UndistorterRectifier::undistortRectifyImage(const cv::Mat& img,
+                                                 cv::Mat* undistorted_img,
+                                                 cv::Mat* valid_mask) const {
+  CHECK_NOTNULL(valid_mask);
+  undistortRectifyImage(img, undistorted_img);
+  CHECK_EQ(valid_mask_.size, img.size);
+  CHECK_EQ(valid_mask_.type(), CV_8UC1);
+  valid_mask_.copyTo(*valid_mask);
 }
 
 void UndistorterRectifier::undistortRectifyKeypoints(
@@ -241,8 +281,14 @@ void UndistorterRectifier::initUndistortRectifyMaps(
   cv::Mat map_x_float, map_y_float;
   switch (cam_params.distortion_model_) {
     case DistortionModel::NONE: {
-      map_x_float.create(cam_params.image_size_, kImageType);
-      map_y_float.create(cam_params.image_size_, kImageType);
+      cv::initUndistortRectifyMap(cam_params.K_,
+                                  cv::Mat(),
+                                  R,
+                                  P,
+                                  cam_params.image_size_,
+                                  kImageType,
+                                  map_x_float,
+                                  map_y_float);
     } break;
     case DistortionModel::RADTAN: {
       cv::initUndistortRectifyMap(

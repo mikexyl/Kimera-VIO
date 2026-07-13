@@ -365,6 +365,10 @@ MonoDepthRawPacket::ConstPtr applyMonoDepthScaleAlignment(
     return MonoDepthRawPacket::ConstPtr(aligned_packet);
   };
 
+  if (!canonical_packet.source_image_is_undistorted) {
+    return fail_closed(
+        "mono-depth packet is not in undistorted pinhole geometry");
+  }
   if (!result.valid) {
     return fail_closed("mono-depth scale alignment failed");
   }

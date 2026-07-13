@@ -34,6 +34,7 @@ VIO::MonoDepthRawPacket makePacket(const VIO::FrameId frame_id,
   packet.valid_mask = cv::Mat(16, 20, CV_8UC1, cv::Scalar(255u));
   packet.weight_image = cv::Mat(4, 5, CV_32FC1, cv::Scalar(0.75f));
   packet.source_image_bgr = cv::Mat(16, 20, CV_8UC3, cv::Scalar(1, 2, 3));
+  packet.source_image_is_undistorted = true;
   packet.intrinsics.fx = 10.0;
   packet.intrinsics.fy = 10.0;
   packet.intrinsics.cx = 9.5;
@@ -275,6 +276,18 @@ int testFailClosedAndRecoveryFromCanonicalData() {
   const VIO::PointsWithIdMap landmarks;
   const auto aligner = VIO::makeMonoDepthScaleAligner(
       makeParams(Method::kRelativePose, VIO::MonoDepthMode::kMultiView));
+
+  VIO::MonoDepthRawPacket distorted_geometry = canonical;
+  distorted_geometry.source_image_is_undistorted = false;
+  VIO::MonoDepthScaleAlignmentResult otherwise_valid;
+  otherwise_valid.method = Method::kRelativePose;
+  otherwise_valid.valid = true;
+  otherwise_valid.absolute_scale = 2.0;
+  const auto geometry_rejected =
+      VIO::applyMonoDepthScaleAlignment(distorted_geometry, otherwise_valid);
+  EXPECT_TRUE(geometry_rejected && !geometry_rejected->scale_alignment.valid &&
+                  cv::countNonZero(geometry_rejected->valid_mask) == 0,
+              "raw distorted packet geometry fails closed before consumers");
 
   std::map<VIO::FrameId, gtsam::Pose3> missing_context{
       {31u, gtsam::Pose3(gtsam::Rot3(), gtsam::Point3(2.0, 0.0, 0.0))}};

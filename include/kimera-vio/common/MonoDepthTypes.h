@@ -192,6 +192,9 @@ struct MonoDepthRawPacket {
   cv::Mat weight_image;
   cv::Mat confidence;
   cv::Mat confidence_mask;
+  bool source_image_is_undistorted = false;
+  std::size_t image_geometry_valid_pixels = 0u;
+  std::size_t image_geometry_rejected_pixels = 0u;
   bool confidence_visualization_enabled = false;
   bool confidence_filtering_enabled = false;
   bool confidence_valid = false;

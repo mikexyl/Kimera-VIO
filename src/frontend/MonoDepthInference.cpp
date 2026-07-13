@@ -43,8 +43,38 @@ MonoDepthPairDistanceGateResult evaluateMonoDepthPairDistanceGate(
   return result;
 }
 
-MonoDepthInference::MonoDepthInference(const MonoDepthParams& params)
-    : params_(params), mono_depth_(nullptr), buffered_keyframe_(std::nullopt) {
+MonoDepthRectifiedFeatures makeMonoDepthRectifiedFeatures(
+    const StatusKeypointsCV& undistorted_keypoints,
+    const LandmarkIds& landmark_ids) {
+  MonoDepthRectifiedFeatures result;
+  if (undistorted_keypoints.size() != landmark_ids.size()) {
+    result.error = "undistorted keypoint and landmark-id counts differ";
+    return result;
+  }
+
+  result.keypoints.reserve(undistorted_keypoints.size());
+  result.landmark_ids = landmark_ids;
+  for (std::size_t i = 0u; i < undistorted_keypoints.size(); ++i) {
+    const StatusKeypointCV& status_keypoint = undistorted_keypoints[i];
+    result.keypoints.push_back(status_keypoint.second);
+    if (status_keypoint.first != KeypointStatus::VALID) {
+      if (result.landmark_ids[i] != -1) {
+        ++result.rejected_keypoints;
+      }
+      result.landmark_ids[i] = -1;
+    }
+  }
+  result.valid = true;
+  return result;
+}
+
+MonoDepthInference::MonoDepthInference(const MonoDepthParams& params,
+                                       const CameraParams& camera_params)
+    : params_(params),
+      camera_params_(camera_params),
+      image_undistorter_(nullptr),
+      mono_depth_(nullptr),
+      buffered_keyframe_(std::nullopt) {
   validateMonoDepthScaleAlignmentConfiguration(params_.mode,
                                                params_.scale_alignment_method);
   if (!std::isfinite(params_.min_confidence) || params_.min_confidence < 0.0) {
@@ -60,6 +90,21 @@ MonoDepthInference::MonoDepthInference(const MonoDepthParams& params)
   if (!params_.enabled) {
     return;
   }
+
+  if (camera_params_.camera_model_ != CameraModel::PINHOLE) {
+    LOG(FATAL) << "Mono-depth image undistortion currently requires a "
+                  "pinhole camera model.";
+  }
+  if (camera_params_.K_.empty() || camera_params_.image_size_.width <= 0 ||
+      camera_params_.image_size_.height <= 0) {
+    LOG(FATAL) << "Mono-depth image undistortion requires a valid camera "
+                  "matrix and image size.";
+  }
+  const cv::Mat rectification_rotation =
+      cv::Mat::eye(3, 3, camera_params_.K_.type());
+  image_undistorter_ = std::make_unique<UndistorterRectifier>(
+      camera_params_.K_, camera_params_, rectification_rotation);
+  CHECK(image_undistorter_);
 
 #ifdef HAVE_TENSORRT
   if (params_.engine_path.empty()) {
@@ -93,7 +138,8 @@ MonoDepthInference::MonoDepthInference(const MonoDepthParams& params)
             << monoDepthScaleAlignmentMethodToString(
                    params_.scale_alignment_method)
             << ", min_confidence=" << params_.min_confidence
-            << ", min_keyframe_distance_m=" << params_.min_keyframe_distance_m;
+            << ", min_keyframe_distance_m=" << params_.min_keyframe_distance_m
+            << ", input_geometry=undistorted_pinhole";
 #else
   LOG(FATAL) << "Mono depth inference requires xfeat-cpp TensorRT support, "
                 "but HAVE_TENSORRT is not enabled.";
@@ -226,7 +272,11 @@ MonoDepthRawPacket::ConstPtr MonoDepthInference::inferKeyframe(
               << ", confidence_threshold=" << packet->confidence_threshold
               << ", accepted=" << packet->confidence_accepted_pixels
               << ", rejected=" << packet->confidence_rejected_pixels
-              << ", retained=" << packet->confidence_retained_fraction << ")";
+              << ", retained=" << packet->confidence_retained_fraction
+              << ", undistortion_valid="
+              << packet->image_geometry_valid_pixels
+              << ", undistortion_rejected="
+              << packet->image_geometry_rejected_pixels << ")";
   }
   return packet;
 }
@@ -252,22 +302,37 @@ cv::Mat MonoDepthInference::toBgrImage(const cv::Mat& image) {
 std::optional<MonoDepthInference::BufferedKeyframe>
 MonoDepthInference::bufferKeyframe(
     const Frame& frame,
-    const std::optional<gtsam::Pose3>& odometry_world_T_body) {
+    const std::optional<gtsam::Pose3>& odometry_world_T_body) const {
   const cv::Mat bgr_image = toBgrImage(frame.img_);
   if (bgr_image.empty()) {
     LOG(ERROR) << "Skipping mono depth inference for an empty or unsupported "
                   "keyframe image.";
     return std::nullopt;
   }
+  if (bgr_image.size() != camera_params_.image_size_) {
+    LOG(ERROR) << "Skipping mono depth inference because keyframe image size "
+               << bgr_image.cols << "x" << bgr_image.rows
+               << " differs from the calibrated size "
+               << camera_params_.image_size_.width << "x"
+               << camera_params_.image_size_.height << ".";
+    return std::nullopt;
+  }
+  CHECK(image_undistorter_);
 
   BufferedKeyframe buffered;
   buffered.keyframe_id = *frame.keyframe_id_;
   buffered.timestamp = frame.timestamp_;
-  buffered.image_bgr = bgr_image.clone();
-  buffered.intrinsics.fx = frame.cam_param_.intrinsics_[0];
-  buffered.intrinsics.fy = frame.cam_param_.intrinsics_[1];
-  buffered.intrinsics.cx = frame.cam_param_.intrinsics_[2];
-  buffered.intrinsics.cy = frame.cam_param_.intrinsics_[3];
+  image_undistorter_->undistortRectifyImage(
+      bgr_image, &buffered.image_bgr, &buffered.image_geometry_mask);
+  if (buffered.image_bgr.empty() || buffered.image_geometry_mask.empty()) {
+    LOG(ERROR) << "Skipping mono depth inference because image undistortion "
+                  "failed.";
+    return std::nullopt;
+  }
+  buffered.intrinsics.fx = camera_params_.intrinsics_[0];
+  buffered.intrinsics.fy = camera_params_.intrinsics_[1];
+  buffered.intrinsics.cx = camera_params_.intrinsics_[2];
+  buffered.intrinsics.cy = camera_params_.intrinsics_[3];
   buffered.intrinsics.width = bgr_image.cols;
   buffered.intrinsics.height = bgr_image.rows;
   if (!std::isfinite(buffered.intrinsics.fx) ||
@@ -279,8 +344,22 @@ MonoDepthInference::bufferKeyframe(
   }
   buffered.body_T_cam = frame.cam_param_.body_Pose_cam_;
   buffered.odometry_world_T_body = odometry_world_T_body;
-  buffered.keypoints = frame.keypoints_;
-  buffered.landmark_ids = frame.landmarks_;
+  const MonoDepthRectifiedFeatures rectified_features =
+      makeMonoDepthRectifiedFeatures(frame.keypoints_undistorted_,
+                                     frame.landmarks_);
+  if (!rectified_features.valid) {
+    LOG(ERROR) << "Skipping mono depth inference for keyframe "
+               << buffered.keyframe_id << ": " << rectified_features.error;
+    return std::nullopt;
+  }
+  buffered.keypoints = rectified_features.keypoints;
+  buffered.landmark_ids = rectified_features.landmark_ids;
+  VLOG(1) << "Prepared undistorted mono-depth keyframe " << buffered.keyframe_id
+          << ": geometric_valid_pixels="
+          << cv::countNonZero(buffered.image_geometry_mask) << "/"
+          << buffered.image_geometry_mask.total()
+          << ", rejected_rectified_landmarks="
+          << rectified_features.rejected_keypoints;
   return buffered;
 }
 
@@ -397,7 +476,8 @@ MonoDepthConfidenceFilterResult makeMonoDepthConfidenceFilter(
 
 cv::Mat makeMonoDepthValidMask(const cv::Mat& depth,
                                const cv::Mat& sky_mask,
-                               const cv::Mat& confidence_mask) {
+                               const cv::Mat& confidence_mask,
+                               const cv::Mat& image_geometry_mask) {
   CHECK(!depth.empty());
   CHECK_EQ(depth.type(), CV_32FC1);
 
@@ -414,19 +494,33 @@ cv::Mat makeMonoDepthValidMask(const cv::Mat& depth,
                   "mask is malformed or shape-incompatible.";
     return valid_mask;
   }
+  const bool use_image_geometry_mask = !image_geometry_mask.empty();
+  const bool has_image_geometry_mask =
+      use_image_geometry_mask && image_geometry_mask.type() == CV_8UC1 &&
+      image_geometry_mask.size() == depth.size();
+  if (use_image_geometry_mask && !has_image_geometry_mask) {
+    LOG(ERROR) << "Rejecting all mono-depth pixels because the undistorted "
+                  "image geometry mask is malformed or shape-incompatible.";
+    return valid_mask;
+  }
 
   for (int v = 0; v < depth.rows; ++v) {
     const float* depth_row = depth.ptr<float>(v);
     const uint8_t* sky_row = has_sky_mask ? sky_mask.ptr<uint8_t>(v) : nullptr;
     const uint8_t* confidence_row =
         has_confidence_mask ? confidence_mask.ptr<uint8_t>(v) : nullptr;
+    const uint8_t* geometry_row =
+        has_image_geometry_mask ? image_geometry_mask.ptr<uint8_t>(v) : nullptr;
     uint8_t* valid_row = valid_mask.ptr<uint8_t>(v);
     for (int u = 0; u < depth.cols; ++u) {
       const float z = depth_row[u];
       const bool sky = sky_row != nullptr && sky_row[u] != 0u;
       const bool confidence_valid =
           confidence_row == nullptr || confidence_row[u] != 0u;
-      if (std::isfinite(z) && z > 0.0f && !sky && confidence_valid) {
+      const bool geometry_valid =
+          geometry_row == nullptr || geometry_row[u] != 0u;
+      if (std::isfinite(z) && z > 0.0f && !sky && confidence_valid &&
+          geometry_valid) {
         valid_row[u] = 255u;
       }
     }
@@ -442,6 +536,17 @@ MonoDepthRawPacket::ConstPtr MonoDepthInference::buildPacket(
   if (depth_result.depth.empty() || depth_result.depth.type() != CV_32FC1) {
     LOG(ERROR) << "DA3 mono depth returned an empty or non-CV_32FC1 depth map "
                << "for keyframe " << frame.keyframe_id;
+    return nullptr;
+  }
+  if (depth_result.depth.size() != frame.image_bgr.size() ||
+      frame.image_geometry_mask.type() != CV_8UC1 ||
+      frame.image_geometry_mask.size() != frame.image_bgr.size()) {
+    LOG(ERROR) << "DA3 mono depth geometry mismatch for keyframe "
+               << frame.keyframe_id << ": image=" << frame.image_bgr.cols << "x"
+               << frame.image_bgr.rows << ", depth=" << depth_result.depth.cols
+               << "x" << depth_result.depth.rows
+               << ", geometry_mask=" << frame.image_geometry_mask.cols << "x"
+               << frame.image_geometry_mask.rows;
     return nullptr;
   }
 
@@ -485,8 +590,15 @@ MonoDepthRawPacket::ConstPtr MonoDepthInference::buildPacket(
                << frame.keyframe_id << ": " << confidence_filter.error;
   }
 
-  packet->valid_mask = makeMonoDepthValidMask(
-      packet->depth, depth_result.sky_mask, confidence_filter.mask);
+  packet->source_image_is_undistorted = true;
+  packet->image_geometry_valid_pixels =
+      static_cast<std::size_t>(cv::countNonZero(frame.image_geometry_mask));
+  packet->image_geometry_rejected_pixels =
+      frame.image_geometry_mask.total() - packet->image_geometry_valid_pixels;
+  packet->valid_mask = makeMonoDepthValidMask(packet->depth,
+                                              depth_result.sky_mask,
+                                              confidence_filter.mask,
+                                              frame.image_geometry_mask);
   const cv::Size weight_size =
       depth_result.metadata.model_size.width > 0 &&
               depth_result.metadata.model_size.height > 0
