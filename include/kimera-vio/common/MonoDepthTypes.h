@@ -165,6 +165,10 @@ struct MonoDepthParams {
   double depth_weight_range_min = 0.05;
   bool visualize_weights = false;
   bool visualize_landmark_scale_alignment = false;
+  // Experimental five-DoF DA3 camera-motion constraint in the VIO smoother.
+  // This consumes only the canonical two-view pose metadata, independently of
+  // depth scaling, confidence filtering, dense mapping, and ICP.
+  bool da3_essential_factors_enabled = false;
   // Experimental isolated diagnostic: run DA3 on consecutive keyframes and
   // chain pair reconstructions through their duplicate middle image. No
   // odometry pose is used by DA3 overlap alignment or fusion; metric odometry
@@ -202,6 +206,7 @@ struct MonoDepthParams {
            visualize_weights == rhs.visualize_weights &&
            visualize_landmark_scale_alignment ==
                rhs.visualize_landmark_scale_alignment &&
+           da3_essential_factors_enabled == rhs.da3_essential_factors_enabled &&
            icp_only_da3_overlap_fusion == rhs.icp_only_da3_overlap_fusion &&
            min_confidence == rhs.min_confidence &&
            visualize_confidence == rhs.visualize_confidence &&

@@ -205,6 +205,20 @@ if(KIMERA_BUILD_TESTS)
     PUBLIC kimera_vio::kimera_vio)
   add_test(NAME testMonoDepthScaleAlignment
     COMMAND testMonoDepthScaleAlignment)
+
+  add_executable(testCameraAwareEssentialMatrixFactor
+    tests/testCameraAwareEssentialMatrixFactor.cpp)
+  target_link_libraries(testCameraAwareEssentialMatrixFactor
+    PUBLIC kimera_vio::kimera_vio)
+  add_test(NAME testCameraAwareEssentialMatrixFactor
+    COMMAND testCameraAwareEssentialMatrixFactor)
+
+  add_executable(testDa3EssentialMatrixFactors
+    tests/testDa3EssentialMatrixFactors.cpp)
+  target_link_libraries(testDa3EssentialMatrixFactors
+    PUBLIC kimera_vio::kimera_vio)
+  add_test(NAME testDa3EssentialMatrixFactors
+    COMMAND testDa3EssentialMatrixFactors)
 endif()
 
 ############################### INSTALL/EXPORT #################################
