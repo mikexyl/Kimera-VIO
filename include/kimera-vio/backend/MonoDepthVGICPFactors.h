@@ -71,15 +71,6 @@ class MonoDepthVGICPFactors {
   using FramePair = std::pair<FrameId, FrameId>;
   using PairTrackCounts = std::map<FramePair, std::size_t>;
 
-  struct Da3OverlapScaleEstimate {
-    bool valid = false;
-    double scale_ratio = 1.0;
-    std::size_t candidate_count = 0u;
-    std::size_t inlier_count = 0u;
-    double log_rmse = 0.0;
-    std::string failure_reason;
-  };
-
   struct Da3OverlapViewCloud {
     FrameId frame_id = 0u;
     Point3Vector points;
@@ -107,10 +98,6 @@ class MonoDepthVGICPFactors {
   void cacheRawPacket(const MonoDepthRawPacket::ConstPtr& raw_packet);
 
   void cacheDa3OverlapPair(const MonoDepthRawPacket::ConstPtr& raw_packet);
-
-  Da3OverlapScaleEstimate estimateDa3OverlapScale(
-      const MonoDepthRawPacket& previous_current,
-      const MonoDepthRawPacket& next_context) const;
 
   std::size_t appendDa3OverlapView(const MonoDepthRawPacket& packet,
                                    double scale,

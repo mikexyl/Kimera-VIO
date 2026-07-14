@@ -209,6 +209,11 @@ struct MonoDepthParams {
   // This consumes only the canonical two-view pose metadata, independently of
   // depth scaling, confidence filtering, dense mapping, and ICP.
   bool da3_essential_factors_enabled = false;
+  // Experimental scale-free constraint over consecutive DA3 pairs.  The
+  // measured baseline ratio comes only from canonical shared-image depth and
+  // DA3 translations; it supplies no absolute distance.
+  bool da3_baseline_ratio_factors_enabled = false;
+  double da3_baseline_ratio_log_sigma = 0.25;
   // Experimental isolated diagnostic: chain selected DA3 pair reconstructions
   // through their duplicate middle image. No odometry pose is used by DA3
   // overlap alignment or fusion; metric odometry is consulted only when the
@@ -249,6 +254,10 @@ struct MonoDepthParams {
            visualize_landmark_scale_alignment ==
                rhs.visualize_landmark_scale_alignment &&
            da3_essential_factors_enabled == rhs.da3_essential_factors_enabled &&
+           da3_baseline_ratio_factors_enabled ==
+               rhs.da3_baseline_ratio_factors_enabled &&
+           da3_baseline_ratio_log_sigma ==
+               rhs.da3_baseline_ratio_log_sigma &&
            icp_only_da3_overlap_fusion == rhs.icp_only_da3_overlap_fusion &&
            min_confidence == rhs.min_confidence &&
            visualize_confidence == rhs.visualize_confidence &&

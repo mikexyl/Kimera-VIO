@@ -12,7 +12,6 @@
 #include <gtsam_points/features/covariance_estimation.hpp>
 #include <gtsam_points/types/gaussian_voxelmap_cpu.hpp>
 #include <gtsam_points/types/point_cloud_cpu.hpp>
-#include <limits>
 #include <numeric>
 #include <queue>
 
@@ -30,22 +29,6 @@ double elapsedMs(
 }
 
 constexpr int kVgicpLogEveryN = 10;
-constexpr std::size_t kMinDa3OverlapSamples = 32u;
-
-double median(std::vector<double> values) {
-  if (values.empty()) {
-    return std::numeric_limits<double>::quiet_NaN();
-  }
-  const std::size_t middle = values.size() / 2u;
-  std::nth_element(values.begin(), values.begin() + middle, values.end());
-  const double upper = values[middle];
-  if (values.size() % 2u != 0u) {
-    return upper;
-  }
-  const double lower =
-      *std::max_element(values.begin(), values.begin() + middle);
-  return 0.5 * (lower + upper);
-}
 
 bool isFinitePose(const gtsam::Pose3& pose) {
   return pose.rotation().matrix().allFinite() && pose.translation().allFinite();
@@ -457,8 +440,10 @@ void MonoDepthVGICPFactors::cacheDa3OverlapPair(
       da3_overlap_fusion_.last_current_packet;
   Da3OverlapScaleEstimate overlap;
   if (continue_component) {
-    overlap = estimateDa3OverlapScale(*da3_overlap_fusion_.last_current_packet,
-                                      *context_packet);
+    overlap = VIO::estimateDa3OverlapScale(
+        *da3_overlap_fusion_.last_current_packet,
+        *context_packet,
+        mono_depth_params_.visualization_point_stride);
     continue_component = overlap.valid;
   }
 
@@ -554,101 +539,6 @@ void MonoDepthVGICPFactors::cacheDa3OverlapPair(
             << ", retained_views=" << da3_overlap_fusion_.window_views.size()
             << ", window_points=" << da3OverlapWindowPointCount()
             << ". ICP disabled.";
-}
-
-MonoDepthVGICPFactors::Da3OverlapScaleEstimate
-MonoDepthVGICPFactors::estimateDa3OverlapScale(
-    const MonoDepthRawPacket& previous_current,
-    const MonoDepthRawPacket& next_context) const {
-  Da3OverlapScaleEstimate result;
-  if (previous_current.keyframe_id != next_context.keyframe_id) {
-    result.failure_reason = "overlap packets do not describe the same image";
-    return result;
-  }
-  if (previous_current.depth.empty() || next_context.depth.empty() ||
-      previous_current.depth.type() != CV_32FC1 ||
-      next_context.depth.type() != CV_32FC1 ||
-      previous_current.depth.size() != next_context.depth.size() ||
-      previous_current.depth_support_mask.empty() ||
-      next_context.depth_support_mask.empty() ||
-      previous_current.depth_support_mask.type() != CV_8UC1 ||
-      next_context.depth_support_mask.type() != CV_8UC1 ||
-      previous_current.depth_support_mask.size() !=
-          previous_current.depth.size() ||
-      next_context.depth_support_mask.size() != next_context.depth.size()) {
-    result.failure_reason = "overlap depth or support-mask geometry is invalid";
-    return result;
-  }
-
-  const int stride = std::max(1, mono_depth_params_.visualization_point_stride);
-  std::vector<double> log_ratios;
-  const std::size_t reserve = static_cast<std::size_t>(
-      ((previous_current.depth.rows + stride - 1) / stride) *
-      ((previous_current.depth.cols + stride - 1) / stride));
-  log_ratios.reserve(reserve);
-  for (int v = 0; v < previous_current.depth.rows; v += stride) {
-    const float* previous_depth = previous_current.depth.ptr<float>(v);
-    const float* context_depth = next_context.depth.ptr<float>(v);
-    const uint8_t* previous_support =
-        previous_current.depth_support_mask.ptr<uint8_t>(v);
-    const uint8_t* context_support =
-        next_context.depth_support_mask.ptr<uint8_t>(v);
-    for (int u = 0; u < previous_current.depth.cols; u += stride) {
-      if (previous_support[u] == 0u || context_support[u] == 0u) {
-        continue;
-      }
-      const double previous_z = static_cast<double>(previous_depth[u]);
-      const double context_z = static_cast<double>(context_depth[u]);
-      if (!std::isfinite(previous_z) || !std::isfinite(context_z) ||
-          previous_z <= 0.0 || context_z <= 0.0) {
-        continue;
-      }
-      log_ratios.push_back(std::log(previous_z / context_z));
-    }
-  }
-  result.candidate_count = log_ratios.size();
-  if (log_ratios.size() < kMinDa3OverlapSamples) {
-    result.failure_reason = "insufficient same-image depth overlap";
-    return result;
-  }
-
-  const double initial_median = median(log_ratios);
-  std::vector<double> absolute_residuals;
-  absolute_residuals.reserve(log_ratios.size());
-  for (const double log_ratio : log_ratios) {
-    absolute_residuals.push_back(std::abs(log_ratio - initial_median));
-  }
-  const double mad = median(absolute_residuals);
-  const double inlier_threshold = std::max(1e-3, 3.0 * 1.4826 * mad);
-  std::vector<double> inliers;
-  inliers.reserve(log_ratios.size());
-  for (const double log_ratio : log_ratios) {
-    if (std::abs(log_ratio - initial_median) <= inlier_threshold) {
-      inliers.push_back(log_ratio);
-    }
-  }
-  result.inlier_count = inliers.size();
-  if (inliers.size() < kMinDa3OverlapSamples) {
-    result.failure_reason = "insufficient robust same-image depth overlap";
-    return result;
-  }
-
-  const double robust_log_ratio = median(inliers);
-  double squared_error_sum = 0.0;
-  for (const double log_ratio : inliers) {
-    const double residual = log_ratio - robust_log_ratio;
-    squared_error_sum += residual * residual;
-  }
-  result.log_rmse =
-      std::sqrt(squared_error_sum / static_cast<double>(inliers.size()));
-  result.scale_ratio = std::exp(robust_log_ratio);
-  result.valid = std::isfinite(result.scale_ratio) &&
-                 result.scale_ratio > 0.0 && std::isfinite(result.log_rmse);
-  if (!result.valid) {
-    result.scale_ratio = 1.0;
-    result.failure_reason = "robust overlap scale is invalid";
-  }
-  return result;
 }
 
 std::size_t MonoDepthVGICPFactors::appendDa3OverlapView(

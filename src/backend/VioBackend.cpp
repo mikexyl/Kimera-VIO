@@ -102,6 +102,11 @@ VioBackend::VioBackend(const gtsam::Pose3& B_Pose_leftCamRect,
       landmark_count_(0),
       log_output_(log_output),
       logger_(log_output ? std::make_unique<BackendLogger>() : nullptr),
+      da3_baseline_ratio_factors_(
+          std::make_unique<Da3BaselineRatioFactors>(
+              mono_depth_params_.da3_baseline_ratio_factors_enabled,
+              mono_depth_params_.da3_baseline_ratio_log_sigma,
+              mono_depth_params_.point_stride)),
       da3_essential_matrix_factors_(std::make_unique<Da3EssentialMatrixFactors>(
           mono_depth_params_.da3_essential_factors_enabled)),
       mono_depth_scale_aligner_(
@@ -1378,6 +1383,10 @@ bool VioBackend::optimize(
   // Consume the canonical DA3 relative-camera pose directly. This path is
   // intentionally independent of depth confidence, metric scale alignment,
   // dense-map insertion, and both smoother/isolated ICP modes.
+  if (da3_baseline_ratio_factors_) {
+    da3_baseline_ratio_factors_->addFactor(
+        mono_depth_raw_packet, state_, new_values_, &new_factors_tmp);
+  }
   if (da3_essential_matrix_factors_) {
     da3_essential_matrix_factors_->addFactor(
         mono_depth_raw_packet, state_, new_values_, &new_factors_tmp);
@@ -1462,6 +1471,9 @@ bool VioBackend::optimize(
   VLOG(10) << "Starting first update.";
   bool is_smoother_ok = updateSmoother(
       &result, new_factors_tmp, new_values_, key_frame_count, delete_slots);
+  if (da3_baseline_ratio_factors_) {
+    da3_baseline_ratio_factors_->notifySmootherUpdateResult(is_smoother_ok);
+  }
   if (da3_essential_matrix_factors_) {
     da3_essential_matrix_factors_->notifySmootherUpdateResult(is_smoother_ok);
   }

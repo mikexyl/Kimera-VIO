@@ -214,6 +214,10 @@ void VioParams::print() const {
             << mono_depth_params_.visualize_landmark_scale_alignment;
   LOG(INFO) << "Mono depth DA3 essential factors: "
             << mono_depth_params_.da3_essential_factors_enabled;
+  LOG(INFO) << "Mono depth DA3 baseline-ratio factors: "
+            << mono_depth_params_.da3_baseline_ratio_factors_enabled;
+  LOG(INFO) << "Mono depth DA3 baseline-ratio log sigma: "
+            << mono_depth_params_.da3_baseline_ratio_log_sigma;
   LOG(INFO) << "Mono depth ICP-only DA3 overlap fusion: "
             << mono_depth_params_.icp_only_da3_overlap_fusion;
   LOG(INFO) << "Mono depth landmark-scale flatness radius [px]: "

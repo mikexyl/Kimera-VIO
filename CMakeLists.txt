@@ -217,12 +217,26 @@ if(KIMERA_BUILD_TESTS)
   add_test(NAME testCameraAwareEssentialMatrixFactor
     COMMAND testCameraAwareEssentialMatrixFactor)
 
+  add_executable(testCameraAwareBaselineRatioFactor
+    tests/testCameraAwareBaselineRatioFactor.cpp)
+  target_link_libraries(testCameraAwareBaselineRatioFactor
+    PUBLIC kimera_vio::kimera_vio)
+  add_test(NAME testCameraAwareBaselineRatioFactor
+    COMMAND testCameraAwareBaselineRatioFactor)
+
   add_executable(testDa3EssentialMatrixFactors
     tests/testDa3EssentialMatrixFactors.cpp)
   target_link_libraries(testDa3EssentialMatrixFactors
     PUBLIC kimera_vio::kimera_vio)
   add_test(NAME testDa3EssentialMatrixFactors
     COMMAND testDa3EssentialMatrixFactors)
+
+  add_executable(testDa3BaselineRatioFactors
+    tests/testDa3BaselineRatioFactors.cpp)
+  target_link_libraries(testDa3BaselineRatioFactors
+    PUBLIC kimera_vio::kimera_vio)
+  add_test(NAME testDa3BaselineRatioFactors
+    COMMAND testDa3BaselineRatioFactors)
 endif()
 
 ############################### INSTALL/EXPORT #################################

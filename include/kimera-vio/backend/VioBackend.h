@@ -51,6 +51,7 @@
 #include <memory>
 #include <unordered_map>
 
+#include "kimera-vio/backend/Da3BaselineRatioFactors.h"
 #include "kimera-vio/backend/Da3EssentialMatrixFactors.h"
 #include "kimera-vio/backend/DenseMap.h"
 #include "kimera-vio/backend/MonoDepthAlignment.h"
@@ -613,6 +614,7 @@ class VioBackend {
   //! Logger.
   const bool log_output_ = {false};
   std::unique_ptr<BackendLogger> logger_;
+  std::unique_ptr<Da3BaselineRatioFactors> da3_baseline_ratio_factors_;
   std::unique_ptr<Da3EssentialMatrixFactors> da3_essential_matrix_factors_;
   MonoDepthScaleAligner::UniquePtr mono_depth_scale_aligner_;
   MonoDepthAlignment::UniquePtr mono_depth_alignment_;
