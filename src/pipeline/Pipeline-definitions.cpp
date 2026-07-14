@@ -203,6 +203,8 @@ void VioParams::print() const {
             << mono_depth_params_.da3_keyframe_skip;
   LOG(INFO) << "Mono depth minimum keyframe distance [m]: "
             << mono_depth_params_.min_keyframe_distance_m;
+  LOG(INFO) << "Mono depth DA3 keyframe covisibility threshold: "
+            << mono_depth_params_.da3_keyframe_covisibility_threshold;
   LOG(INFO) << "Mono depth minimum confidence: "
             << mono_depth_params_.min_confidence;
   LOG(INFO) << "Mono depth confidence visualization: "

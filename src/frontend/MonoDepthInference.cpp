@@ -69,6 +69,15 @@ MonoDepthInference::MonoDepthInference(const MonoDepthParams& params,
     LOG(FATAL) << "mono_depth.da3_keyframe_skip must be non-negative, but got "
                << params_.da3_keyframe_skip;
   }
+  if (params_.da3_keyframe_selection_method ==
+          Da3KeyframeSelectionMethod::kCovisibility &&
+      (!std::isfinite(params_.da3_keyframe_covisibility_threshold) ||
+       params_.da3_keyframe_covisibility_threshold < 0.0 ||
+       params_.da3_keyframe_covisibility_threshold > 1.0)) {
+    LOG(FATAL) << "mono_depth.da3_keyframe_covisibility_threshold must be "
+                  "finite and in [0, 1], but got "
+               << params_.da3_keyframe_covisibility_threshold;
+  }
   if (!params_.enabled) {
     return;
   }
@@ -137,6 +146,8 @@ MonoDepthInference::MonoDepthInference(const MonoDepthParams& params,
                    params_.da3_keyframe_selection_method)
             << ", da3_keyframe_skip=" << params_.da3_keyframe_skip
             << ", min_keyframe_distance_m=" << params_.min_keyframe_distance_m
+            << ", da3_keyframe_covisibility_threshold="
+            << params_.da3_keyframe_covisibility_threshold
             << ", input_geometry=undistorted_pinhole";
 #else
   LOG(FATAL) << "Mono depth inference requires xfeat-cpp TensorRT support, "
@@ -197,6 +208,9 @@ MonoDepthRawPacket::ConstPtr MonoDepthInference::inferKeyframe(
   Da3KeyframeSelectionInput selection_input;
   selection_input.context_keyframe_id = buffered_keyframe_->keyframe_id;
   selection_input.candidate_keyframe_id = current->keyframe_id;
+  selection_input.context_feature_track_ids =
+      &buffered_keyframe_->feature_track_ids;
+  selection_input.candidate_feature_track_ids = &current->feature_track_ids;
   if (buffered_keyframe_->odometry_world_T_body.has_value()) {
     selection_input.odometry_world_T_context_cam =
         buffered_keyframe_->odometry_world_T_body->compose(
@@ -379,6 +393,7 @@ MonoDepthInference::bufferKeyframe(
   }
   buffered.keypoints = rectified_features.keypoints;
   buffered.landmark_ids = rectified_features.landmark_ids;
+  buffered.feature_track_ids = frame.landmarks_;
   VLOG(1) << "Prepared undistorted mono-depth keyframe " << buffered.keyframe_id
           << ": geometric_valid_pixels="
           << cv::countNonZero(buffered.image_geometry_mask) << "/"

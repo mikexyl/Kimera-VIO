@@ -4,6 +4,7 @@
 #include <cmath>
 #include <sstream>
 #include <stdexcept>
+#include <unordered_set>
 
 namespace VIO {
 namespace {
@@ -99,6 +100,76 @@ class FixedSkipDa3KeyframeSelector final : public Da3KeyframeSelector {
   std::size_t held_candidates_ = 0u;
 };
 
+class CovisibilityDa3KeyframeSelector final : public Da3KeyframeSelector {
+ public:
+  explicit CovisibilityDa3KeyframeSelector(const double threshold)
+      : threshold_(threshold) {
+    if (!std::isfinite(threshold_) || threshold_ < 0.0 || threshold_ > 1.0) {
+      throw std::invalid_argument(
+          "DA3 keyframe covisibility threshold must be finite and in [0, 1]");
+    }
+  }
+
+  Da3KeyframeSelectionResult evaluate(
+      const Da3KeyframeSelectionInput& input) override {
+    Da3KeyframeSelectionResult result;
+    if (input.candidate_keyframe_id == input.context_keyframe_id) {
+      result.diagnostic = "context and candidate keyframe IDs are identical";
+      return result;
+    }
+    if (!input.context_feature_track_ids ||
+        !input.candidate_feature_track_ids) {
+      result.diagnostic =
+          "covisibility selection requires feature tracks for both endpoints";
+      return result;
+    }
+
+    std::unordered_set<LandmarkId> reference_tracks;
+    reference_tracks.reserve(input.context_feature_track_ids->size());
+    for (const LandmarkId id : *input.context_feature_track_ids) {
+      if (id != -1) {
+        reference_tracks.insert(id);
+      }
+    }
+
+    std::unordered_set<LandmarkId> candidate_tracks;
+    candidate_tracks.reserve(input.candidate_feature_track_ids->size());
+    for (const LandmarkId id : *input.candidate_feature_track_ids) {
+      if (id != -1) {
+        candidate_tracks.insert(id);
+      }
+    }
+
+    result.reference_tracks = reference_tracks.size();
+    for (const LandmarkId id : reference_tracks) {
+      if (candidate_tracks.count(id) != 0u) {
+        ++result.shared_tracks;
+      }
+    }
+    const double score = reference_tracks.empty()
+                             ? 0.0
+                             : static_cast<double>(result.shared_tracks) /
+                                   static_cast<double>(reference_tracks.size());
+    result.valid = true;
+    result.selected = score < threshold_;
+    result.covisibility_score = score;
+
+    std::ostringstream diagnostic;
+    diagnostic << "covisibility " << score << " (" << result.shared_tracks
+               << "/" << result.reference_tracks << " reference tracks) "
+               << (result.selected ? "< " : ">= ") << threshold_;
+    result.diagnostic = diagnostic.str();
+    return result;
+  }
+
+  Da3KeyframeSelectionMethod method() const noexcept override {
+    return Da3KeyframeSelectionMethod::kCovisibility;
+  }
+
+ private:
+  double threshold_;
+};
+
 }  // namespace
 
 MonoDepthPairDistanceGateResult evaluateMonoDepthPairDistanceGate(
@@ -141,6 +212,9 @@ std::unique_ptr<Da3KeyframeSelector> makeDa3KeyframeSelector(
       }
       return std::make_unique<FixedSkipDa3KeyframeSelector>(
           static_cast<std::size_t>(params.da3_keyframe_skip));
+    case Da3KeyframeSelectionMethod::kCovisibility:
+      return std::make_unique<CovisibilityDa3KeyframeSelector>(
+          params.da3_keyframe_covisibility_threshold);
   }
   throw std::invalid_argument("Unknown DA3 keyframe selection method");
 }

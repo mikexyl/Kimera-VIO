@@ -29,6 +29,8 @@ struct Da3KeyframeSelectionInput {
   FrameId candidate_keyframe_id = 0u;
   std::optional<gtsam::Pose3> odometry_world_T_context_cam;
   std::optional<gtsam::Pose3> odometry_world_T_candidate_cam;
+  const LandmarkIds* context_feature_track_ids = nullptr;
+  const LandmarkIds* candidate_feature_track_ids = nullptr;
 };
 
 struct Da3KeyframeSelectionResult {
@@ -36,6 +38,9 @@ struct Da3KeyframeSelectionResult {
   bool selected = false;
   std::size_t held_candidates = 0u;
   std::optional<double> camera_displacement_m;
+  std::optional<double> covisibility_score;
+  std::size_t reference_tracks = 0u;
+  std::size_t shared_tracks = 0u;
   std::string diagnostic;
 };
 

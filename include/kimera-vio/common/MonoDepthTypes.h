@@ -25,6 +25,7 @@ enum class MonoDepthMode { kSingleView = 0, kMultiView = 1 };
 enum class Da3KeyframeSelectionMethod {
   kDistance = 0,
   kFixedSkip = 1,
+  kCovisibility = 2,
 };
 
 inline std::string da3KeyframeSelectionMethodToString(
@@ -34,6 +35,8 @@ inline std::string da3KeyframeSelectionMethodToString(
       return "distance";
     case Da3KeyframeSelectionMethod::kFixedSkip:
       return "fixed_skip";
+    case Da3KeyframeSelectionMethod::kCovisibility:
+      return "covisibility";
   }
   throw std::invalid_argument("Unknown DA3 keyframe selection method: " +
                               std::to_string(static_cast<int>(method)));
@@ -52,9 +55,12 @@ inline Da3KeyframeSelectionMethod da3KeyframeSelectionMethodFromString(
   if (method == "fixed_skip" || method == "skip") {
     return Da3KeyframeSelectionMethod::kFixedSkip;
   }
+  if (method == "covisibility" || method == "covis") {
+    return Da3KeyframeSelectionMethod::kCovisibility;
+  }
   throw std::invalid_argument(
       "Unsupported mono_depth.da3_keyframe_selection_method: " + method +
-      ". Expected one of: distance, fixed_skip.");
+      ". Expected one of: distance, fixed_skip, covisibility.");
 }
 
 enum class MonoDepthScaleAlignmentMethod {
@@ -190,6 +196,9 @@ struct MonoDepthParams {
   // Zero selects consecutive VIO keyframes.
   int da3_keyframe_skip = 0;
   double min_keyframe_distance_m = 1.0;
+  // Run two-view DA3 when the fraction of the buffered reference frame's
+  // valid feature tracks still observed by the candidate falls below this.
+  double da3_keyframe_covisibility_threshold = 0.5;
   int point_stride = 4;
   int max_points_per_keyframe = 5000;
   int visualization_point_stride = 4;
@@ -237,6 +246,8 @@ struct MonoDepthParams {
            da3_keyframe_selection_method == rhs.da3_keyframe_selection_method &&
            da3_keyframe_skip == rhs.da3_keyframe_skip &&
            min_keyframe_distance_m == rhs.min_keyframe_distance_m &&
+           da3_keyframe_covisibility_threshold ==
+               rhs.da3_keyframe_covisibility_threshold &&
            point_stride == rhs.point_stride &&
            max_points_per_keyframe == rhs.max_points_per_keyframe &&
            visualization_point_stride == rhs.visualization_point_stride &&
@@ -256,8 +267,7 @@ struct MonoDepthParams {
            da3_essential_factors_enabled == rhs.da3_essential_factors_enabled &&
            da3_baseline_ratio_factors_enabled ==
                rhs.da3_baseline_ratio_factors_enabled &&
-           da3_baseline_ratio_log_sigma ==
-               rhs.da3_baseline_ratio_log_sigma &&
+           da3_baseline_ratio_log_sigma == rhs.da3_baseline_ratio_log_sigma &&
            icp_only_da3_overlap_fusion == rhs.icp_only_da3_overlap_fusion &&
            min_confidence == rhs.min_confidence &&
            visualize_confidence == rhs.visualize_confidence &&

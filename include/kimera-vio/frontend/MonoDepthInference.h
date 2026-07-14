@@ -74,6 +74,7 @@ class MonoDepthInference {
     std::optional<gtsam::Pose3> odometry_world_T_body;
     KeypointsCV keypoints;
     LandmarkIds landmark_ids;
+    LandmarkIds feature_track_ids;
   };
 
   struct Da3PairInfo {
