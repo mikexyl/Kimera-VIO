@@ -199,6 +199,10 @@ if(KIMERA_BUILD_TESTS)
   target_link_libraries(testMonoDepthConfidence PUBLIC kimera_vio::kimera_vio)
   add_test(NAME testMonoDepthConfidence COMMAND testMonoDepthConfidence)
 
+  add_executable(testDa3KeyframeSelector tests/testDa3KeyframeSelector.cpp)
+  target_link_libraries(testDa3KeyframeSelector PUBLIC kimera_vio::kimera_vio)
+  add_test(NAME testDa3KeyframeSelector COMMAND testDa3KeyframeSelector)
+
   add_executable(testMonoDepthScaleAlignment
     tests/testMonoDepthScaleAlignment.cpp)
   target_link_libraries(testMonoDepthScaleAlignment

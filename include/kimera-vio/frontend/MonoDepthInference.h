@@ -9,6 +9,7 @@
 
 #include "kimera-vio/common/MonoDepthTypes.h"
 #include "kimera-vio/frontend/CameraParams.h"
+#include "kimera-vio/frontend/Da3KeyframeSelector.h"
 #include "kimera-vio/frontend/Frame.h"
 #include "kimera-vio/frontend/UndistorterRectifier.h"
 #include "kimera-vio/utils/Macros.h"
@@ -22,13 +23,6 @@ struct MonoDepthConfidenceFilterResult {
   std::size_t accepted_pixels = 0u;
   std::size_t rejected_pixels = 0u;
   double retained_fraction = 1.0;
-  std::string error;
-};
-
-struct MonoDepthPairDistanceGateResult {
-  bool valid = false;
-  bool passes = false;
-  double camera_displacement_m = 0.0;
   std::string error;
 };
 
@@ -53,11 +47,6 @@ cv::Mat makeMonoDepthValidMask(const cv::Mat& depth,
 MonoDepthRectifiedFeatures makeMonoDepthRectifiedFeatures(
     const StatusKeypointsCV& undistorted_keypoints,
     const LandmarkIds& landmark_ids);
-
-MonoDepthPairDistanceGateResult evaluateMonoDepthPairDistanceGate(
-    const gtsam::Pose3& odometry_world_T_context_cam,
-    const gtsam::Pose3& odometry_world_T_current_cam,
-    double min_keyframe_distance_m);
 
 class MonoDepthInference {
  public:
@@ -114,6 +103,7 @@ class MonoDepthInference {
   CameraParams camera_params_;
   UndistorterRectifier::UniquePtr image_undistorter_;
   std::unique_ptr<xfeat::MonoDepth> mono_depth_;
+  std::unique_ptr<Da3KeyframeSelector> da3_keyframe_selector_;
   mutable std::optional<BufferedKeyframe> buffered_keyframe_;
 };
 

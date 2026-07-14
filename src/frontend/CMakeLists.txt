@@ -4,6 +4,7 @@ target_sources(kimera_vio
   "${CMAKE_CURRENT_LIST_DIR}/Camera.cpp"
   "${CMAKE_CURRENT_LIST_DIR}/CameraParams.cpp"
   "${CMAKE_CURRENT_LIST_DIR}/DepthFrame.cpp"
+  "${CMAKE_CURRENT_LIST_DIR}/Da3KeyframeSelector.cpp"
   "${CMAKE_CURRENT_LIST_DIR}/MonoDepthInference.cpp"
   "${CMAKE_CURRENT_LIST_DIR}/MonoImuSyncPacket.cpp"
   "${CMAKE_CURRENT_LIST_DIR}/MonoVisionImuFrontend.cpp"

@@ -22,6 +22,41 @@ namespace VIO {
 
 enum class MonoDepthMode { kSingleView = 0, kMultiView = 1 };
 
+enum class Da3KeyframeSelectionMethod {
+  kDistance = 0,
+  kFixedSkip = 1,
+};
+
+inline std::string da3KeyframeSelectionMethodToString(
+    const Da3KeyframeSelectionMethod method) {
+  switch (method) {
+    case Da3KeyframeSelectionMethod::kDistance:
+      return "distance";
+    case Da3KeyframeSelectionMethod::kFixedSkip:
+      return "fixed_skip";
+  }
+  throw std::invalid_argument("Unknown DA3 keyframe selection method: " +
+                              std::to_string(static_cast<int>(method)));
+}
+
+inline Da3KeyframeSelectionMethod da3KeyframeSelectionMethodFromString(
+    std::string method) {
+  std::transform(
+      method.begin(), method.end(), method.begin(), [](unsigned char c) {
+        return static_cast<char>(std::tolower(c));
+      });
+  std::replace(method.begin(), method.end(), '-', '_');
+  if (method == "distance") {
+    return Da3KeyframeSelectionMethod::kDistance;
+  }
+  if (method == "fixed_skip" || method == "skip") {
+    return Da3KeyframeSelectionMethod::kFixedSkip;
+  }
+  throw std::invalid_argument(
+      "Unsupported mono_depth.da3_keyframe_selection_method: " + method +
+      ". Expected one of: distance, fixed_skip.");
+}
+
 enum class MonoDepthScaleAlignmentMethod {
   kNone = 0,
   kRelativePose = 1,
@@ -149,6 +184,11 @@ inline MonoDepthMode monoDepthModeFromString(std::string mode) {
 struct MonoDepthParams {
   bool enabled = false;
   std::string engine_path;
+  Da3KeyframeSelectionMethod da3_keyframe_selection_method =
+      Da3KeyframeSelectionMethod::kDistance;
+  // Number of incoming VIO keyframes to hold between selected DA3 endpoints.
+  // Zero selects consecutive VIO keyframes.
+  int da3_keyframe_skip = 0;
   double min_keyframe_distance_m = 1.0;
   int point_stride = 4;
   int max_points_per_keyframe = 5000;
@@ -169,10 +209,10 @@ struct MonoDepthParams {
   // This consumes only the canonical two-view pose metadata, independently of
   // depth scaling, confidence filtering, dense mapping, and ICP.
   bool da3_essential_factors_enabled = false;
-  // Experimental isolated diagnostic: run DA3 on consecutive keyframes and
-  // chain pair reconstructions through their duplicate middle image. No
-  // odometry pose is used by DA3 overlap alignment or fusion; metric odometry
-  // is consulted only to apply min_keyframe_distance_m consistently.
+  // Experimental isolated diagnostic: chain selected DA3 pair reconstructions
+  // through their duplicate middle image. No odometry pose is used by DA3
+  // overlap alignment or fusion; metric odometry is consulted only when the
+  // distance keyframe selector is active.
   bool icp_only_da3_overlap_fusion = false;
   double min_confidence = 1.1;
   bool visualize_confidence = false;
@@ -189,6 +229,8 @@ struct MonoDepthParams {
 
   bool operator==(const MonoDepthParams& rhs) const {
     return enabled == rhs.enabled && engine_path == rhs.engine_path &&
+           da3_keyframe_selection_method == rhs.da3_keyframe_selection_method &&
+           da3_keyframe_skip == rhs.da3_keyframe_skip &&
            min_keyframe_distance_m == rhs.min_keyframe_distance_m &&
            point_stride == rhs.point_stride &&
            max_points_per_keyframe == rhs.max_points_per_keyframe &&

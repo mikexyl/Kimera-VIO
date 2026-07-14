@@ -16,33 +16,6 @@
 
 namespace VIO {
 
-MonoDepthPairDistanceGateResult evaluateMonoDepthPairDistanceGate(
-    const gtsam::Pose3& odometry_world_T_context_cam,
-    const gtsam::Pose3& odometry_world_T_current_cam,
-    const double min_keyframe_distance_m) {
-  MonoDepthPairDistanceGateResult result;
-  if (!std::isfinite(min_keyframe_distance_m) ||
-      min_keyframe_distance_m < 0.0) {
-    result.error = "minimum keyframe distance must be finite and non-negative";
-    return result;
-  }
-
-  result.camera_displacement_m =
-      odometry_world_T_context_cam.between(odometry_world_T_current_cam)
-          .translation()
-          .norm();
-  if (!std::isfinite(result.camera_displacement_m)) {
-    result.error = "odometry camera-center displacement is not finite";
-    return result;
-  }
-  result.valid = true;
-  const double comparison_tolerance =
-      1e-9 * std::max(1.0, min_keyframe_distance_m);
-  result.passes = result.camera_displacement_m + comparison_tolerance >=
-                  min_keyframe_distance_m;
-  return result;
-}
-
 MonoDepthRectifiedFeatures makeMonoDepthRectifiedFeatures(
     const StatusKeypointsCV& undistorted_keypoints,
     const LandmarkIds& landmark_ids) {
@@ -74,6 +47,7 @@ MonoDepthInference::MonoDepthInference(const MonoDepthParams& params,
       camera_params_(camera_params),
       image_undistorter_(nullptr),
       mono_depth_(nullptr),
+      da3_keyframe_selector_(nullptr),
       buffered_keyframe_(std::nullopt) {
   validateMonoDepthScaleAlignmentConfiguration(params_.mode,
                                                params_.scale_alignment_method);
@@ -81,14 +55,26 @@ MonoDepthInference::MonoDepthInference(const MonoDepthParams& params,
     LOG(FATAL) << "mono_depth.min_confidence must be finite and non-negative, "
                << "but got " << params_.min_confidence;
   }
-  if (!std::isfinite(params_.min_keyframe_distance_m) ||
-      params_.min_keyframe_distance_m < 0.0) {
+  if (params_.da3_keyframe_selection_method ==
+          Da3KeyframeSelectionMethod::kDistance &&
+      (!std::isfinite(params_.min_keyframe_distance_m) ||
+       params_.min_keyframe_distance_m < 0.0)) {
     LOG(FATAL) << "mono_depth.min_keyframe_distance_m must be finite and "
                   "non-negative, but got "
                << params_.min_keyframe_distance_m;
   }
+  if (params_.da3_keyframe_selection_method ==
+          Da3KeyframeSelectionMethod::kFixedSkip &&
+      params_.da3_keyframe_skip < 0) {
+    LOG(FATAL) << "mono_depth.da3_keyframe_skip must be non-negative, but got "
+               << params_.da3_keyframe_skip;
+  }
   if (!params_.enabled) {
     return;
+  }
+  if (params_.mode == MonoDepthMode::kMultiView) {
+    da3_keyframe_selector_ = makeDa3KeyframeSelector(params_);
+    CHECK(da3_keyframe_selector_);
   }
 
   if (camera_params_.camera_model_ != CameraModel::PINHOLE) {
@@ -146,6 +132,10 @@ MonoDepthInference::MonoDepthInference(const MonoDepthParams& params,
             << ", landmark_scale_max_relative_depth_variation="
             << params_.landmark_scale_max_relative_depth_variation
             << ", min_confidence=" << params_.min_confidence
+            << ", da3_keyframe_selection_method="
+            << da3KeyframeSelectionMethodToString(
+                   params_.da3_keyframe_selection_method)
+            << ", da3_keyframe_skip=" << params_.da3_keyframe_skip
             << ", min_keyframe_distance_m=" << params_.min_keyframe_distance_m
             << ", input_geometry=undistorted_pinhole";
 #else
@@ -165,10 +155,11 @@ MonoDepthRawPacket::ConstPtr MonoDepthInference::inferKeyframe(
   CHECK(frame.keyframe_id_.has_value());
 
   if (params_.mode == MonoDepthMode::kMultiView &&
+      params_.da3_keyframe_selection_method ==
+          Da3KeyframeSelectionMethod::kDistance &&
       !odometry_world_T_body.has_value()) {
     LOG_EVERY_N(WARNING, 30)
-        << "Holding DA3 two-view inference at keyframe "
-        << *frame.keyframe_id_
+        << "Holding DA3 two-view inference at keyframe " << *frame.keyframe_id_
         << " because a metric odometry pose is unavailable for keyframe "
            "distance gating.";
     return nullptr;
@@ -202,52 +193,56 @@ MonoDepthRawPacket::ConstPtr MonoDepthInference::inferKeyframe(
     return nullptr;
   }
 
-  MonoDepthPairDistanceGateResult distance_gate;
-  CHECK(buffered_keyframe_->odometry_world_T_body.has_value());
-  CHECK(current->odometry_world_T_body.has_value());
-  const gtsam::Pose3 odometry_world_T_context_cam =
-      buffered_keyframe_->odometry_world_T_body->compose(
-          buffered_keyframe_->body_T_cam);
-  const gtsam::Pose3 odometry_world_T_current_cam =
-      current->odometry_world_T_body->compose(current->body_T_cam);
-  distance_gate =
-      evaluateMonoDepthPairDistanceGate(odometry_world_T_context_cam,
-                                        odometry_world_T_current_cam,
-                                        params_.min_keyframe_distance_m);
-  if (!distance_gate.valid) {
-    LOG(ERROR) << "Cannot evaluate DA3 two-view distance gate for pair ["
+  CHECK(da3_keyframe_selector_);
+  Da3KeyframeSelectionInput selection_input;
+  selection_input.context_keyframe_id = buffered_keyframe_->keyframe_id;
+  selection_input.candidate_keyframe_id = current->keyframe_id;
+  if (buffered_keyframe_->odometry_world_T_body.has_value()) {
+    selection_input.odometry_world_T_context_cam =
+        buffered_keyframe_->odometry_world_T_body->compose(
+            buffered_keyframe_->body_T_cam);
+  }
+  if (current->odometry_world_T_body.has_value()) {
+    selection_input.odometry_world_T_candidate_cam =
+        current->odometry_world_T_body->compose(current->body_T_cam);
+  }
+  const Da3KeyframeSelectionResult selection =
+      da3_keyframe_selector_->evaluate(selection_input);
+  if (!selection.valid) {
+    LOG(ERROR) << "Cannot evaluate DA3 keyframe selector for pair ["
                << buffered_keyframe_->keyframe_id << ", "
-               << current->keyframe_id << "]: " << distance_gate.error;
+               << current->keyframe_id << "]: " << selection.diagnostic;
     return nullptr;
   }
-  if (!distance_gate.passes) {
+  if (!selection.selected) {
     VLOG(1) << "Holding DA3 two-view context keyframe "
             << buffered_keyframe_->keyframe_id << "; candidate keyframe "
-            << current->keyframe_id << " has endpoint camera displacement "
-            << distance_gate.camera_displacement_m << " m < "
-            << params_.min_keyframe_distance_m << " m.";
+            << current->keyframe_id << " rejected by "
+            << da3KeyframeSelectionMethodToString(
+                   da3_keyframe_selector_->method())
+            << " selector: " << selection.diagnostic << ".";
     return nullptr;
   }
 
   BufferedKeyframe previous = std::move(*buffered_keyframe_);
   // Advance before inference so a failed pair does not get retried and the
-  // next distance-gated pair uses the newest accepted context view.
+  // next selected pair uses the newest accepted context view.
   buffered_keyframe_ = current;
 
   if (params_.icp_only_da3_overlap_fusion) {
     LOG(INFO) << "Running pose-free DA3 overlap pair [" << previous.keyframe_id
-              << ", " << current->keyframe_id
-              << "] selected at odometry endpoint camera displacement "
-              << distance_gate.camera_displacement_m << " m (threshold "
-              << params_.min_keyframe_distance_m
-              << " m). Odometry is used only for keyframe selection, not "
-                 "DA3 overlap alignment or fusion.";
+              << ", " << current->keyframe_id << "] selected by "
+              << da3KeyframeSelectionMethodToString(
+                     da3_keyframe_selector_->method())
+              << " (" << selection.diagnostic
+              << "). Selection metadata is not used for DA3 overlap alignment "
+                 "or fusion.";
   } else {
     LOG(INFO) << "Running pose-free DA3 two-view pair [" << previous.keyframe_id
-              << ", " << current->keyframe_id
-              << "] with odometry endpoint camera displacement "
-              << distance_gate.camera_displacement_m << " m (threshold "
-              << params_.min_keyframe_distance_m << " m)";
+              << ", " << current->keyframe_id << "] selected by "
+              << da3KeyframeSelectionMethodToString(
+                     da3_keyframe_selector_->method())
+              << " (" << selection.diagnostic << ")";
   }
   std::vector<xfeat::MonoDepthResult> depth_results;
   try {
