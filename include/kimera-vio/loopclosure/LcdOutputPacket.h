@@ -77,6 +77,10 @@ struct LcdOutput : PipelinePayload {
   gtsam::NonlinearFactorGraph nfg_;
   // frame information
   Timestamp timestamp_kf_;
+  // Stable VIO keyframe identifier for the descriptor/verification payload.
+  // This is intentionally independent from callback ordering: the VLAD path
+  // can delay outputs by its local window and may omit invalid frames.
+  FrameId keyframe_id_{0};
   KeypointsCV keypoints_2d_;
   Landmarks keypoints_3d_;
   BearingVectors versors_;

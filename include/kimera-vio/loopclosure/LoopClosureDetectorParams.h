@@ -133,7 +133,6 @@ class LoopClosureDetectorParams : public PipelineParams {
   // lighterglue parameters
   int lcd_lg_num_features_ = 500;  // num features to track
   std::string lcd_lg_model_path_{};
-  std::string lcd_faiss_index_path_{};
   std::string xfeat_nv_head_model_path_{};
   std::string netvlad_model_path_{};
   int lcd_min_matched_features_ = 5;

@@ -75,7 +75,6 @@ ransac_2d3d_algorithm: 3 # EPNP
 
 lcd_lg_num_features: 500
 lcd_lg_model_path: /workspaces/src/xfeat-cpp/onnx_model/lg_640x480_500.onnx
-lcd_faiss_index_path: /workspaces/src/xfeat-cpp/onnx_model/faiss_ivfflat.index.bin
 xfeat_nv_head_model_path: /workspaces/src/xfeat-cpp/onnx_model/xfeat_nv.onnx
 netvlad_model_path: /workspaces/src/xfeat-cpp/onnx_model/netvlad.onnx
 local_window_size: 10

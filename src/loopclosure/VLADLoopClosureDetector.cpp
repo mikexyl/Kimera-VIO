@@ -130,15 +130,9 @@ VLADLoopClosureDetector::VLADLoopClosureDetector(
   size_t free_before, total;
   cudaMemGetInfo(&free_before, &total);
 
-  auto faiss_mode = VPRONNXWrapper::Database::IndexMode::kIVFFlat;
-  int faiss_dim = 0;
-  if (lcd_params_.lcd_faiss_index_path_.empty()) {
-    faiss_mode = VPRONNXWrapper::Database::IndexMode::kFlat;
-    faiss_dim = vpr_model->get_descriptor_dim();
-  }
-
-  auto faiss_db = std::make_unique<VPRONNXWrapper::Database>(
-      faiss_mode, lcd_params_.lcd_faiss_index_path_, false, faiss_dim);
+  const int faiss_dim = vpr_model->get_descriptor_dim();
+  auto faiss_db =
+      std::make_unique<VPRONNXWrapper::Database>(faiss_dim);
 
   size_t free_after, total_after;
   cudaMemGetInfo(&free_after, &total_after);
@@ -295,13 +289,14 @@ LcdOutput::UniquePtr VLADLoopClosureDetector::spinOnce(const LcdInput& input) {
     LcdOutput::UniquePtr output_payload =
         makeOutputPayload(input.timestamp_, output_frame_id);
 
+    if (!output_payload) {
+      LOG(WARNING) << "makeOutputPayload returned nullptr.";
+      return nullptr;
+    }
     if (!output_payload->bow_vec_.empty()) {
       FrameId clean_frames_until_id =
           landmark_manager_->getOldestCovisFrame(output_frame_id);
       cleanFrameUntil(clean_frames_until_id);
-    }
-    if (!output_payload) {
-      LOG(WARNING) << "makeOutputPayload returned nullptr.";
     }
     return output_payload;
   }
@@ -491,6 +486,7 @@ LcdOutput::UniquePtr VLADLoopClosureDetector::makeOutputPayload(
 
   LcdOutput::UniquePtr output_payload =
       std::make_unique<LcdOutput>(LCDStatus::NO_MATCHES, msg_timestamp);
+  output_payload->keyframe_id_ = lcd_frame_id;
 
   CHECK(output_payload) << "Missing LCD output payload.";
 

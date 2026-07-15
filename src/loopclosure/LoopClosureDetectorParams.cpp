@@ -14,6 +14,8 @@
 
 #include "kimera-vio/loopclosure/LoopClosureDetectorParams.h"
 
+#include <stdexcept>
+
 namespace VIO {
 
 LoopClosureDetectorParams::LoopClosureDetectorParams()
@@ -167,7 +169,6 @@ bool LoopClosureDetectorParams::parseYAML(const std::string& filepath) {
 
   yaml_parser.getYamlParam("lcd_lg_num_features", &lcd_lg_num_features_);
   yaml_parser.getYamlParam("lcd_lg_model_path", &lcd_lg_model_path_);
-  yaml_parser.getYamlParam("lcd_faiss_index_path", &lcd_faiss_index_path_);
   yaml_parser.getYamlParam("xfeat_nv_head_model_path",
                            &xfeat_nv_head_model_path_);
   yaml_parser.getYamlParam("netvlad_model_path", &netvlad_model_path_);
@@ -188,8 +189,11 @@ bool LoopClosureDetectorParams::parseYAML(const std::string& filepath) {
     vpr_model_type_ = VprModelType::kMixVPR;
   } else if (vpr_model_type_str == "patchnetvlad") {
     vpr_model_type_ = VprModelType::kPatchNetVLAD;
-  } else {
+  } else if (vpr_model_type_str == "jist") {
     vpr_model_type_ = VprModelType::kJist;
+  } else {
+    throw std::runtime_error("Unsupported vpr_model_type: " +
+                             vpr_model_type_str);
   }
 
   yaml_parser.getYamlParam("min_seq_coverage_score", &min_seq_coverage_score_);
