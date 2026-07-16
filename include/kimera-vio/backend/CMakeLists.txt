@@ -2,8 +2,6 @@
 target_sources(kimera_vio PRIVATE
   "${CMAKE_CURRENT_LIST_DIR}/Da3BaselineRatioFactors.h"
   "${CMAKE_CURRENT_LIST_DIR}/Da3EssentialMatrixFactors.h"
-  "${CMAKE_CURRENT_LIST_DIR}/DenseMap.h"
-  "${CMAKE_CURRENT_LIST_DIR}/MonoDepthAlignment.h"
   "${CMAKE_CURRENT_LIST_DIR}/MonoDepthScaleAlignment.h"
   "${CMAKE_CURRENT_LIST_DIR}/MonoDepthVGICPFactors.h"
   "${CMAKE_CURRENT_LIST_DIR}/RegularVioBackend-definitions.h"

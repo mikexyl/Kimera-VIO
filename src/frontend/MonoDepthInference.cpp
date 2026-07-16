@@ -132,10 +132,6 @@ MonoDepthInference::MonoDepthInference(const MonoDepthParams& params,
             << ", scale_alignment_method="
             << monoDepthScaleAlignmentMethodToString(
                    params_.scale_alignment_method)
-            << ", visualize_landmark_scale_alignment="
-            << params_.visualize_landmark_scale_alignment
-            << ", icp_only_da3_overlap_fusion="
-            << params_.icp_only_da3_overlap_fusion
             << ", landmark_scale_flatness_radius="
             << params_.landmark_scale_flatness_radius
             << ", landmark_scale_max_relative_depth_variation="
@@ -243,21 +239,11 @@ MonoDepthRawPacket::ConstPtr MonoDepthInference::inferKeyframe(
   // next selected pair uses the newest accepted context view.
   buffered_keyframe_ = current;
 
-  if (params_.icp_only_da3_overlap_fusion) {
-    LOG(INFO) << "Running pose-free DA3 overlap pair [" << previous.keyframe_id
-              << ", " << current->keyframe_id << "] selected by "
-              << da3KeyframeSelectionMethodToString(
-                     da3_keyframe_selector_->method())
-              << " (" << selection.diagnostic
-              << "). Selection metadata is not used for DA3 overlap alignment "
-                 "or fusion.";
-  } else {
-    LOG(INFO) << "Running pose-free DA3 two-view pair [" << previous.keyframe_id
-              << ", " << current->keyframe_id << "] selected by "
-              << da3KeyframeSelectionMethodToString(
-                     da3_keyframe_selector_->method())
-              << " (" << selection.diagnostic << ")";
-  }
+  LOG(INFO) << "Running pose-free DA3 two-view pair [" << previous.keyframe_id
+            << ", " << current->keyframe_id << "] selected by "
+            << da3KeyframeSelectionMethodToString(
+                   da3_keyframe_selector_->method())
+            << " (" << selection.diagnostic << ")";
   std::vector<xfeat::MonoDepthResult> depth_results;
   try {
     const std::vector<cv::Mat> images{previous.image_bgr, current->image_bgr};
@@ -294,7 +280,7 @@ MonoDepthRawPacket::ConstPtr MonoDepthInference::inferKeyframe(
   // Preserve both views.  Consecutive invocations [A, B] and [B, C] then
   // contain two independent depth predictions for the exact same B image.
   const MonoDepthRawPacket::ConstPtr context_packet =
-      buildPacket(previous, depth_results[0], false);
+      buildPacket(previous, depth_results[0], true);
   if (!context_packet) {
     LOG(ERROR) << "DA3 pair [" << previous.keyframe_id << ", "
                << current->keyframe_id
@@ -310,6 +296,10 @@ MonoDepthRawPacket::ConstPtr MonoDepthInference::inferKeyframe(
               << " (view_index=" << packet->metadata.view_index
               << ", view_count=" << packet->metadata.view_count
               << ", confidence_threshold=" << packet->confidence_threshold
+              << ", context_accepted="
+              << context_packet->confidence_accepted_pixels
+              << ", context_rejected="
+              << context_packet->confidence_rejected_pixels
               << ", accepted=" << packet->confidence_accepted_pixels
               << ", rejected=" << packet->confidence_rejected_pixels
               << ", retained=" << packet->confidence_retained_fraction

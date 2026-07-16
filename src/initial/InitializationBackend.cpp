@@ -40,7 +40,6 @@ InitializationBackend::InitializationBackend(
                  imu_params,
                  backend_output_params,
                  MonoDepthParams(),
-                 DenseMapParams(),
                  log_output) {}
 
 /* ------------------------------------------------------------------------ */

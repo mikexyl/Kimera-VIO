@@ -78,7 +78,6 @@ VioBackend::VioBackend(const gtsam::Pose3& B_Pose_leftCamRect,
                        const ImuParams& imu_params,
                        const BackendOutputParams& backend_output_params,
                        const MonoDepthParams& mono_depth_params,
-                       const DenseMapParams& dense_map_params,
                        bool log_output,
                        std::optional<OdometryParams> odom_params)
     : backend_state_(BackendState::Bootstrap),
@@ -86,7 +85,6 @@ VioBackend::VioBackend(const gtsam::Pose3& B_Pose_leftCamRect,
       imu_params_(imu_params),
       backend_output_params_(backend_output_params),
       mono_depth_params_(mono_depth_params),
-      dense_map_params_(dense_map_params),
       odom_params_(odom_params),
       timestamp_lkf_(-1),
       imu_bias_lkf_(ImuBias()),
@@ -112,14 +110,6 @@ VioBackend::VioBackend(const gtsam::Pose3& B_Pose_leftCamRect,
       mono_depth_scale_aligner_(
           mono_depth_params_.enabled
               ? makeMonoDepthScaleAligner(mono_depth_params_)
-              : nullptr),
-      mono_depth_alignment_(
-          mono_depth_params_.enabled
-              ? std::make_unique<MonoDepthAlignment>(mono_depth_params_)
-              : nullptr),
-      dense_map_module_(
-          dense_map_params_.enabled
-              ? std::make_unique<DenseMapModule>(dense_map_params_)
               : nullptr),
       mono_depth_vgicp_factors_(
           backend_params_.vgicp_factors_enabled_
@@ -256,31 +246,6 @@ BackendOutput::UniquePtr VioBackend::spinOnce(const BackendInput& input) {
         kPoseSymbolChar, curr_kf_id_));  // Body pose from smoother.
     gtsam::Pose3 W_P_cur = W_Pose_B_lkf_from_increments_;
     gtsam::Pose3 W_P_smoother = W_P_cur * smoother_P_cur.inverse();
-    MonoDepthICPOnlyResult mono_depth_icp_only_result;
-    const MonoDepthICPOnlyResult* mono_depth_icp_only_result_ptr = nullptr;
-    if (mono_depth_vgicp_factors_ && backend_params_.vgicp_icp_only_enabled_) {
-      mono_depth_icp_only_result =
-          mono_depth_vgicp_factors_->optimizeIcpOnly(state_);
-      mono_depth_icp_only_result_ptr = &mono_depth_icp_only_result;
-    }
-    MonoDepthMapOutput::ConstPtr mono_depth_map_output =
-        mono_depth_alignment_
-            ? mono_depth_alignment_->process(
-                  state_, W_P_smoother, mono_depth_icp_only_result_ptr)
-            : nullptr;
-    DenseMapOutput::ConstPtr dense_map_output = nullptr;
-    if (dense_map_module_ && mono_depth_map_output &&
-        !mono_depth_map_output->keyframe_cloud.empty()) {
-      auto dense_packet = std::make_shared<DenseMapInputPacket>();
-      dense_packet->keyframe_id = mono_depth_map_output->target_frame_id;
-      dense_packet->timestamp = mono_depth_map_output->target_timestamp;
-      dense_packet->points = Point3VectorConstPtr(
-          mono_depth_map_output, &mono_depth_map_output->keyframe_cloud);
-      dense_packet->colors = RgbaColorVectorConstPtr(
-          mono_depth_map_output, &mono_depth_map_output->keyframe_colors);
-      dense_map_output = dense_map_module_->process(dense_packet);
-    }
-
     // Create Backend Output Payload.
     output_payload = std::make_unique<BackendOutput>(
         VioNavStateTimestamped(
@@ -303,8 +268,8 @@ BackendOutput::UniquePtr VioBackend::spinOnce(const BackendInput& input) {
         lmks_in_local_window_with_stats.num_observations,
         lmks_in_local_window_with_stats.residuals,
         T_W_B_,
-        mono_depth_map_output,
-        dense_map_output);
+        input.status_stereo_measurements_kf_,
+        input.mono_depth_raw_packet_);
 
     if (logger_) {
       logger_->logBackendOutput(*output_payload);
@@ -418,9 +383,6 @@ void VioBackend::refreshMonoDepthWindowAfterOptimization(
   }
   mono_depth_scaled_packet_cache_ = std::move(refreshed_packets);
 
-  if (mono_depth_alignment_) {
-    mono_depth_alignment_->replaceRawPackets(mono_depth_scaled_packet_cache_);
-  }
   if (mono_depth_vgicp_factors_) {
     mono_depth_vgicp_factors_->replaceRawPackets(
         mono_depth_scaled_packet_cache_);
@@ -1382,7 +1344,7 @@ bool VioBackend::optimize(
 
   // Consume the canonical DA3 relative-camera pose directly. This path is
   // intentionally independent of depth confidence, metric scale alignment,
-  // dense-map insertion, and both smoother/isolated ICP modes.
+  // and both smoother/isolated ICP modes.
   if (da3_baseline_ratio_factors_) {
     da3_baseline_ratio_factors_->addFactor(
         mono_depth_raw_packet, state_, new_values_, &new_factors_tmp);
@@ -1393,15 +1355,7 @@ bool VioBackend::optimize(
   }
 
   if (mono_depth_vgicp_factors_) {
-    // The DA3-overlap prototype deliberately consumes the canonical two-view
-    // result before any VIO/landmark scale is applied.  The normal ICP path
-    // continues to receive packets only through the post-smoother aligned
-    // cache.
-    const MonoDepthRawPacket::ConstPtr da3_overlap_packet =
-        backend_params_.vgicp_icp_only_da3_overlap_fusion_
-            ? mono_depth_raw_packet
-            : nullptr;
-    mono_depth_vgicp_factors_->addFactors(da3_overlap_packet,
+    mono_depth_vgicp_factors_->addFactors(nullptr,
                                           state_,
                                           new_values_,
                                           feature_tracks_,

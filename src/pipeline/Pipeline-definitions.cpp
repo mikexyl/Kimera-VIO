@@ -212,25 +212,16 @@ void VioParams::print() const {
   LOG(INFO) << "Mono depth scale alignment method: "
             << monoDepthScaleAlignmentMethodToString(
                    mono_depth_params_.scale_alignment_method);
-  LOG(INFO) << "Mono depth landmark-scale visualization: "
-            << mono_depth_params_.visualize_landmark_scale_alignment;
   LOG(INFO) << "Mono depth DA3 essential factors: "
             << mono_depth_params_.da3_essential_factors_enabled;
   LOG(INFO) << "Mono depth DA3 baseline-ratio factors: "
             << mono_depth_params_.da3_baseline_ratio_factors_enabled;
   LOG(INFO) << "Mono depth DA3 baseline-ratio log sigma: "
             << mono_depth_params_.da3_baseline_ratio_log_sigma;
-  LOG(INFO) << "Mono depth ICP-only DA3 overlap fusion: "
-            << mono_depth_params_.icp_only_da3_overlap_fusion;
   LOG(INFO) << "Mono depth landmark-scale flatness radius [px]: "
             << mono_depth_params_.landmark_scale_flatness_radius;
   LOG(INFO) << "Mono depth landmark-scale maximum relative depth variation: "
             << mono_depth_params_.landmark_scale_max_relative_depth_variation;
-  LOG(INFO) << "Dense map enabled: " << dense_map_params_.enabled;
-  LOG(INFO) << "Dense map backend: "
-            << denseMapBackendToString(dense_map_params_.backend);
-  LOG(INFO) << "Dense map voxel resolution: "
-            << dense_map_params_.voxel_resolution;
   LOG(INFO) << "Frontend Type: " << VIO::to_underlying(frontend_type_);
   LOG(INFO) << "Backend Type: " << VIO::to_underlying(backend_type_);
   LOG(INFO) << "Display Type: " << VIO::to_underlying(display_type_);

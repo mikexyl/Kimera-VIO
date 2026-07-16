@@ -46,12 +46,6 @@ class MonoDepthVGICPFactors {
 
   void notifySmootherUpdateResult(bool update_succeeded);
 
-  /**
-   * Optimize active poses using only the cached mono-depth ICP factors.
-   * The returned poses are diagnostic and never modify the supplied state.
-   */
-  MonoDepthICPOnlyResult optimizeIcpOnly(const gtsam::Values& state);
-
  private:
   struct DenseFrame {
     std::shared_ptr<gtsam_points::PointCloudCPU> cloud;
@@ -71,46 +65,7 @@ class MonoDepthVGICPFactors {
   using FramePair = std::pair<FrameId, FrameId>;
   using PairTrackCounts = std::map<FramePair, std::size_t>;
 
-  struct Da3OverlapViewCloud {
-    FrameId frame_id = 0u;
-    Point3Vector points;
-    RgbaColorVector colors;
-  };
-
-  struct Da3OverlapFusionState {
-    EIGEN_MAKE_ALIGNED_OPERATOR_NEW
-
-    bool initialized = false;
-    FramePair last_pair{0u, 0u};
-    FrameId last_current_frame_id = 0u;
-    MonoDepthRawPacket::ConstPtr last_current_packet;
-    gtsam::Pose3 chain_T_last_current;
-    double last_pair_scale = 1.0;
-    std::size_t pair_count = 0u;
-    std::size_t fused_view_count = 0u;
-    std::size_t component_reset_count = 0u;
-    std::size_t last_overlap_candidate_count = 0u;
-    std::size_t last_overlap_inlier_count = 0u;
-    double last_overlap_log_rmse = 0.0;
-    std::vector<Da3OverlapViewCloud> window_views;
-  };
-
   void cacheRawPacket(const MonoDepthRawPacket::ConstPtr& raw_packet);
-
-  void cacheDa3OverlapPair(const MonoDepthRawPacket::ConstPtr& raw_packet);
-
-  std::size_t appendDa3OverlapView(const MonoDepthRawPacket& packet,
-                                   double scale,
-                                   const gtsam::Pose3& chain_T_cam,
-                                   Point3Vector* points,
-                                   RgbaColorVector* colors) const;
-
-  void pruneDa3OverlapWindow(
-      const std::vector<FrameId>& active_frame_ids);
-
-  std::size_t da3OverlapWindowPointCount() const;
-
-  MonoDepthICPOnlyResult makeDa3OverlapResult() const;
 
   static std::vector<FrameId> collectActivePoseFrameIds(
       const gtsam::Values& state,
@@ -157,8 +112,6 @@ class MonoDepthVGICPFactors {
   std::set<FramePair> accepted_factor_pairs_;
   std::set<FramePair> pending_factor_pairs_;
   std::set<FrameId> changed_frame_ids_;
-  Da3OverlapFusionState da3_overlap_fusion_;
-
   static constexpr std::size_t kRawPacketCacheSize = 256u;
 };
 

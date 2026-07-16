@@ -201,8 +201,6 @@ struct MonoDepthParams {
   double da3_keyframe_covisibility_threshold = 0.5;
   int point_stride = 4;
   int max_points_per_keyframe = 5000;
-  int visualization_point_stride = 4;
-  int visualization_max_points_per_keyframe = 5000;
   double min_depth_m = 0.1;
   double max_depth_m = 30.0;
   bool depth_weighting_enabled = true;
@@ -212,25 +210,17 @@ struct MonoDepthParams {
   double depth_weight_range_ref = 0.0;
   double depth_weight_range_power = 2.0;
   double depth_weight_range_min = 0.05;
-  bool visualize_weights = false;
-  bool visualize_landmark_scale_alignment = false;
   // Experimental five-DoF DA3 camera-motion constraint in the VIO smoother.
   // This consumes only the canonical two-view pose metadata, independently of
-  // depth scaling, confidence filtering, dense mapping, and ICP.
+  // depth scaling, confidence filtering, and ICP.
   bool da3_essential_factors_enabled = false;
   // Experimental scale-free constraint over consecutive DA3 pairs.  The
   // measured baseline ratio comes only from canonical shared-image depth and
   // DA3 translations; it supplies no absolute distance.
   bool da3_baseline_ratio_factors_enabled = false;
   double da3_baseline_ratio_log_sigma = 0.25;
-  // Experimental isolated diagnostic: chain selected DA3 pair reconstructions
-  // through their duplicate middle image. No odometry pose is used by DA3
-  // overlap alignment or fusion; metric odometry is consulted only when the
-  // distance keyframe selector is active.
-  bool icp_only_da3_overlap_fusion = false;
   double min_confidence = 1.1;
   bool visualize_confidence = false;
-  float point_radius = 0.005f;
   bool verbose = false;
   MonoDepthScaleAlignmentMethod scale_alignment_method =
       MonoDepthScaleAlignmentMethod::kNone;
@@ -250,9 +240,6 @@ struct MonoDepthParams {
                rhs.da3_keyframe_covisibility_threshold &&
            point_stride == rhs.point_stride &&
            max_points_per_keyframe == rhs.max_points_per_keyframe &&
-           visualization_point_stride == rhs.visualization_point_stride &&
-           visualization_max_points_per_keyframe ==
-               rhs.visualization_max_points_per_keyframe &&
            min_depth_m == rhs.min_depth_m && max_depth_m == rhs.max_depth_m &&
            depth_weighting_enabled == rhs.depth_weighting_enabled &&
            depth_weight_normal_radius == rhs.depth_weight_normal_radius &&
@@ -261,17 +248,13 @@ struct MonoDepthParams {
            depth_weight_range_ref == rhs.depth_weight_range_ref &&
            depth_weight_range_power == rhs.depth_weight_range_power &&
            depth_weight_range_min == rhs.depth_weight_range_min &&
-           visualize_weights == rhs.visualize_weights &&
-           visualize_landmark_scale_alignment ==
-               rhs.visualize_landmark_scale_alignment &&
            da3_essential_factors_enabled == rhs.da3_essential_factors_enabled &&
            da3_baseline_ratio_factors_enabled ==
                rhs.da3_baseline_ratio_factors_enabled &&
            da3_baseline_ratio_log_sigma == rhs.da3_baseline_ratio_log_sigma &&
-           icp_only_da3_overlap_fusion == rhs.icp_only_da3_overlap_fusion &&
            min_confidence == rhs.min_confidence &&
            visualize_confidence == rhs.visualize_confidence &&
-           point_radius == rhs.point_radius && verbose == rhs.verbose &&
+           verbose == rhs.verbose &&
            scale_alignment_method == rhs.scale_alignment_method &&
            landmark_scale_flatness_radius ==
                rhs.landmark_scale_flatness_radius &&
@@ -330,71 +313,6 @@ struct MonoDepthRawPacket {
   KeypointsCV keypoints;
   LandmarkIds landmark_ids;
   xfeat::MonoDepthMetadata metadata;
-};
-
-// Result of the optional diagnostic pose-only optimization.  This graph is
-// initialized from the VIO smoother poses and contains only mono-depth ICP
-// factors plus one gauge-fixing pose prior per connected component.  Its poses
-// never feed back into the VIO smoother, landmarks, or depth scale alignment.
-struct MonoDepthICPOnlyResult {
-  EIGEN_MAKE_ALIGNED_OPERATOR_NEW
-
-  bool enabled = false;
-  bool solution_available = false;
-  bool valid = false;
-  std::string failure_reason;
-  std::size_t factor_count = 0u;
-  std::size_t pose_count = 0u;
-  std::size_t anchor_count = 0u;
-  std::size_t iterations = 0u;
-  double initial_error = 0.0;
-  double final_error = 0.0;
-  double error_ratio = 1.0;
-  double max_translation_delta_m = 0.0;
-  double max_rotation_delta_deg = 0.0;
-  double optimization_ms = 0.0;
-  std::map<FrameId, gtsam::Pose3> body_poses;
-
-  // Experimental DA3-only alternative carried through the existing isolated
-  // ICP diagnostic path.  It chains consecutive two-view predictions using
-  // their duplicate middle image and never consumes VIO/odometry poses.
-  bool da3_overlap_fusion = false;
-  std::size_t da3_pair_count = 0u;
-  std::size_t da3_fused_view_count = 0u;
-  std::size_t da3_retained_view_count = 0u;
-  std::size_t da3_retained_keyframe_count = 0u;
-  std::size_t da3_component_reset_count = 0u;
-  std::size_t da3_overlap_candidate_count = 0u;
-  std::size_t da3_overlap_inlier_count = 0u;
-  double da3_overlap_log_rmse = 0.0;
-  double da3_last_pair_scale = 1.0;
-  Point3Vector da3_overlap_cloud;
-  RgbaColorVector da3_overlap_colors;
-};
-
-struct MonoDepthMapOutput {
-  KIMERA_POINTER_TYPEDEFS(MonoDepthMapOutput);
-  EIGEN_MAKE_ALIGNED_OPERATOR_NEW
-
-  FrameId target_frame_id = 0u;
-  Timestamp target_timestamp = 0;
-  FrameId selected_scale_alignment_frame_id = 0u;
-  MonoDepthScaleAlignmentResult selected_scale_alignment;
-  cv::Mat landmark_scale_alignment_visualization_bgr;
-  std::map<FrameId, MonoDepthScaleAlignmentResult> scale_alignments;
-  std::size_t valid_scale_alignment_packets = 0u;
-  std::size_t rejected_scale_alignment_packets = 0u;
-  Point3Vector keyframe_cloud;
-  RgbaColorVector keyframe_colors;
-  Point3Vector window_cloud;
-  RgbaColorVector window_colors;
-  RgbaColorVector window_weight_colors;
-  std::size_t window_keyframes = 0u;
-  MonoDepthICPOnlyResult icp_only;
-  Point3Vector icp_only_window_cloud;
-  RgbaColorVector icp_only_window_colors;
-  std::size_t icp_only_window_keyframes = 0u;
-  float point_radius = 0.005f;
 };
 
 }  // namespace VIO

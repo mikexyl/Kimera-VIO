@@ -196,6 +196,13 @@ class Pipeline {
    */
   virtual void spinSequential();
 
+ public:
+  inline void registerBackendOutputCallback(
+      const VioBackendModule::OutputCallback& callback) {
+    CHECK(vio_backend_module_);
+    vio_backend_module_->registerOutputCallback(callback);
+  }
+
  protected:
   //! Initialize random seed for repeatability (only on the same machine).
   //! Still does not make RANSAC repeatable across different machines.
@@ -210,12 +217,6 @@ class Pipeline {
   virtual void signalBackendFailure() {
     VLOG(1) << "Backend failure signal received.";
     is_backend_ok_ = false;
-  }
-
-  inline void registerBackendOutputCallback(
-      const VioBackendModule::OutputCallback& callback) {
-    CHECK(vio_backend_module_);
-    vio_backend_module_->registerOutputCallback(callback);
   }
 
   inline void registerFrontendOutputCallback(

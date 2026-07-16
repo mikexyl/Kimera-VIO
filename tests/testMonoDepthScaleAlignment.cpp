@@ -12,7 +12,6 @@
 #include <stdexcept>
 #include <string>
 
-#include "kimera-vio/backend/MonoDepthAlignment.h"
 #include "kimera-vio/backend/MonoDepthScaleAlignment.h"
 #include "kimera-vio/backend/MonoDepthVGICPFactors.h"
 
@@ -49,7 +48,6 @@ VIO::MonoDepthRawPacket makePacket(const VIO::FrameId frame_id,
   packet.metadata.model_size = packet.weight_image.size();
   return packet;
 }
-
 VIO::MonoDepthParams makeParams(
     const VIO::MonoDepthScaleAlignmentMethod method,
     const VIO::MonoDepthMode mode = VIO::MonoDepthMode::kSingleView) {
@@ -59,8 +57,6 @@ VIO::MonoDepthParams makeParams(
   params.scale_alignment_method = method;
   params.min_depth_m = 0.1;
   params.max_depth_m = 30.0;
-  params.visualization_point_stride = 4;
-  params.visualization_max_points_per_keyframe = 1000;
   return params;
 }
 
@@ -410,76 +406,6 @@ int testLandmarkFlatnessWeightingAndDepthEdgeSuppression() {
   return EXIT_SUCCESS;
 }
 
-int testLandmarkScaleAlignmentVisualization() {
-  VIO::MonoDepthParams params =
-      makeParams(VIO::MonoDepthScaleAlignmentMethod::kLandmarks);
-  params.visualize_landmark_scale_alignment = true;
-  VIO::MonoDepthRawPacket canonical = makePacket(15u, 2.0f);
-  resizePacketImages(&canonical, 240, 320, 2.0f);
-
-  VIO::MonoDepthScaleAlignmentResult result;
-  result.method = VIO::MonoDepthScaleAlignmentMethod::kLandmarks;
-  result.valid = true;
-  result.absolute_scale = 1.0;
-  result.candidate_count = 2u;
-  result.inlier_count = 2u;
-  using Status = VIO::MonoDepthLandmarkScaleSampleStatus;
-  result.landmark_samples = {
-      {600, cv::Point2f(40.0f, 200.0f), 0.0, 1.0, 0.0, Status::kFlatInlier},
-      {601, cv::Point2f(80.0f, 200.0f), 0.1, 0.2, 0.0, Status::kFlatInlier},
-      {602,
-       cv::Point2f(120.0f, 200.0f),
-       0.5,
-       0.0,
-       0.0,
-       Status::kDepthEdgeRejected},
-      {603,
-       cv::Point2f(160.0f, 200.0f),
-       -1.0,
-       0.0,
-       0.0,
-       Status::kFlatnessSupportRejected},
-      {604,
-       cv::Point2f(200.0f, 200.0f),
-       0.0,
-       1.0,
-       2.0,
-       Status::kLogRatioOutlier}};
-  const auto aligned = VIO::applyMonoDepthScaleAlignment(canonical, result);
-
-  VIO::MonoDepthAlignment map_builder(params);
-  map_builder.replaceRawPackets({{canonical.keyframe_id, aligned}});
-  gtsam::Values state;
-  state.insert(gtsam::Symbol(VIO::kPoseSymbolChar, canonical.keyframe_id),
-               gtsam::Pose3());
-  const auto output = map_builder.process(state, gtsam::Pose3());
-  EXPECT_TRUE(
-      output && output->landmark_scale_alignment_visualization_bgr.size() ==
-                    canonical.source_image_bgr.size(),
-      "enabled landmark-scale visualization carries a full image");
-  const cv::Mat& image = output->landmark_scale_alignment_visualization_bgr;
-  EXPECT_TRUE(image.at<cv::Vec3b>(200, 40) == cv::Vec3b(0u, 255u, 0u),
-              "full-weight flat inliers are green");
-  EXPECT_TRUE(image.at<cv::Vec3b>(200, 80) == cv::Vec3b(0u, 255u, 204u),
-              "downweighted flat inliers transition toward yellow");
-  EXPECT_TRUE(image.at<cv::Vec3b>(200, 120) == cv::Vec3b(0u, 0u, 255u),
-              "depth-edge rejections are red");
-  EXPECT_TRUE(image.at<cv::Vec3b>(200, 160) == cv::Vec3b(255u, 255u, 0u),
-              "missing flatness support is cyan");
-  EXPECT_TRUE(image.at<cv::Vec3b>(200, 200) == cv::Vec3b(255u, 0u, 255u),
-              "log-ratio outliers are magenta");
-
-  params.visualize_landmark_scale_alignment = false;
-  VIO::MonoDepthAlignment disabled_map_builder(params);
-  disabled_map_builder.replaceRawPackets({{canonical.keyframe_id, aligned}});
-  const auto disabled_output =
-      disabled_map_builder.process(state, gtsam::Pose3());
-  EXPECT_TRUE(
-      disabled_output &&
-          disabled_output->landmark_scale_alignment_visualization_bgr.empty(),
-      "disabled landmark-scale visualization avoids image generation");
-  return EXIT_SUCCESS;
-}
 
 int testLandmarkFailures() {
   const auto aligner = VIO::makeMonoDepthScaleAligner(
@@ -586,46 +512,6 @@ int testFailClosedAndRecoveryFromCanonicalData() {
   return EXIT_SUCCESS;
 }
 
-int testMapConsumesScaledPacketWithoutSecondMultiplier() {
-  VIO::MonoDepthParams params =
-      makeParams(VIO::MonoDepthScaleAlignmentMethod::kLandmarks);
-  VIO::MonoDepthRawPacket canonical = makePacket(40u, 2.0f);
-  VIO::MonoDepthScaleAlignmentResult result;
-  result.method = VIO::MonoDepthScaleAlignmentMethod::kLandmarks;
-  result.valid = true;
-  result.absolute_scale = 3.0;
-  result.candidate_count = 8u;
-  result.inlier_count = 8u;
-  const auto aligned = VIO::applyMonoDepthScaleAlignment(canonical, result);
-
-  VIO::MonoDepthAlignment map_builder(params);
-  map_builder.replaceRawPackets({{40u, aligned}});
-  gtsam::Values state;
-  state.insert(gtsam::Symbol(VIO::kPoseSymbolChar, 40u), gtsam::Pose3());
-  const auto output = map_builder.process(state, gtsam::Pose3());
-  EXPECT_TRUE(output && !output->window_cloud.empty(),
-              "already-aligned packet produces map points");
-  EXPECT_TRUE(std::abs(output->window_cloud.front().z() - 6.0) < kTolerance,
-              "map backprojection does not apply a second landmark multiplier");
-  EXPECT_TRUE(output->scale_alignments.at(40u).absolute_scale == 3.0,
-              "map output carries the per-keyframe alignment result");
-
-  VIO::MonoDepthScaleAlignmentResult failure = result;
-  failure.valid = false;
-  failure.failure_reason = "synthetic failure";
-  const auto rejected = VIO::applyMonoDepthScaleAlignment(canonical, failure);
-  VIO::MonoDepthAlignment rejected_map_builder(params);
-  rejected_map_builder.replaceRawPackets({{40u, rejected}});
-  const auto rejected_output =
-      rejected_map_builder.process(state, gtsam::Pose3());
-  EXPECT_TRUE(rejected_output && rejected_output->window_cloud.empty(),
-              "alignment failures remain observable without cloud points");
-  EXPECT_TRUE(rejected_output->rejected_scale_alignment_packets == 1u &&
-                  rejected_output->scale_alignments.at(40u).failure_reason ==
-                      "synthetic failure",
-              "map output preserves rejected per-keyframe diagnostics");
-  return EXIT_SUCCESS;
-}
 
 int testVgicpReplacesAcceptedPairsAfterRefresh() {
   VIO::BackendParams backend_params;
@@ -762,243 +648,7 @@ int testVgicpReplacesAcceptedPairsAfterRefresh() {
   return EXIT_SUCCESS;
 }
 
-int testIcpOnlyOptimizationIsIsolatedAndCorrectsPose() {
-  VIO::BackendParams backend_params;
-  backend_params.vgicp_factors_enabled_ = true;
-  backend_params.vgicp_icp_only_enabled_ = true;
-  backend_params.vgicp_icp_only_max_iterations_ = 50;
-  backend_params.vgicp_use_weighted_icp_factor_ = false;
-  backend_params.vgicp_min_shared_tracks_ = 1;
-  backend_params.vgicp_max_edges_per_keyframe_ = 1;
-  backend_params.vgicp_downsample_resolution_ = 0.05;
-  backend_params.vgicp_voxel_resolution_ = 1.0;
-  backend_params.vgicp_covariance_neighbors_ = 5;
-  backend_params.vgicp_num_threads_ = 1;
-  backend_params.vgicp_min_points_per_keyframe_ = 1;
-  backend_params.vgicp_max_correspondence_distance_ = 5.0;
-  backend_params.vgicp_factor_weight_ = 1.0;
 
-  VIO::MonoDepthParams mono_depth_params =
-      makeParams(VIO::MonoDepthScaleAlignmentMethod::kNone);
-  mono_depth_params.point_stride = 1;
-  mono_depth_params.max_points_per_keyframe = 1000;
-
-  VIO::MonoDepthScaleAlignmentResult identity;
-  identity.method = VIO::MonoDepthScaleAlignmentMethod::kNone;
-  identity.valid = true;
-  identity.absolute_scale = 1.0;
-  const auto target =
-      VIO::applyMonoDepthScaleAlignment(makePacket(60u), identity);
-  const auto source =
-      VIO::applyMonoDepthScaleAlignment(makePacket(61u), identity);
-
-  VIO::MonoDepthVGICPFactors vgicp(backend_params, mono_depth_params);
-  vgicp.replaceRawPackets({{60u, target}, {61u, source}});
-  gtsam::Values state;
-  const gtsam::Symbol target_key(VIO::kPoseSymbolChar, 60u);
-  const gtsam::Symbol source_key(VIO::kPoseSymbolChar, 61u);
-  state.insert(target_key, gtsam::Pose3());
-  state.insert(source_key,
-               gtsam::Pose3(gtsam::Rot3(), gtsam::Point3(0.0, 0.0, 0.25)));
-  VIO::FeatureTracks tracks;
-  VIO::FeatureTrack track(60u, gtsam::StereoPoint2(1.0, 1.0, 1.0));
-  track.obs_.emplace_back(61u, gtsam::StereoPoint2(1.0, 1.0, 1.0), -1.0);
-  tracks.emplace(1, std::move(track));
-
-  gtsam::FactorIndices delete_slots;
-  gtsam::NonlinearFactorGraph smoother_factors;
-  vgicp.addFactors(nullptr,
-                   state,
-                   gtsam::Values(),
-                   tracks,
-                   gtsam::NonlinearFactorGraph(),
-                   &delete_slots,
-                   &smoother_factors);
-  EXPECT_TRUE(delete_slots.empty() && smoother_factors.empty(),
-              "ICP-only mode does not modify the VIO factor graph");
-  vgicp.notifySmootherUpdateResult(true);
-
-  const VIO::MonoDepthICPOnlyResult result = vgicp.optimizeIcpOnly(state);
-  EXPECT_TRUE(result.enabled && result.solution_available && result.valid,
-              "the isolated VGICP graph optimizes successfully");
-  EXPECT_TRUE(result.factor_count == 1u && result.pose_count == 2u &&
-                  result.anchor_count == 1u,
-              "the isolated graph contains one pair and one gauge anchor");
-  EXPECT_TRUE(result.final_error < result.initial_error,
-              "the isolated VGICP objective decreases");
-  EXPECT_TRUE(result.body_poses.at(target_key.index())
-                      .translation()
-                      .norm() < 1e-5,
-              "the oldest target pose remains fixed as the gauge anchor");
-  EXPECT_TRUE(std::abs(result.body_poses.at(source_key.index())
-                           .translation()
-                           .z()) < 0.1,
-              "target_T_source moves toward identity for identical clouds");
-  EXPECT_TRUE(result.max_translation_delta_m > 0.1,
-              "the diagnostic reports the ICP pose correction");
-  EXPECT_TRUE(std::abs(state.at<gtsam::Pose3>(source_key).translation().z() -
-                       0.25) < kTolerance,
-              "the isolated optimization never mutates the VIO state");
-
-  VIO::MonoDepthAlignment map_builder(mono_depth_params);
-  map_builder.replaceRawPackets({{60u, target}, {61u, source}});
-  const auto output = map_builder.process(state, gtsam::Pose3(), &result);
-  EXPECT_TRUE(output && !output->icp_only_window_cloud.empty() &&
-                  output->icp_only_window_keyframes == 2u,
-              "map output carries a separately transformed ICP-only cloud");
-  return EXIT_SUCCESS;
-}
-
-VIO::MonoDepthRawPacket::ConstPtr makeDa3PairPacket(
-    const VIO::FrameId context_id,
-    const VIO::FrameId current_id,
-    const float context_depth,
-    const float current_depth,
-    const gtsam::Pose3& context_T_current) {
-  auto context = std::make_shared<VIO::MonoDepthRawPacket>(
-      makePacket(context_id, context_depth));
-  context->metadata.view_index = 0;
-  context->metadata.view_count = 2;
-  auto current = std::make_shared<VIO::MonoDepthRawPacket>(
-      makePacket(current_id, current_depth));
-  current->metadata.view_index = 1;
-  current->metadata.view_count = 2;
-  current->da3_context_keyframe_id = context_id;
-  current->da3_context_cam_T_current_cam = context_T_current;
-  current->da3_context_packet = context;
-  return current;
-}
-
-int testDa3OverlapFusionChainsWithoutIcpOrVioPoses() {
-  VIO::BackendParams backend_params;
-  backend_params.vgicp_factors_enabled_ = true;
-  backend_params.vgicp_icp_only_enabled_ = true;
-  backend_params.vgicp_icp_only_da3_overlap_fusion_ = true;
-  backend_params.vgicp_downsample_resolution_ = 0.1;
-  backend_params.vgicp_voxel_resolution_ = 0.1;
-  backend_params.vgicp_covariance_neighbors_ = 5;
-  backend_params.vgicp_num_threads_ = 1;
-  backend_params.vgicp_max_correspondence_distance_ = 1.0;
-  backend_params.vgicp_factor_weight_ = 1.0;
-
-  VIO::MonoDepthParams mono_depth_params =
-      makeParams(VIO::MonoDepthScaleAlignmentMethod::kNone,
-                 VIO::MonoDepthMode::kMultiView);
-  mono_depth_params.icp_only_da3_overlap_fusion = true;
-  mono_depth_params.visualization_point_stride = 1;
-  mono_depth_params.visualization_max_points_per_keyframe = 1000;
-
-  // Pair [0, 1] predicts the shared image at depth 4. Pair [1, 2]
-  // predicts that exact image at depth 2, so the second pair must be scaled
-  // by two. Its unit DA3 translation must be scaled by the same factor.
-  const auto first_pair = makeDa3PairPacket(
-      0u,
-      1u,
-      2.0f,
-      4.0f,
-      gtsam::Pose3(gtsam::Rot3(), gtsam::Point3(1.0, 0.0, 0.0)));
-  const auto second_pair = makeDa3PairPacket(
-      1u,
-      2u,
-      2.0f,
-      3.0f,
-      gtsam::Pose3(gtsam::Rot3(), gtsam::Point3(1.0, 0.0, 0.0)));
-
-  VIO::MonoDepthVGICPFactors fusion(backend_params, mono_depth_params);
-  gtsam::FactorIndices delete_slots;
-  gtsam::NonlinearFactorGraph smoother_factors;
-  const gtsam::Values empty_state;
-  const VIO::FeatureTracks no_tracks;
-  fusion.addFactors(first_pair,
-                    empty_state,
-                    empty_state,
-                    no_tracks,
-                    gtsam::NonlinearFactorGraph(),
-                    &delete_slots,
-                    &smoother_factors);
-  fusion.addFactors(second_pair,
-                    empty_state,
-                    empty_state,
-                    no_tracks,
-                    gtsam::NonlinearFactorGraph(),
-                    &delete_slots,
-                    &smoother_factors);
-  EXPECT_TRUE(delete_slots.empty() && smoother_factors.empty(),
-              "DA3 overlap fusion constructs zero ICP factors");
-
-  const VIO::MonoDepthICPOnlyResult result =
-      fusion.optimizeIcpOnly(empty_state);
-  EXPECT_TRUE(result.enabled && result.da3_overlap_fusion && result.valid &&
-                  result.solution_available,
-              "DA3 overlap fusion works without any VIO pose values");
-  EXPECT_TRUE(result.factor_count == 0u && result.iterations == 0u &&
-                  result.body_poses.empty(),
-              "the DA3 overlap prototype performs no ICP optimization");
-  EXPECT_TRUE(result.da3_pair_count == 2u &&
-                  result.da3_fused_view_count == 4u &&
-                  result.da3_retained_view_count == 4u &&
-                  result.da3_retained_keyframe_count == 3u &&
-                  result.da3_component_reset_count == 0u,
-              "two consecutive DA3 pairs grow one four-view component");
-  EXPECT_TRUE(std::abs(result.da3_last_pair_scale - 2.0) < kTolerance &&
-                  result.da3_overlap_candidate_count == 320u &&
-                  result.da3_overlap_inlier_count == 320u &&
-                  result.da3_overlap_log_rmse < kTolerance,
-              "the duplicate middle image recovers the exact pair scale");
-  EXPECT_TRUE(result.da3_overlap_cloud.size() == 1280u &&
-                  result.da3_overlap_colors.size() == 1280u,
-              "both views from both DA3 pairs are concatenated");
-
-  // The two predictions of keyframe 1 occupy the same chained camera frame
-  // and have the same scaled depth, so their sampled clouds coincide exactly.
-  for (std::size_t i = 0u; i < 320u; ++i) {
-    EXPECT_TRUE((result.da3_overlap_cloud[320u + i] -
-                 result.da3_overlap_cloud[640u + i])
-                        .norm() < kTolerance,
-                "the duplicate middle-keyframe clouds align after rescaling");
-  }
-
-  VIO::MonoDepthAlignment map_builder(mono_depth_params);
-  map_builder.replaceRawPackets({{1u, first_pair}, {2u, second_pair}});
-  gtsam::Values deliberately_wrong_vio_state;
-  deliberately_wrong_vio_state.insert(
-      gtsam::Symbol(VIO::kPoseSymbolChar, 1u),
-      gtsam::Pose3(gtsam::Rot3(), gtsam::Point3(100.0, 0.0, 0.0)));
-  deliberately_wrong_vio_state.insert(
-      gtsam::Symbol(VIO::kPoseSymbolChar, 2u),
-      gtsam::Pose3(gtsam::Rot3(), gtsam::Point3(200.0, 0.0, 0.0)));
-  const auto output = map_builder.process(
-      deliberately_wrong_vio_state,
-      gtsam::Pose3(gtsam::Rot3(), gtsam::Point3(300.0, 0.0, 0.0)),
-      &result);
-  EXPECT_TRUE(
-      output && output->icp_only_window_cloud == result.da3_overlap_cloud,
-      "map output forwards DA3-chain coordinates without a VIO pose");
-
-  // Active pose keys are used only as a membership mask. Their values do not
-  // transform the DA3-only cloud. Once keyframe 0 leaves the smoother window,
-  // only its one view contribution is evicted; both predictions of the active
-  // duplicate keyframe 1 remain.
-  gtsam::Values active_window;
-  active_window.insert(
-      gtsam::Symbol(VIO::kPoseSymbolChar, 1u),
-      gtsam::Pose3(gtsam::Rot3(), gtsam::Point3(1000.0, 0.0, 0.0)));
-  active_window.insert(
-      gtsam::Symbol(VIO::kPoseSymbolChar, 2u),
-      gtsam::Pose3(gtsam::Rot3(), gtsam::Point3(2000.0, 0.0, 0.0)));
-  const VIO::MonoDepthICPOnlyResult windowed_result =
-      fusion.optimizeIcpOnly(active_window);
-  EXPECT_TRUE(windowed_result.da3_pair_count == 2u &&
-                  windowed_result.da3_fused_view_count == 4u &&
-                  windowed_result.da3_retained_view_count == 3u &&
-                  windowed_result.da3_retained_keyframe_count == 2u,
-              "DA3 diagnostics distinguish cumulative fusion from retained "
-              "window views");
-  EXPECT_TRUE(windowed_result.da3_overlap_cloud.size() == 960u &&
-                  windowed_result.da3_overlap_colors.size() == 960u,
-              "DA3 output evicts point clouds outside the smoother window");
-  return EXIT_SUCCESS;
-}
 
 }  // namespace
 
@@ -1012,13 +662,9 @@ int main(int argc, char** argv) {
   status |= testRelativePoseAlignment();
   status |= testIndependentLandmarkScalesAndOutliers();
   status |= testLandmarkFlatnessWeightingAndDepthEdgeSuppression();
-  status |= testLandmarkScaleAlignmentVisualization();
   status |= testLandmarkFailures();
   status |= testFailClosedAndRecoveryFromCanonicalData();
-  status |= testMapConsumesScaledPacketWithoutSecondMultiplier();
   status |= testVgicpReplacesAcceptedPairsAfterRefresh();
-  status |= testIcpOnlyOptimizationIsIsolatedAndCorrectsPose();
-  status |= testDa3OverlapFusionChainsWithoutIcpOrVioPoses();
   if (status == EXIT_SUCCESS) {
     std::cout << "All mono-depth scale alignment tests PASSED.\n";
   }

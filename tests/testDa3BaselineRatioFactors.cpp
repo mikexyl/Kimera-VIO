@@ -155,8 +155,8 @@ int testCanonicalSupportIgnoresConfidenceAndOtherFactorModes() {
   low_confidence_context->valid_mask.release();
   second->da3_context_packet = low_confidence_context;
 
-  // This manager has no essential-factor, VGICP, ICP-only, scale-alignment,
-  // or dense-map dependency. Canonical depth_support_mask alone gates overlap.
+  // This manager has no essential-factor, VGICP, or scale-alignment
+  // dependency. Canonical depth_support_mask alone gates overlap.
   VIO::Da3BaselineRatioFactors factors(true, 0.25, 1);
   gtsam::NonlinearFactorGraph graph;
   factors.addFactor(first, fixture.firstMiddleState(), gtsam::Values(), &graph);

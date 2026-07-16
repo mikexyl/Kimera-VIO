@@ -53,8 +53,6 @@
 
 #include "kimera-vio/backend/Da3BaselineRatioFactors.h"
 #include "kimera-vio/backend/Da3EssentialMatrixFactors.h"
-#include "kimera-vio/backend/DenseMap.h"
-#include "kimera-vio/backend/MonoDepthAlignment.h"
 #include "kimera-vio/backend/MonoDepthScaleAlignment.h"
 #include "kimera-vio/backend/MonoDepthVGICPFactors.h"
 #include "kimera-vio/backend/VioBackend-definitions.h"
@@ -99,7 +97,6 @@ class VioBackend {
              const ImuParams& imu_params,
              const BackendOutputParams& backend_output_params,
              const MonoDepthParams& mono_depth_params,
-             const DenseMapParams& dense_map_params,
              bool log_output,
              std::optional<OdometryParams> odom_params = std::nullopt);
   virtual ~VioBackend() { LOG(INFO) << "Backend destructor called."; }
@@ -519,7 +516,6 @@ class VioBackend {
   const ImuParams imu_params_;
   const BackendOutputParams backend_output_params_;
   const MonoDepthParams mono_depth_params_;
-  const DenseMapParams dense_map_params_;
   std::optional<OdometryParams> odom_params_;
 
   std::deque<TrackingStatus> tracking_statuses_;
@@ -617,8 +613,6 @@ class VioBackend {
   std::unique_ptr<Da3BaselineRatioFactors> da3_baseline_ratio_factors_;
   std::unique_ptr<Da3EssentialMatrixFactors> da3_essential_matrix_factors_;
   MonoDepthScaleAligner::UniquePtr mono_depth_scale_aligner_;
-  MonoDepthAlignment::UniquePtr mono_depth_alignment_;
-  DenseMapModule::UniquePtr dense_map_module_;
   MonoDepthVGICPFactors::UniquePtr mono_depth_vgicp_factors_;
   std::map<FrameId, MonoDepthRawPacket::ConstPtr>
       mono_depth_canonical_packet_cache_;

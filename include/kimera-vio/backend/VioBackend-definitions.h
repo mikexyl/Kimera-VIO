@@ -26,7 +26,6 @@
 
 #include <vector>
 
-#include "kimera-vio/common/DenseMapTypes.h"
 #include "kimera-vio/common/MonoDepthTypes.h"
 #include "kimera-vio/common/VioNavState.h"
 #include "kimera-vio/common/vio_types.h"
@@ -335,10 +334,9 @@ struct BackendOutput : public PipelinePayload {
                 const LmkIdToNumObsMap& lmk_num_observations = {},
                 const LmkIdToResidualMap& lmk_smart_factor_residuals = {},
                 const Matrix3& B_Rot_W = Matrix3::Identity(),
-                const MonoDepthMapOutput::ConstPtr& mono_depth_map_output =
+                const StatusStereoMeasurementsPtr& keyframe_measurements =
                     nullptr,
-                const DenseMapOutput::ConstPtr& dense_map_output =
-                    nullptr)
+                const MonoDepthRawPacket::ConstPtr& da3_packet = nullptr)
       : PipelinePayload(timestamp_kf),
         W_State_Blkf_(timestamp_kf, W_Pose_Blkf, W_Vel_Blkf, imu_bias_lkf),
         state_(state),
@@ -354,8 +352,8 @@ struct BackendOutput : public PipelinePayload {
         lmk_num_observations_(lmk_num_observations),
         lmk_smart_factor_residuals_(lmk_smart_factor_residuals),
         T_W_B_(B_Rot_W),
-        mono_depth_map_output_(mono_depth_map_output),
-        dense_map_output_(dense_map_output) {}
+        keyframe_measurements_(keyframe_measurements),
+        da3_packet_(da3_packet) {}
 
   BackendOutput(const VioNavStateTimestamped& vio_navstate_timestamped,
                 const gtsam::Values& state,
@@ -371,10 +369,9 @@ struct BackendOutput : public PipelinePayload {
                 const LmkIdToNumObsMap& lmk_num_observations = {},
                 const LmkIdToResidualMap& lmk_smart_factor_residuals = {},
                 const gtsam::Pose3& T_W_B = gtsam::Pose3(),
-                const MonoDepthMapOutput::ConstPtr& mono_depth_map_output =
+                const StatusStereoMeasurementsPtr& keyframe_measurements =
                     nullptr,
-                const DenseMapOutput::ConstPtr& dense_map_output =
-                    nullptr)
+                const MonoDepthRawPacket::ConstPtr& da3_packet = nullptr)
       : PipelinePayload(vio_navstate_timestamped.timestamp_),
         W_State_Blkf_(vio_navstate_timestamped),
         state_(state),
@@ -390,8 +387,8 @@ struct BackendOutput : public PipelinePayload {
         lmk_num_observations_(lmk_num_observations),
         lmk_smart_factor_residuals_(lmk_smart_factor_residuals),
         T_W_B_(T_W_B),
-        mono_depth_map_output_(mono_depth_map_output),
-        dense_map_output_(dense_map_output) {}
+        keyframe_measurements_(keyframe_measurements),
+        da3_packet_(da3_packet) {}
 
   const VioNavStateTimestamped W_State_Blkf_;
   const gtsam::Values state_;
@@ -408,8 +405,8 @@ struct BackendOutput : public PipelinePayload {
   const LmkIdToResidualMap lmk_smart_factor_residuals_;
   const gtsam::Pose3
       T_W_B_;  //!< Rotation from world to body frame at last keyframe.
-  MonoDepthMapOutput::ConstPtr mono_depth_map_output_;
-  DenseMapOutput::ConstPtr dense_map_output_;
+  const StatusStereoMeasurementsPtr keyframe_measurements_;
+  const MonoDepthRawPacket::ConstPtr da3_packet_;
 };
 
 ////////////////////////////////////////////////////////////////////////////////

@@ -156,13 +156,6 @@ class BackendParams : public PipelineParams {
 
   //! Dense mono-depth VGICP factors.
   bool vgicp_factors_enabled_ = false;
-  //! Keep ICP out of the VIO smoother and optimize a diagnostic pose graph.
-  bool vgicp_icp_only_enabled_ = false;
-  //! Replace the isolated ICP optimizer with DA3 consecutive-pair overlap
-  //! fusion. This prototype adds no ICP factors and uses no VIO poses for
-  //! alignment or fusion; frontend odometry only gates keyframe selection.
-  bool vgicp_icp_only_da3_overlap_fusion_ = false;
-  int vgicp_icp_only_max_iterations_ = 30;
   bool vgicp_use_weighted_icp_factor_ = true;
   int vgicp_min_shared_tracks_ = 30;
   int vgicp_max_edges_per_keyframe_ = 6;
