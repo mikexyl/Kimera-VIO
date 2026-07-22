@@ -66,6 +66,7 @@ Tracker::Tracker(const TrackerParams& tracker_params,
       optical_flow_predictor_(nullptr),
       display_queue_(display_queue),
       output_images_path_("./outputImages/") {
+  (void)env;
   // Create the optical flow prediction module
   optical_flow_predictor_ =
       OpticalFlowPredictorFactory::makeOpticalFlowPredictor(
@@ -159,12 +160,11 @@ Tracker::Tracker(const TrackerParams& tracker_params,
       break;
     }
     case TrackerParams::TrackerType::LIGHTERGLUE: {
-      LighterGlueCV::Params lg_params;
+      LighterGlueTRT::Params lg_params;
       lg_params.min_score = tracker_params_.gpu_bf_min_sim_;
       lg_params.model_path = tracker_params_.lighterglue_model_path_;
       lg_params.n_kpts = tracker_params_.num_features_;
-      lg_params.use_gpu = true;
-      feature_tracker_ = std::make_shared<LighterGlueCV>(*env, lg_params);
+      feature_tracker_ = std::make_shared<LighterGlueTRT>(lg_params);
       break;
     }
     case TrackerParams::TrackerType::VILIB: {

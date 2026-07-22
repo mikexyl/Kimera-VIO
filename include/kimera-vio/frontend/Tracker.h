@@ -16,6 +16,8 @@
 // TODO(Toni): put tracker in another folder.
 #pragma once
 
+#include <onnxruntime_cxx_api.h>
+
 #include <gtsam/base/Matrix.h>
 #include <gtsam/geometry/Pose3.h>
 #include <gtsam/geometry/Rot3.h>
@@ -30,7 +32,7 @@
 #include "kimera-vio/frontend/StereoFrame.h"
 #include "kimera-vio/frontend/Tracker-definitions.h"
 #include "kimera-vio/frontend/VisionImuTrackerParams.h"
-#include "kimera-vio/frontend/feature-tracker/LighterGlueCV.h"
+#include "kimera-vio/frontend/feature-tracker/LighterGlueTRT.h"
 #include "kimera-vio/frontend/feature-tracker/OpticalFlowCV.h"
 #include "kimera-vio/frontend/optical-flow/OpticalFlowPredictor.h"
 #include "kimera-vio/utils/Macros.h"

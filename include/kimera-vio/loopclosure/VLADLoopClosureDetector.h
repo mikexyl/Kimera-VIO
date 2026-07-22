@@ -7,11 +7,11 @@
 
 #include <cuda_runtime.h>
 #include <xfeat-cpp/faiss_database.h>
+#include <xfeat-cpp/lighterglue_trt.h>
 #include <xfeat-cpp/place_recognition/jist_onnx.h>
 #include <xfeat-cpp/place_recognition/mixvpr_onnx.h>
 #include <xfeat-cpp/place_recognition/patchnetvlad_onnx.h>
 #include <xfeat-cpp/place_recognition/place_recognizer.h>
-#include <xfeat-cpp/xfeat_cv.h>
 
 #include "kimera-vio/frontend/RgbdCamera.h"
 #include "kimera-vio/frontend/RgbdFrame.h"
@@ -309,7 +309,7 @@ class VLADLoopClosureDetector : public LoopClosureDetectorBase {
 
   LoopClosureDetectorParams lcd_params_;
 
-  cv::Ptr<xfeat::LighterGlueCV> feature_matcher_;
+  std::unique_ptr<xfeat::LighterGlueTRT> feature_matcher_;
 
   StereoCamera::ConstPtr stereo_camera_;
   StereoMatchingParams stereo_matching_params_;

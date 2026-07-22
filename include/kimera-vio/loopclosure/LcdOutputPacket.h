@@ -59,6 +59,7 @@ struct LcdOutput : PipelinePayload {
   void setFrameInformation(const KeypointsCV& keypoints_2d,
                            const Landmarks& keypoints_3d,
                            const BearingVectors& versors,
+                           const LandmarkIds& landmark_ids,
                            const std::map<int, double>& bow_vec,
                            const cv::Mat& descriptors_mat);
 
@@ -84,6 +85,7 @@ struct LcdOutput : PipelinePayload {
   KeypointsCV keypoints_2d_;
   Landmarks keypoints_3d_;
   BearingVectors versors_;
+  LandmarkIds landmark_ids_;
   std::map<int, double> bow_vec_;
   cv::Mat descriptors_mat_;
   FrameIDTimestampMap timestamp_map_;

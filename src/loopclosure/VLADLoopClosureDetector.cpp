@@ -89,14 +89,10 @@ VLADLoopClosureDetector::VLADLoopClosureDetector(
     VLOG(5) << "LoopClosureDetector initializing in mono mode.";
   }
 
-  feature_matcher_ = xfeat::LighterGlueCV::create(
-      env,
-      xfeat::LighterGlueCV::Params{
-          .model_path = lcd_params_.lcd_lg_model_path_,
-          .use_gpu = true,
-          .min_score = -1,
-          .n_kpts = lcd_params_.lcd_lg_num_features_,
-      });
+  feature_matcher_ = std::make_unique<xfeat::LighterGlueTRT>(
+      lcd_params_.lcd_lg_model_path_);
+  LOG(INFO) << "Using native TensorRT LighterGlue for loop verification: "
+            << lcd_params_.lcd_lg_model_path_;
 
   // Build VPR model selected by vpr_model_type_
   std::unique_ptr<xfeat::PlaceRecognizer> vpr_model;
@@ -481,6 +477,7 @@ LcdOutput::UniquePtr VLADLoopClosureDetector::makeOutputPayload(
 
   auto filtered_keypoints = grid_frame->getKeypoints();
   auto filtered_landmarks = grid_frame->getLandmarks();
+  auto filtered_landmark_ids = grid_frame->getLandmarkIds();
   auto filtered_descriptors_mat = grid_frame->getDescriptors();
   auto filtered_bearing_vectors = grid_frame->getBearingVectors();
 
@@ -507,6 +504,7 @@ LcdOutput::UniquePtr VLADLoopClosureDetector::makeOutputPayload(
 
   CHECK_EQ(filtered_keypoints.size(), filtered_landmarks.size());
   CHECK_EQ(filtered_landmarks.size(), filtered_bearing_vectors.size());
+  CHECK_EQ(filtered_bearing_vectors.size(), filtered_landmark_ids.size());
 
   std::map<int, double> bow_vec{};
   if (curr_frame->descriptors_vec_.size() and
@@ -565,6 +563,7 @@ LcdOutput::UniquePtr VLADLoopClosureDetector::makeOutputPayload(
     output_payload->setFrameInformation(keypoints_2d,
                                         filtered_landmarks,
                                         filtered_bearing_vectors,
+                                        filtered_landmark_ids,
                                         bow_vec,
                                         filtered_descriptors_mat);
     output_payload->landmarks_ = landmark_manager_->getLandmarks();
@@ -1385,8 +1384,6 @@ void VLADLoopClosureDetector::computeDescriptorMatches(
   matches_match_query->clear();
   std::vector<cv::DMatch> matches;
 
-  cv::Size image_size0 = feature_matcher_->params_.image_size;
-
   cv::Mat ref_kp_mat(ref.keypoints_.size(), 2, CV_32F);
   for (size_t i = 0; i < ref.keypoints_.size(); ++i) {
     ref_kp_mat.at<float>(i, 0) = ref.keypoints_[i].pt.x;
@@ -1418,7 +1415,30 @@ void VLADLoopClosureDetector::computeDescriptorMatches(
     cur_ret.scores.at<float>(i, 0) = 1.0f;
   }
 
-  feature_matcher_->match(cur_ret, image_size0, ref_ret, image_size0, matches);
+  CHECK(!curr.image_.empty());
+  CHECK(!ref.image_.empty());
+  const std::array<float, 2> current_image_size = {
+      static_cast<float>(curr.image_.cols),
+      static_cast<float>(curr.image_.rows)};
+  const std::array<float, 2> reference_image_size = {
+      static_cast<float>(ref.image_.cols),
+      static_cast<float>(ref.image_.rows)};
+  std::vector<float> match_scores;
+  const auto match_indices = feature_matcher_->match(cur_ret,
+                                                     current_image_size,
+                                                     ref_ret,
+                                                     reference_image_size,
+                                                     -1.0f,
+                                                     &match_scores);
+  for (size_t query_index = 0; query_index < match_indices.size();
+       ++query_index) {
+    for (const int train_index : match_indices.at(query_index)) {
+      matches.emplace_back(static_cast<int>(query_index),
+                           train_index,
+                           0,
+                           match_scores.at(query_index));
+    }
+  }
 
   if (matches.size() <
       static_cast<size_t>(lcd_params_.lcd_min_matched_features_)) {

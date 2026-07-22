@@ -6,9 +6,10 @@
 
 #include "kimera-vio/frontend/feature-detector/FeatureDetector.h"
 
-#include <xfeat-cpp/xfeat_cv.h>
+#include <xfeat-cpp/xfeat_trt.h>
 
 #include <algorithm>
+#include <limits>
 #include <numeric>
 
 #include "kimera-vio/frontend/UndistorterRectifier.h"
@@ -25,7 +26,9 @@ FeatureDetector::FeatureDetector(
     std::shared_ptr<Ort::Env> env)
     : feature_detector_params_(feature_detector_params),
       non_max_suppression_(nullptr),
-      feature_detector_() {
+      feature_detector_(),
+      xfeat_detector_(nullptr) {
+  (void)env;
   // TODO(Toni): parametrize as well whether we use bucketing or anms...
   // Right now we assume we want anms not bucketing...
   if (feature_detector_params.enable_non_max_suppression_) {
@@ -87,45 +90,29 @@ FeatureDetector::FeatureDetector(
       break;
     }
     case FeatureDetectorType::XFEAT: {
-      xfeat::XFeatCV::Params xfeat_params;
-      xfeat_params.max_features =
-          feature_detector_params_.max_features_per_frame_;
-      xfeat_params.xfeat_path = feature_detector_params_.xfeat_path_;
-      xfeat_params.interp_bicubic_path =
-          feature_detector_params_.interp_bicubic_path_;
-      xfeat_params.interp_bilinear_path =
-          feature_detector_params_.interp_bilinear_path_;
-      xfeat_params.interp_nearest_path =
-          feature_detector_params_.interp_nearest_path_;
-      xfeat_params.use_gpu = feature_detector_params_.xfeat_use_gpu_;
+      xfeat::XFeatTRT::Params xfeat_params;
+      xfeat_params.engine_path = feature_detector_params_.xfeat_path_;
+      xfeat_params.nkpts = feature_detector_params_.max_features_per_frame_;
       xfeat_params.anms = feature_detector_params_.enable_non_max_suppression_;
       xfeat_params.nkpts_before_anms =
           feature_detector_params_.max_nr_keypoints_before_anms_;
       xfeat_params.keypoint_detection = 0;  // Use xfeat to detect keypoints
-
-      auto xfeat = xfeat::XFeatCV::create(*env, xfeat_params);
-      feature_detector_ = xfeat;
+      xfeat_detector_ = std::make_unique<xfeat::XFeatTRT>(xfeat_params);
+      LOG(INFO) << "Using native TensorRT XFeat detector: "
+                << xfeat_params.engine_path;
       break;
     }
     case FeatureDetectorType::GFTT_XFEAT: {
-      xfeat::XFeatCV::Params xfeat_params;
-      xfeat_params.max_features =
-          feature_detector_params_.max_features_per_frame_;
-      xfeat_params.xfeat_path = feature_detector_params_.xfeat_path_;
-      xfeat_params.interp_bicubic_path =
-          feature_detector_params_.interp_bicubic_path_;
-      xfeat_params.interp_bilinear_path =
-          feature_detector_params_.interp_bilinear_path_;
-      xfeat_params.interp_nearest_path =
-          feature_detector_params_.interp_nearest_path_;
-      xfeat_params.use_gpu = feature_detector_params_.xfeat_use_gpu_;
+      xfeat::XFeatTRT::Params xfeat_params;
+      xfeat_params.engine_path = feature_detector_params_.xfeat_path_;
+      xfeat_params.nkpts = feature_detector_params_.max_features_per_frame_;
       xfeat_params.anms = feature_detector_params_.enable_non_max_suppression_;
       xfeat_params.nkpts_before_anms =
           feature_detector_params_.max_nr_keypoints_before_anms_;
       xfeat_params.keypoint_detection = 1;  // Use GFTT to detect keypoints
-
-      auto xfeat = xfeat::XFeatCV::create(*env, xfeat_params);
-      feature_detector_ = xfeat;
+      xfeat_detector_ = std::make_unique<xfeat::XFeatTRT>(xfeat_params);
+      LOG(INFO) << "Using GFTT with native TensorRT XFeat descriptors: "
+                << xfeat_params.engine_path;
       break;
     }
     default: {
@@ -282,10 +269,7 @@ KeypointsCV FeatureDetector::featureDetection(Frame* cur_frame,
   }
   if (feature_detector_params_.feature_detector_type_ >=
       FeatureDetectorType::XFEAT) {
-    // when using xfeat, we detect features and compute descriptors
-    auto xfeat_detector =
-        std::dynamic_pointer_cast<xfeat::XFeatCV>(feature_detector_);
-    CHECK_NOTNULL(xfeat_detector);
+    CHECK_NOTNULL(xfeat_detector_.get());
     std::vector<cv::Vec2d> keypoint_stds;
 
     CHECK(!cur_frame->of_keypoints_.empty())
@@ -300,19 +284,40 @@ KeypointsCV FeatureDetector::featureDetection(Frame* cur_frame,
       VLOG(1) << input_kpts[0].pt;
     }
 
-    std::vector<double> xfeat_scores;
-
-    xfeat_detector->detectAndCompute(
+    const xfeat::DetectionResult result = xfeat_detector_->detect_and_compute(
         cur_frame->img_,
-        {},
-        keypoints,
-        cur_frame->descriptors_,
-        feature_detector_params_.xfeat_use_of_points_,
+        feature_detector_params_.max_features_per_frame_,
+        nullptr,
         &cur_frame->xfeat_M1_,
         &cur_frame->xfeat_x_prep_,
-        //  &keypoint_stds,
         nullptr,
-        &xfeat_scores);
+        feature_detector_params_.xfeat_use_of_points_ ? keypoints
+                                                      : std::vector<cv::KeyPoint>{},
+        mask);
+
+    keypoints.clear();
+    keypoints.reserve(result.keypoints.rows);
+    for (int row = 0; row < result.keypoints.rows; ++row) {
+      keypoints.emplace_back(result.keypoints.at<float>(row, 0),
+                             result.keypoints.at<float>(row, 1),
+                             1.0f);
+    }
+    cur_frame->descriptors_ = result.descriptors.clone();
+
+    std::vector<double> xfeat_scores(result.scores.rows);
+    for (int row = 0; row < result.scores.rows; ++row) {
+      xfeat_scores.at(row) = result.scores.at<float>(row, 0);
+    }
+    if (!xfeat_scores.empty()) {
+      const auto [minimum, maximum] =
+          std::minmax_element(xfeat_scores.begin(), xfeat_scores.end());
+      const double range = *maximum - *minimum;
+      if (range > std::numeric_limits<double>::epsilon()) {
+        for (double& score : xfeat_scores) {
+          score = (score - *minimum) / range;
+        }
+      }
+    }
     // check the first elements of the input_kpts the same as keypoints
     CHECK_LE(input_kpts.size(), keypoints.size());
     CHECK_EQ(cur_frame->keypoints_.size(), cur_frame->scores_.size());

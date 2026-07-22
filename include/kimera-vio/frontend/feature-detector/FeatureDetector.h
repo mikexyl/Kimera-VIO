@@ -14,9 +14,10 @@
 
 #pragma once
 
-#include <xfeat-cpp/xfeat_cv.h>
+#include <xfeat-cpp/xfeat_trt.h>
 
 #include <Eigen/Eigen>
+#include <onnxruntime_cxx_api.h>
 #include <opencv2/features2d.hpp>
 #include <optional>
 #include <vector>
@@ -83,6 +84,7 @@ class FeatureDetector {
 
   // Actual feature detector implementation.
   cv::Ptr<cv::Feature2D> feature_detector_;
+  std::unique_ptr<xfeat::XFeatTRT> xfeat_detector_;
 };
 
 }  // namespace VIO

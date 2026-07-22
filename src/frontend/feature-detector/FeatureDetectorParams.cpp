@@ -234,9 +234,8 @@ bool FeatureDetectorParams::parseYAML(const std::string& filepath) {
   yaml_parser.getYamlParam("xfeat_use_gpu", &xfeat_use_gpu_);
 
   if (feature_detector_type_ >= FeatureDetectorType::XFEAT) {
-    if (xfeat_path_.empty() || interp_bilinear_path_.empty() ||
-        interp_bicubic_path_.empty() || interp_nearest_path_.empty()) {
-      LOG(FATAL) << "XFEAT feature detector requires paths to ONNX models.";
+    if (xfeat_path_.empty()) {
+      LOG(FATAL) << "XFEAT feature detector requires a TensorRT engine path.";
     }
   }
 
