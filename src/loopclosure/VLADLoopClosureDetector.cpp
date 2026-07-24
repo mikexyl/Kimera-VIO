@@ -23,15 +23,31 @@ namespace VIO {
 
 namespace {
 
+double computeFrameTravelDistanceMeters(const LCDFrame& from_frame,
+                                        const LCDFrame& to_frame);
+
 std::vector<LCDFrame::Ptr> selectDiverseSequenceFrames(
     const std::vector<LCDFrame::Ptr>& candidate_frames,
-    size_t target_size,
-    const LcdLandmarkManager& landmark_manager) {
+    size_t target_size) {
   CHECK_LE(target_size, candidate_frames.size());
   CHECK_GT(target_size, 0u);
 
   std::vector<LCDFrame::Ptr> selected_frames;
   selected_frames.reserve(target_size);
+
+  std::vector<double> cumulative_distance_m(candidate_frames.size(), 0.0);
+  for (size_t i = 1u; i < candidate_frames.size(); ++i) {
+    cumulative_distance_m.at(i) =
+        cumulative_distance_m.at(i - 1u) +
+        computeFrameTravelDistanceMeters(*candidate_frames.at(i - 1u),
+                                         *candidate_frames.at(i));
+  }
+
+  const double total_distance_m = cumulative_distance_m.back();
+  const double min_motion_spacing_m =
+      (target_size <= 1u || total_distance_m <= 0.0)
+          ? 0.0
+          : total_distance_m / static_cast<double>(target_size - 1u);
 
   int last_idx = -1;
   for (size_t i = 0; i < target_size; ++i) {
@@ -52,22 +68,26 @@ std::vector<LCDFrame::Ptr> selectDiverseSequenceFrames(
     double best_score = std::numeric_limits<double>::infinity();
     for (int candidate_idx = min_idx; candidate_idx <= max_idx;
          ++candidate_idx) {
-      // Sum covisibility against all already-selected frames to avoid
-      // redundancy with any prior selection, not just the immediate predecessor.
-      double covisibility_penalty = 0.0;
-      for (const auto& selected_frame : selected_frames) {
-        covisibility_penalty += landmark_manager.computeCovisibilityScore(
-            selected_frame->id_,
-            candidate_frames.at(candidate_idx)->id_);
+      double repeated_frame_penalty = 0.0;
+      if (last_idx >= 0 && min_motion_spacing_m > 0.0) {
+        const double motion_since_last_pick_m =
+            cumulative_distance_m.at(candidate_idx) -
+            cumulative_distance_m.at(static_cast<size_t>(last_idx));
+        const double normalized_motion_shortfall =
+            std::max(0.0, min_motion_spacing_m - motion_since_last_pick_m) /
+            min_motion_spacing_m;
+        // Prioritize avoiding near-stationary repeats before refining the
+        // pick using temporal coverage.
+        repeated_frame_penalty = 10.0 * normalized_motion_shortfall;
       }
 
-      // Penalize deviation from the ideal evenly-spaced position so that
-      // frames spread across the full sequence rather than clustering.
+      // Keep the selected frames spread across the full sequence once
+      // near-duplicate picks have been discouraged.
       const double position_deviation =
           std::abs(static_cast<double>(candidate_idx) - position) /
           static_cast<double>(candidate_frames.size());
 
-      const double score = covisibility_penalty + position_deviation;
+      const double score = repeated_frame_penalty + position_deviation;
       if (score < best_score) {
         best_score = score;
         best_idx = candidate_idx;
@@ -1280,8 +1300,8 @@ bool VLADLoopClosureDetector::finalizeSequenceFrames(
 
   std::vector<LCDFrame::Ptr> selected_frames;
   if (sequence_frames.size() >= target_seq_length) {
-    selected_frames = selectDiverseSequenceFrames(
-        sequence_frames, target_seq_length, *landmark_manager_);
+    selected_frames =
+        selectDiverseSequenceFrames(sequence_frames, target_seq_length);
   } else {
     selected_frames =
         duplicateSequenceFramesInOrder(sequence_frames, target_seq_length);
