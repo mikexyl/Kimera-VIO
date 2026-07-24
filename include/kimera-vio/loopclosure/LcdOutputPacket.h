@@ -109,6 +109,7 @@ struct LcdOutput : PipelinePayload {
   double structure_score{0.0};  ///< Geometric structure score of the feature grid
   double covisibility_score{0.0};  ///< Covisibility score between the current frame and the previous frame
   double similarity_penalty{0.0};  ///< Covisibility score between the current frame and the previous frame
+  double avg_sequence_length{0.0};  ///< Average covered frame span of finalized VPR sequences
 };
 
 }  // namespace VIO

@@ -196,6 +196,22 @@ bool LoopClosureDetectorParams::parseYAML(const std::string& filepath) {
                              vpr_model_type_str);
   }
 
+  std::string vpr_short_sequence_policy_str = "wait";
+  yaml_parser.getYamlParam("vpr_short_sequence_policy",
+                           &vpr_short_sequence_policy_str);
+  if (vpr_short_sequence_policy_str == "duplicate") {
+    vpr_short_sequence_policy_ = VprShortSequencePolicy::kDuplicate;
+  } else if (vpr_short_sequence_policy_str == "wait") {
+    vpr_short_sequence_policy_ = VprShortSequencePolicy::kWait;
+  } else {
+    throw std::runtime_error(
+        "LCDparams parseYAML: wrong vpr_short_sequence_policy");
+  }
+  if (yaml_parser.hasParam("vpr_max_sequence_distance_m")) {
+    yaml_parser.getYamlParam("vpr_max_sequence_distance_m",
+                             &vpr_max_sequence_distance_m_);
+  }
+
   yaml_parser.getYamlParam("min_seq_coverage_score", &min_seq_coverage_score_);
   yaml_parser.getYamlParam("min_seq_structure_score",
                            &min_seq_structure_score_);
@@ -297,6 +313,10 @@ void LoopClosureDetectorParams::print() const {
                         static_cast<int>(vpr_model_type_),
                         "vpr_seq_interval_",
                         vpr_seq_interval_,
+                        "vpr_short_sequence_policy_",
+                        static_cast<int>(vpr_short_sequence_policy_),
+                        "vpr_max_sequence_distance_m_",
+                        vpr_max_sequence_distance_m_,
                         "min_seq_coverage_score_",
                         min_seq_coverage_score_,
                         "min_seq_structure_score_",
@@ -361,6 +381,9 @@ bool LoopClosureDetectorParams::equals(const LoopClosureDetectorParams& lp2,
          (vpr_model_path_ == lp2.vpr_model_path_) &&
          (vpr_model_type_ == lp2.vpr_model_type_) &&
          (vpr_seq_interval_ == lp2.vpr_seq_interval_) &&
+         (vpr_short_sequence_policy_ == lp2.vpr_short_sequence_policy_) &&
+         (fabs(vpr_max_sequence_distance_m_ -
+               lp2.vpr_max_sequence_distance_m_) <= tol) &&
          (fabs(min_seq_coverage_score_ - lp2.min_seq_coverage_score_) <= tol) &&
          (fabs(min_seq_structure_score_ - lp2.min_seq_structure_score_) <=
           tol) &&

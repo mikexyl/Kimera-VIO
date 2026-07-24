@@ -1,5 +1,8 @@
 #include "kimera-vio/loopclosure/VLADLoopClosureDetector.h"
 
+#include <algorithm>
+#include <cmath>
+#include <limits>
 #include <gtsam/inference/Symbol.h>
 #include <gtsam/nonlinear/GaussNewtonOptimizer.h>
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
@@ -17,6 +20,154 @@ DECLARE_bool(lcd_no_optimize);
 DECLARE_bool(lcd_no_detection);
 
 namespace VIO {
+
+namespace {
+
+double computeFrameTravelDistanceMeters(const LCDFrame& from_frame,
+                                        const LCDFrame& to_frame);
+
+std::vector<LCDFrame::Ptr> selectDiverseSequenceFrames(
+    const std::vector<LCDFrame::Ptr>& candidate_frames,
+    size_t target_size) {
+  CHECK_LE(target_size, candidate_frames.size());
+  CHECK_GT(target_size, 0u);
+
+  std::vector<LCDFrame::Ptr> selected_frames;
+  selected_frames.reserve(target_size);
+
+  std::vector<double> cumulative_distance_m(candidate_frames.size(), 0.0);
+  for (size_t i = 1u; i < candidate_frames.size(); ++i) {
+    cumulative_distance_m.at(i) =
+        cumulative_distance_m.at(i - 1u) +
+        computeFrameTravelDistanceMeters(*candidate_frames.at(i - 1u),
+                                         *candidate_frames.at(i));
+  }
+
+  const double total_distance_m = cumulative_distance_m.back();
+  const double min_motion_spacing_m =
+      (target_size <= 1u || total_distance_m <= 0.0)
+          ? 0.0
+          : total_distance_m / static_cast<double>(target_size - 1u);
+
+  int last_idx = -1;
+  for (size_t i = 0; i < target_size; ++i) {
+    const double position =
+        (target_size == 1u)
+            ? 0.0
+            : static_cast<double>(i) *
+                  static_cast<double>(candidate_frames.size() - 1u) /
+                  static_cast<double>(target_size - 1u);
+    const int min_idx = last_idx + 1;
+    const int max_idx =
+        static_cast<int>(candidate_frames.size()) -
+        static_cast<int>(target_size - i);
+
+    CHECK_LE(min_idx, max_idx);
+
+    int best_idx = min_idx;
+    double best_score = std::numeric_limits<double>::infinity();
+    for (int candidate_idx = min_idx; candidate_idx <= max_idx;
+         ++candidate_idx) {
+      double repeated_frame_penalty = 0.0;
+      if (last_idx >= 0 && min_motion_spacing_m > 0.0) {
+        const double motion_since_last_pick_m =
+            cumulative_distance_m.at(candidate_idx) -
+            cumulative_distance_m.at(static_cast<size_t>(last_idx));
+        const double normalized_motion_shortfall =
+            std::max(0.0, min_motion_spacing_m - motion_since_last_pick_m) /
+            min_motion_spacing_m;
+        // Prioritize avoiding near-stationary repeats before refining the
+        // pick using temporal coverage.
+        repeated_frame_penalty = 10.0 * normalized_motion_shortfall;
+      }
+
+      // Keep the selected frames spread across the full sequence once
+      // near-duplicate picks have been discouraged.
+      const double position_deviation =
+          std::abs(static_cast<double>(candidate_idx) - position) /
+          static_cast<double>(candidate_frames.size());
+
+      const double score = repeated_frame_penalty + position_deviation;
+      if (score < best_score) {
+        best_score = score;
+        best_idx = candidate_idx;
+      }
+    }
+
+    selected_frames.push_back(candidate_frames.at(best_idx));
+    last_idx = best_idx;
+  }
+
+  return selected_frames;
+}
+
+std::vector<LCDFrame::Ptr> duplicateSequenceFramesInOrder(
+    const std::vector<LCDFrame::Ptr>& candidate_frames,
+    size_t target_size) {
+  CHECK_GT(target_size, 0u);
+  CHECK(!candidate_frames.empty());
+
+  std::vector<LCDFrame::Ptr> selected_frames;
+  selected_frames.reserve(target_size);
+
+  for (size_t i = 0; i < target_size; ++i) {
+    const double position =
+        (target_size == 1u)
+            ? 0.0
+            : static_cast<double>(i) *
+                  static_cast<double>(candidate_frames.size() - 1u) /
+                  static_cast<double>(target_size - 1u);
+    const size_t idx = static_cast<size_t>(std::lround(position));
+    selected_frames.push_back(
+        candidate_frames.at(std::min(idx, candidate_frames.size() - 1u)));
+  }
+
+  return selected_frames;
+}
+
+double computeFrameTravelDistanceMeters(const LCDFrame& from_frame,
+                                        const LCDFrame& to_frame) {
+  return (to_frame.W_Pose_Blkf_.translation() -
+          from_frame.W_Pose_Blkf_.translation())
+      .norm();
+}
+
+double computeSequenceTravelDistanceMeters(
+    const std::vector<LCDFrame::Ptr>& frames) {
+  if (frames.size() < 2u) {
+    return 0.0;
+  }
+
+  double total_distance_m = 0.0;
+  for (size_t i = 1u; i < frames.size(); ++i) {
+    total_distance_m +=
+        computeFrameTravelDistanceMeters(*frames.at(i - 1u), *frames.at(i));
+  }
+  return total_distance_m;
+}
+
+size_t findSequenceDistanceOverflowIndex(
+    const std::vector<LCDFrame::Ptr>& frames,
+    double max_sequence_distance_m) {
+  CHECK_GT(max_sequence_distance_m, 0.0);
+
+  if (frames.size() < 2u) {
+    return frames.size();
+  }
+
+  double total_distance_m = 0.0;
+  for (size_t i = 1u; i < frames.size(); ++i) {
+    total_distance_m +=
+        computeFrameTravelDistanceMeters(*frames.at(i - 1u), *frames.at(i));
+    if (total_distance_m > max_sequence_distance_m) {
+      return i;
+    }
+  }
+
+  return frames.size();
+}
+
+}  // namespace
 
 size_t VLADLoopClosureDetector::new_seq_id_ = 0;
 
@@ -252,21 +403,7 @@ LcdOutput::UniquePtr VLADLoopClosureDetector::spinOnce(const LcdInput& input) {
     LOG(FATAL) << "Unknown frontend output type.";
   }
 
-  bool frame_too_repetitive_wrt_lkf =
-      landmark_manager_->computeCovisibilityScore(
-          lcd_frame_id - 1, lcd_frame_id) > lcd_params_.max_covisibility_score_;
-  bool frame_too_repetitive_wrt_seq_anchor =
-      getCurrentAnchorFrameId()
-          ? landmark_manager_->computeCovisibilityScore(
-                *getCurrentAnchorFrameId(), lcd_frame_id) >
-                lcd_params_.max_covisibility_score_
-          : false;
-
-  bool add_frame_to_sequence =
-      frame_is_valid and (not frame_too_repetitive_wrt_lkf and
-                          not frame_too_repetitive_wrt_seq_anchor);
-
-  computeSequenceGlobalDesc(lcd_frame_id, add_frame_to_sequence);
+  computeSequenceGlobalDesc(lcd_frame_id, frame_is_valid);
 
   updatePoseGraph(input.backend_states_, input.T_W_B_);
 
@@ -347,7 +484,13 @@ VLADLoopClosureDetector::augmentAndFilterFrameFeatures(FrameId lcd_frame_id) {
   auto covis_it = landmark_manager_->getCovisGraph().find(lcd_frame_id);
   if (lcd_params_.use_covis_projection_ &&
       covis_it != landmark_manager_->getCovisGraph().end()) {
+    static constexpr FrameId kCovisProjectionHalfWindow = 20;
     for (const auto& covis_frame_id : covis_it->second) {
+      if (covis_frame_id < lcd_frame_id - kCovisProjectionHalfWindow ||
+          covis_frame_id > lcd_frame_id + kCovisProjectionHalfWindow) {
+        continue;
+      }
+
       auto covis_frame = cache_.getFrame(covis_frame_id);
       if (!covis_frame) continue;
 
@@ -587,6 +730,11 @@ LcdOutput::UniquePtr VLADLoopClosureDetector::makeOutputPayload(
 
   output_payload->coverage_score = S_cover;
   output_payload->structure_score = S_struct;
+  output_payload->avg_sequence_length =
+      num_finalized_sequences_ > 0u
+          ? static_cast<double>(total_sequence_frame_span_) /
+                static_cast<double>(num_finalized_sequences_)
+          : 0.0;
 
   output_payload->covisibility_score =
       landmark_manager_->computeCovisibilityScore(lcd_frame_id - 1,
@@ -1129,50 +1277,143 @@ double VLADLoopClosureDetector::computeSequenceScore(
   return static_cast<double>(grid_frame->size());
 }
 
+bool VLADLoopClosureDetector::finalizeSequenceFrames(
+    const std::vector<LCDFrame::Ptr>& sequence_frames,
+    bool force_finalize_short_sequence) {
+  CHECK(!sequence_frames.empty());
+
+  const size_t target_seq_length =
+      static_cast<size_t>(vpr_db_->get_seq_length());
+  if (sequence_frames.size() < target_seq_length &&
+      !force_finalize_short_sequence &&
+      lcd_params_.vpr_short_sequence_policy_ == VprShortSequencePolicy::kWait) {
+    VLOG(2) << "VLADLoopClosureDetector: Sequence boundary reached with "
+            << sequence_frames.size()
+            << " frames, waiting for enough frames to fill the VPR input.";
+    return false;
+  }
+
+  std::vector<LCDFrame::Ptr> selected_frames;
+  if (sequence_frames.size() >= target_seq_length) {
+    selected_frames =
+        selectDiverseSequenceFrames(sequence_frames, target_seq_length);
+  } else {
+    selected_frames =
+        duplicateSequenceFramesInOrder(sequence_frames, target_seq_length);
+  }
+
+  const double sequence_distance_m =
+      computeSequenceTravelDistanceMeters(sequence_frames);
+  VLOG(2) << "VLADLoopClosureDetector: Processing sequence of size: "
+          << sequence_frames.size() << ", selected " << selected_frames.size()
+          << " frames for the VPR model over " << sequence_distance_m
+          << " m.";
+
+  auto global_desc = cv::Mat();
+  vpr_db_->transform(selected_frames, global_desc);
+
+  std::vector<FrameId> frame_ids;
+  frame_ids.reserve(selected_frames.size());
+  for (const auto& seq_frame : selected_frames) {
+    frame_ids.push_back(seq_frame->id_);
+  }
+  seq_frames_.push_back(frame_ids);
+
+  const size_t sequence_frame_span = static_cast<size_t>(
+      sequence_frames.back()->id_ - sequence_frames.front()->id_ + 1);
+  total_sequence_frame_span_ += sequence_frame_span;
+  num_finalized_sequences_++;
+  const double avg_sequence_length =
+      static_cast<double>(total_sequence_frame_span_) /
+      static_cast<double>(num_finalized_sequences_);
+  LOG(INFO) << "VLADLoopClosureDetector: covered frame-id span = "
+            << sequence_frame_span << " frames, sequence travel = "
+            << sequence_distance_m << " m, average sequence span = "
+            << avg_sequence_length
+            << " frames (includes intra-sequence downsampling by"
+            << " vpr_seq_interval and later sequence subsampling).";
+
+  for (const auto& seq_frame : sequence_frames) {
+    seq_frame->descriptors_vec_.clear();
+    seq_frame->clearImage();
+  }
+
+  sequence_frames.back()->descriptors_vec_.push_back(global_desc.clone());
+
+  last_seq_end_frame_id_ = sequence_frames.back()->id_;
+  new_seq_id_++;
+  return true;
+}
+
 void VLADLoopClosureDetector::computeSequenceGlobalDesc(
     const FrameId target_frame_id,
     bool add_to_sequence) {
+  const FrameId vpr_seq_interval = std::max<FrameId>(
+      1, static_cast<FrameId>(lcd_params_.vpr_seq_interval_));
   auto new_frame = cache_.getFrame(target_frame_id);
   new_frame->seq_id_ = new_seq_id_;
   new_frame->descriptors_vec_.clear();
 
-  if ((target_frame_id % lcd_params_.vpr_seq_interval_ == 0) and
-      add_to_sequence) {
-    // When starting a new sequence, enforce inter-sequence interval: the first
-    // frame of the new sequence must be at least vpr_seq_interval_ frames after
-    // the last frame of the previous sequence.
-    const bool in_active_seq = !new_seq_frames_.empty();
-    const bool cooldown_expired =
-        !last_seq_end_frame_id_.has_value() ||
-        target_frame_id >=
-            *last_seq_end_frame_id_ + lcd_params_.vpr_seq_interval_;
-    if (in_active_seq || cooldown_expired) {
-      new_seq_frames_.emplace_back(new_frame);
+  if (!add_to_sequence) {
+    return;
+  }
+
+  if (new_seq_frames_.empty()) {
+    active_seq_boundary_reached_ = false;
+  } else if (target_frame_id < new_seq_frames_.back()->id_ + vpr_seq_interval) {
+    return;
+  }
+
+  new_seq_frames_.emplace_back(new_frame);
+
+  if (lcd_params_.vpr_max_sequence_distance_m_ > 0.0) {
+    const size_t distance_overflow_idx = findSequenceDistanceOverflowIndex(
+        new_seq_frames_, lcd_params_.vpr_max_sequence_distance_m_);
+    if (distance_overflow_idx < new_seq_frames_.size()) {
+      std::vector<LCDFrame::Ptr> finalized_sequence_frames(
+          new_seq_frames_.begin(),
+          new_seq_frames_.begin() + distance_overflow_idx);
+      VLOG(2) << "VLADLoopClosureDetector: Sequence reached max travel "
+              << "distance of " << lcd_params_.vpr_max_sequence_distance_m_
+              << " m; finalizing " << finalized_sequence_frames.size()
+              << " frames before starting a new sequence at frame "
+              << new_seq_frames_.at(distance_overflow_idx)->id_ << ".";
+      const bool finalized =
+          finalizeSequenceFrames(finalized_sequence_frames, true);
+      CHECK(finalized);
+
+      std::vector<LCDFrame::Ptr> rollover_sequence_frames(
+          new_seq_frames_.begin() + distance_overflow_idx,
+          new_seq_frames_.end());
+      new_seq_frames_ = rollover_sequence_frames;
+      active_seq_boundary_reached_ = false;
+      for (const auto& rollover_frame : new_seq_frames_) {
+        rollover_frame->seq_id_ = new_seq_id_;
+      }
+      return;
     }
   }
 
-  if (new_seq_frames_.size() ==
-      static_cast<size_t>(vpr_db_->get_seq_length())) {
-    VLOG(2) << "VLADLoopClosureDetector: Processing sequence of size: "
-            << new_seq_frames_.size() << ".";
+  const auto anchor_frame_id = getCurrentAnchorFrameId();
+  CHECK(anchor_frame_id);
 
-    auto global_desc = cv::Mat();
-    vpr_db_->transform(new_seq_frames_, global_desc);
-
-    std::vector<FrameId> frame_ids;
-    for (auto seq_frame : new_seq_frames_) {
-      seq_frame->descriptors_vec_.clear();
-      seq_frame->clearImage();
-      frame_ids.push_back(seq_frame->id_);
-    }
-    seq_frames_.push_back(frame_ids);
-
-    new_frame->descriptors_vec_.push_back(global_desc.clone());
-
-    last_seq_end_frame_id_ = new_seq_frames_.back()->id_;
-    new_seq_frames_.clear();
-    new_seq_id_++;
+  const bool reached_sequence_boundary_now =
+      new_seq_frames_.size() > 1u &&
+      landmark_manager_->computeCovisibilityScore(*anchor_frame_id,
+                                                  target_frame_id) <
+          lcd_params_.max_covisibility_score_;
+  active_seq_boundary_reached_ =
+      active_seq_boundary_reached_ || reached_sequence_boundary_now;
+  if (!active_seq_boundary_reached_) {
+    return;
   }
+
+  if (!finalizeSequenceFrames(new_seq_frames_, false)) {
+    return;
+  }
+
+  new_seq_frames_.clear();
+  active_seq_boundary_reached_ = false;
 }
 
 void VLADLoopClosureDetector::detectLoop(const FrameId& frame_id,

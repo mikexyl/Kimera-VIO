@@ -160,6 +160,10 @@ class VLADLoopClosureDetector : public LoopClosureDetectorBase {
   void computeSequenceGlobalDesc(const FrameId target_frame_id,
                                  bool add_to_sequence);
 
+  bool finalizeSequenceFrames(
+      const std::vector<LCDFrame::Ptr>& sequence_frames,
+      bool force_finalize_short_sequence);
+
   void detectLoop(const FrameId& frame_id,
                   LoopResult* result,
                   FrameId* query_frame = nullptr,
@@ -299,6 +303,9 @@ class VLADLoopClosureDetector : public LoopClosureDetectorBase {
   std::vector<LCDFrame::Ptr> new_seq_frames_;
   static size_t new_seq_id_;
   std::optional<FrameId> last_seq_end_frame_id_;
+  bool active_seq_boundary_reached_ = false;
+  size_t total_sequence_frame_span_ = 0u;
+  size_t num_finalized_sequences_ = 0u;
 
  protected:
   enum class LcdState {

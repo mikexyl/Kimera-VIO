@@ -4,7 +4,7 @@ klt_win_size: 24
 klt_max_iter: 30
 klt_max_level: 4
 klt_eps: 0.1
-maxFeatureAge: 40
+maxFeatureAge: 30
 
 # Detector Params
 # 0: FAST
@@ -171,7 +171,7 @@ medianBlurDisparity: 0
 
 stereoDepthMethod: ONNX_Stereo
 # enginePath: /workspaces/src/ONNX-FastACVNet-Depth-Estimation/models/fast_acvnet_plus_generalization_opset11_288x512.onnx
-enginePath: /workspaces/src/ONNX-FastACVNet-Depth-Estimation/models/fast_acvnet_plus_generalization_opset11_288x512.onnx
+enginePath: /workspaces/src/xfeat-cpp/onnx_model/fast_acvnet_plus_generalization_opset11_288x512.onnx
 dispWidth: 512
 dispHeight: 288
 onnxWarmupIterations: 3
@@ -189,3 +189,6 @@ opencv_of_quality_level: 0.01
 opencv_of_min_distance: 30.0
 opencv_of_use_fwd_bwd_check: false # this runs too slow
 opencv_of_fwd_bwd_threshold: 1.0
+
+desc_tracking_mode: 0
+publish_only_sequence: true

@@ -40,6 +40,11 @@ enum class VprModelType {
   kPatchNetVLAD = 2,  // Single-image with re-ranking (PatchNetVLAD)
 };
 
+enum class VprShortSequencePolicy {
+  kDuplicate = 0,
+  kWait = 1,
+};
+
 class LoopClosureDetectorParams : public PipelineParams {
  public:
   KIMERA_POINTER_TYPEDEFS(LoopClosureDetectorParams);
@@ -141,6 +146,9 @@ class LoopClosureDetectorParams : public PipelineParams {
   std::string vpr_model_path_{};
   VprModelType vpr_model_type_ = VprModelType::kJist;
   int vpr_seq_interval_ = 1;
+  VprShortSequencePolicy vpr_short_sequence_policy_ =
+      VprShortSequencePolicy::kWait;
+  double vpr_max_sequence_distance_m_ = 10.0;
 
   int local_window_size_ = 50;  // number of most recent keyframes to skip when
   // detecting loops

@@ -116,8 +116,6 @@ rematch_threshold: 0.5
 
 xfeat_use_of_points: 1
 
-copy_optical_flow_tracks: 1
-
 # ============================================================================
 # Dense Stereo Depth Estimation Parameters
 # ============================================================================
@@ -169,7 +167,7 @@ medianBlurDisparity: 0
 
 stereoDepthMethod: LibSGM
 # enginePath: /workspaces/src/ONNX-FastACVNet-Depth-Estimation/models/fast_acvnet_plus_generalization_opset11_288x512.onnx
-enginePath: /workspaces/src/ONNX-FastACVNet-Depth-Estimation/models/fast_acvnet_plus_generalization_opset11_288x512.onnx
+enginePath: /workspaces/src/xfeat-cpp/onnx_model/fast_acvnet_plus_generalization_opset11_288x512.onnx
 dispWidth: 512
 dispHeight: 288
 onnxWarmupIterations: 3
