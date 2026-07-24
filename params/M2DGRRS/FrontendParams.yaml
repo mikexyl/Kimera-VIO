@@ -4,7 +4,7 @@ klt_win_size: 24
 klt_max_iter: 30
 klt_max_level: 4
 klt_eps: 0.1
-maxFeatureAge: 20
+maxFeatureAge: 60
 
 # Detector Params
 # 0: FAST
@@ -188,4 +188,4 @@ opencv_of_min_distance: 10.0
 opencv_of_use_fwd_bwd_check: false # this runs too slow
 opencv_of_fwd_bwd_threshold: 1.0
 
-desc_tracking_mode: 0 # 0: Track only with optical flow, 1: Track only with descriptors, 2: Use both
+desc_tracking_mode: 2 # 0: Track only with optical flow, 1: Track only with descriptors, 2: Use both
