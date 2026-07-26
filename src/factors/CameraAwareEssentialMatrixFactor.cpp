@@ -117,8 +117,8 @@ gtsam::Vector5 CameraAwareEssentialMatrixFactor::localCoordinates(
 gtsam::Vector CameraAwareEssentialMatrixFactor::evaluateError(
     const gtsam::Pose3& world_T_context_body,
     const gtsam::Pose3& world_T_current_body,
-    gtsam::OptionalMatrixType H_context_body,
-    gtsam::OptionalMatrixType H_current_body) const {
+    CameraAwareEssentialJacobian H_context_body,
+    CameraAwareEssentialJacobian H_current_body) const {
   const bool compute_jacobians = H_context_body || H_current_body;
   gtsam::Matrix66 H_context_cam_context_body;
   gtsam::Matrix66 H_current_cam_current_body;
@@ -165,8 +165,7 @@ gtsam::Vector CameraAwareEssentialMatrixFactor::evaluateError(
 
 gtsam::NonlinearFactor::shared_ptr CameraAwareEssentialMatrixFactor::clone()
     const {
-  return std::static_pointer_cast<gtsam::NonlinearFactor>(
-      std::make_shared<This>(*this));
+  return gtsam::NonlinearFactor::shared_ptr(new This(*this));
 }
 
 bool CameraAwareEssentialMatrixFactor::equals(

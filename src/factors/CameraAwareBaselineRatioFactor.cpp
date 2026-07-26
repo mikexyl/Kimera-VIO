@@ -55,9 +55,9 @@ gtsam::Vector CameraAwareBaselineRatioFactor::evaluateError(
     const gtsam::Pose3& world_T_first_body,
     const gtsam::Pose3& world_T_middle_body,
     const gtsam::Pose3& world_T_last_body,
-    gtsam::OptionalMatrixType H_first_body,
-    gtsam::OptionalMatrixType H_middle_body,
-    gtsam::OptionalMatrixType H_last_body) const {
+    CameraAwareBaselineRatioJacobian H_first_body,
+    CameraAwareBaselineRatioJacobian H_middle_body,
+    CameraAwareBaselineRatioJacobian H_last_body) const {
   if (!isFinite(world_T_first_body) || !isFinite(world_T_middle_body) ||
       !isFinite(world_T_last_body)) {
     throw std::domain_error(
@@ -115,8 +115,7 @@ gtsam::Vector CameraAwareBaselineRatioFactor::evaluateError(
 
 gtsam::NonlinearFactor::shared_ptr CameraAwareBaselineRatioFactor::clone()
     const {
-  return std::static_pointer_cast<gtsam::NonlinearFactor>(
-      std::make_shared<This>(*this));
+  return gtsam::NonlinearFactor::shared_ptr(new This(*this));
 }
 
 bool CameraAwareBaselineRatioFactor::equals(

@@ -14,6 +14,11 @@ namespace VIO {
 
 using CameraAwareBaselineRatioFactorBase =
     gtsam::NoiseModelFactor3<gtsam::Pose3, gtsam::Pose3, gtsam::Pose3>;
+#if GTSAM_VERSION_MAJOR <= 4 && GTSAM_VERSION_MINOR < 3
+using CameraAwareBaselineRatioJacobian = boost::optional<gtsam::Matrix&>;
+#else
+using CameraAwareBaselineRatioJacobian = gtsam::OptionalMatrixType;
+#endif
 
 /**
  * A scale-free constraint on two consecutive camera-center baselines.
@@ -45,9 +50,9 @@ class CameraAwareBaselineRatioFactor
       const gtsam::Pose3& world_T_first_body,
       const gtsam::Pose3& world_T_middle_body,
       const gtsam::Pose3& world_T_last_body,
-      gtsam::OptionalMatrixType H_first_body = nullptr,
-      gtsam::OptionalMatrixType H_middle_body = nullptr,
-      gtsam::OptionalMatrixType H_last_body = nullptr) const override;
+      CameraAwareBaselineRatioJacobian H_first_body = {},
+      CameraAwareBaselineRatioJacobian H_middle_body = {},
+      CameraAwareBaselineRatioJacobian H_last_body = {}) const override;
 
   gtsam::NonlinearFactor::shared_ptr clone() const override;
 

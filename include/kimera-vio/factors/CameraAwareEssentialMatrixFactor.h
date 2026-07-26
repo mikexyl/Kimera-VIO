@@ -12,6 +12,12 @@
 
 namespace VIO {
 
+#if GTSAM_VERSION_MAJOR <= 4 && GTSAM_VERSION_MINOR < 3
+using CameraAwareEssentialJacobian = boost::optional<gtsam::Matrix&>;
+#else
+using CameraAwareEssentialJacobian = gtsam::OptionalMatrixType;
+#endif
+
 /**
  * A five degree-of-freedom relative-pose constraint between body poses.
  *
@@ -42,8 +48,8 @@ class CameraAwareEssentialMatrixFactor
   gtsam::Vector evaluateError(
       const gtsam::Pose3& world_T_context_body,
       const gtsam::Pose3& world_T_current_body,
-      gtsam::OptionalMatrixType H_context_body = nullptr,
-      gtsam::OptionalMatrixType H_current_body = nullptr) const override;
+      CameraAwareEssentialJacobian H_context_body = {},
+      CameraAwareEssentialJacobian H_current_body = {}) const override;
 
   gtsam::NonlinearFactor::shared_ptr clone() const override;
 

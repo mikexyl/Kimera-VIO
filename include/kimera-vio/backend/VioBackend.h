@@ -495,9 +495,15 @@ class VioBackend {
     if (new_factor->find(pose_symbol) == new_factor->end()) {
       new_factor->add(measurement, pose_symbol, stereo_cal_);
       auto noise = new_factor->noiseModel();
+#if GTSAM_VERSION_MAJOR <= 4 && GTSAM_VERSION_MINOR < 3
+      auto smart_noise_ptr =
+          boost::dynamic_pointer_cast<gtsam::noiseModel::ExpandingIsotropic<3>>(
+              noise);
+#else
       auto smart_noise_ptr =
           std::dynamic_pointer_cast<gtsam::noiseModel::ExpandingIsotropic<3>>(
               noise);
+#endif
       if (smart_noise_ptr) {
         CHECK(smart_noise_);
         CHECK_EQ(smart_noise_->sigmas().size(), 3U)

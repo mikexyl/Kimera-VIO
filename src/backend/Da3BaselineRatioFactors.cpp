@@ -197,6 +197,18 @@ Da3BaselineRatioFactorAddResult Da3BaselineRatioFactors::addFactor(
   }
 
   try {
+#if GTSAM_VERSION_MAJOR <= 4 && GTSAM_VERSION_MINOR < 3
+    boost::shared_ptr<CameraAwareBaselineRatioFactor> factor(
+        new CameraAwareBaselineRatioFactor(
+            first_key,
+            middle_key,
+            last_key,
+            *previous_pair.packet->da3_context_body_T_cam,
+            previous_pair.packet->body_T_cam,
+            raw_packet->body_T_cam,
+            measured_ratio,
+            noise_model_));
+#else
     auto factor = std::make_shared<CameraAwareBaselineRatioFactor>(
         first_key,
         middle_key,
@@ -206,6 +218,7 @@ Da3BaselineRatioFactorAddResult Da3BaselineRatioFactors::addFactor(
         raw_packet->body_T_cam,
         measured_ratio,
         noise_model_);
+#endif
     const double initial_error = factor->evaluateError(
         *first_body_pose, *middle_body_pose, *last_body_pose)(0);
     new_factors->push_back(factor);

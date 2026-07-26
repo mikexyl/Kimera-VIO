@@ -125,6 +125,16 @@ Da3EssentialFactorAddResult Da3EssentialMatrixFactors::addFactor(
   }
 
   try {
+#if GTSAM_VERSION_MAJOR <= 4 && GTSAM_VERSION_MINOR < 3
+    boost::shared_ptr<CameraAwareEssentialMatrixFactor> factor(
+        new CameraAwareEssentialMatrixFactor(
+            context_key,
+            current_key,
+            *raw_packet->da3_context_cam_T_current_cam,
+            *raw_packet->da3_context_body_T_cam,
+            raw_packet->body_T_cam,
+            noise_model_));
+#else
     auto factor = std::make_shared<CameraAwareEssentialMatrixFactor>(
         context_key,
         current_key,
@@ -132,6 +142,7 @@ Da3EssentialFactorAddResult Da3EssentialMatrixFactors::addFactor(
         *raw_packet->da3_context_body_T_cam,
         raw_packet->body_T_cam,
         noise_model_);
+#endif
     const gtsam::Vector5 initial_error =
         factor->evaluateError(*context_body_pose, *current_body_pose);
     new_factors->push_back(factor);

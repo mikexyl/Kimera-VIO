@@ -37,7 +37,11 @@ using ImuAcc = Eigen::Matrix<double, 3, 1>;
 using ImuGyr = Eigen::Matrix<double, 3, 1>;
 using ImuAccGyrS = Eigen::Matrix<double, 6, Eigen::Dynamic>;
 using ImuBias = gtsam::imuBias::ConstantBias;
+#if GTSAM_VERSION_MAJOR <= 4 && GTSAM_VERSION_MINOR < 3
+using GtsamPreintegrationType = gtsam::PreintegrationType;
+#else
 using GtsamPreintegrationType = gtsam::DefaultPreintegrationType;
+#endif
 
 struct ImuMeasurement {
   ImuMeasurement() = default;
