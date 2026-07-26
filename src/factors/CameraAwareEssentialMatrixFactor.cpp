@@ -125,11 +125,11 @@ gtsam::Vector CameraAwareEssentialMatrixFactor::evaluateError(
   const gtsam::Pose3 world_T_context_cam = world_T_context_body.compose(
       context_body_T_cam_,
       compute_jacobians ? &H_context_cam_context_body : nullptr,
-      nullptr);
+      {});
   const gtsam::Pose3 world_T_current_cam = world_T_current_body.compose(
       current_body_T_cam_,
       compute_jacobians ? &H_current_cam_current_body : nullptr,
-      nullptr);
+      {});
 
   gtsam::Matrix66 H_relative_context_cam;
   gtsam::Matrix66 H_relative_current_cam;

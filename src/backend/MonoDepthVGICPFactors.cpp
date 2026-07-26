@@ -656,11 +656,20 @@ gtsam::NonlinearFactor::shared_ptr MonoDepthVGICPFactors::makeMatchingFactor(
       backend_params_.vgicp_factor_weight_ /
       static_cast<double>(source_it->second.cloud->size());
   if (backend_params_.vgicp_use_weighted_icp_factor_) {
+#if GTSAM_VERSION_MAJOR <= 4 && GTSAM_VERSION_MINOR < 3
+    boost::shared_ptr<gtsam_points::IntegratedWeightedICPFactor> factor(
+        new gtsam_points::IntegratedWeightedICPFactor(
+            target_key,
+            source_key,
+            target_it->second.cloud,
+            source_it->second.cloud));
+#else
     auto factor = std::make_shared<gtsam_points::IntegratedWeightedICPFactor>(
         target_key,
         source_key,
         target_it->second.cloud,
         source_it->second.cloud);
+#endif
     factor->set_num_threads(backend_params_.vgicp_num_threads_);
     factor->set_max_correspondence_distance(
         backend_params_.vgicp_max_correspondence_distance_);
@@ -668,11 +677,19 @@ gtsam::NonlinearFactor::shared_ptr MonoDepthVGICPFactors::makeMatchingFactor(
     return factor;
   }
 
+#if GTSAM_VERSION_MAJOR <= 4 && GTSAM_VERSION_MINOR < 3
+  boost::shared_ptr<gtsam_points::IntegratedVGICPFactor> factor(
+      new gtsam_points::IntegratedVGICPFactor(target_key,
+                                              source_key,
+                                              target_it->second.voxelmap,
+                                              source_it->second.cloud));
+#else
   auto factor = std::make_shared<gtsam_points::IntegratedVGICPFactor>(
       target_key,
       source_key,
       target_it->second.voxelmap,
       source_it->second.cloud);
+#endif
   factor->set_num_threads(backend_params_.vgicp_num_threads_);
   factor->set_fused_cov_cache_mode(gtsam_points::FusedCovCacheMode::COMPACT);
   factor->set_information_scale(information_scale);
