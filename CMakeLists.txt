@@ -34,6 +34,24 @@ find_package(GTSAM REQUIRED)
 find_package(GTSAM_UNSTABLE REQUIRED)
 find_package(opengv REQUIRED)
 find_package(OpenCV REQUIRED)
+
+find_path(KIMERA_OPENCV_VIZ_INCLUDE_DIR opencv2/viz.hpp
+  PATHS ${OpenCV_INCLUDE_DIRS}
+  NO_DEFAULT_PATH)
+find_library(KIMERA_OPENCV_VIZ_LIBRARY opencv_viz)
+set(KIMERA_OPENCV_VIZ_DEFAULT OFF)
+if(KIMERA_OPENCV_VIZ_INCLUDE_DIR AND KIMERA_OPENCV_VIZ_LIBRARY)
+  set(KIMERA_OPENCV_VIZ_DEFAULT ON)
+endif()
+option(KIMERA_BUILD_OPENCV_VIZ
+  "Build the legacy OpenCV/VTK visualizer"
+  ${KIMERA_OPENCV_VIZ_DEFAULT})
+if(KIMERA_BUILD_OPENCV_VIZ AND
+   (NOT KIMERA_OPENCV_VIZ_INCLUDE_DIR OR NOT KIMERA_OPENCV_VIZ_LIBRARY))
+  message(FATAL_ERROR
+    "KIMERA_BUILD_OPENCV_VIZ requires the OpenCV viz module")
+endif()
+message(STATUS "Kimera legacy OpenCV viz: ${KIMERA_BUILD_OPENCV_VIZ}")
 find_package(DBoW2 REQUIRED)
 find_package(KimeraRPGO REQUIRED)
 find_package(gtsam_points REQUIRED)
@@ -83,6 +101,13 @@ add_subdirectory(third_party)
 
 ### Compile the code
 add_library(${PROJECT_NAME} SHARED "")
+
+if(KIMERA_BUILD_OPENCV_VIZ)
+  target_compile_definitions(${PROJECT_NAME} PUBLIC KIMERA_HAS_OPENCV_VIZ=1)
+  target_link_libraries(${PROJECT_NAME} PUBLIC ${KIMERA_OPENCV_VIZ_LIBRARY})
+else()
+  target_compile_definitions(${PROJECT_NAME} PUBLIC KIMERA_HAS_OPENCV_VIZ=0)
+endif()
 
 ### Add source code for data provider.
 add_subdirectory(include/kimera-vio/dataprovider)
@@ -237,6 +262,10 @@ if(KIMERA_BUILD_TESTS)
     PUBLIC kimera_vio::kimera_vio)
   add_test(NAME testDa3BaselineRatioFactors
     COMMAND testDa3BaselineRatioFactors)
+
+  add_executable(testLcdGridFrame tests/testLcdGridFrame.cpp)
+  target_link_libraries(testLcdGridFrame PUBLIC kimera_vio::kimera_vio)
+  add_test(NAME testLcdGridFrame COMMAND testLcdGridFrame)
 endif()
 
 ############################### INSTALL/EXPORT #################################

@@ -13,12 +13,131 @@
  */
 #include "kimera-vio/frontend/DepthFrame.h"
 
+#include <opencv2/calib3d.hpp>
 #include <opencv2/core/core.hpp>
-#include <opencv2/rgbd.hpp>
+
+#include <cmath>
+#include <vector>
 
 #include "kimera-vio/frontend/CameraParams.h"
 
 namespace VIO {
+namespace {
+
+cv::Mat registerDepthImage(const CameraParams& params,
+                           const cv::Mat& source_depth) {
+  LOG(FATAL) << "The Jetson build does not provide OpenCV's validated rgbd "
+                "depth registration module; refusing to execute the "
+                "temporary fallback.";
+
+  CHECK(!params.depth.K_.empty());
+  CHECK(!params.K_.empty());
+  CHECK_EQ(params.depth.T_color_depth_.rows, 4);
+  CHECK_EQ(params.depth.T_color_depth_.cols, 4);
+  CHECK_GT(params.depth.depth_to_meters_, 0.0f);
+
+  cv::Mat color_T_depth;
+  params.depth.T_color_depth_.convertTo(color_T_depth, CV_64F);
+  const cv::Matx33d color_R_depth(
+      color_T_depth.at<double>(0, 0), color_T_depth.at<double>(0, 1),
+      color_T_depth.at<double>(0, 2), color_T_depth.at<double>(1, 0),
+      color_T_depth.at<double>(1, 1), color_T_depth.at<double>(1, 2),
+      color_T_depth.at<double>(2, 0), color_T_depth.at<double>(2, 1),
+      color_T_depth.at<double>(2, 2));
+  const cv::Vec3d color_t_depth(color_T_depth.at<double>(0, 3),
+                                color_T_depth.at<double>(1, 3),
+                                color_T_depth.at<double>(2, 3));
+
+  cv::Mat depth_K;
+  params.depth.K_.convertTo(depth_K, CV_64F);
+  const double fx = depth_K.at<double>(0, 0);
+  const double fy = depth_K.at<double>(1, 1);
+  const double cx = depth_K.at<double>(0, 2);
+  const double cy = depth_K.at<double>(1, 2);
+
+  std::vector<cv::Point3f> color_points;
+  color_points.reserve(source_depth.total());
+  for (int v = 0; v < source_depth.rows; ++v) {
+    for (int u = 0; u < source_depth.cols; ++u) {
+      double raw_depth = 0.0;
+      if (source_depth.type() == CV_32FC1) {
+        raw_depth = source_depth.at<float>(v, u);
+      } else {
+        raw_depth = source_depth.at<uint16_t>(v, u);
+      }
+      const double depth_m =
+          raw_depth * static_cast<double>(params.depth.depth_to_meters_);
+      if (!std::isfinite(depth_m) || depth_m <= 0.0) {
+        continue;
+      }
+      const cv::Vec3d depth_point((u - cx) / fx * depth_m,
+                                  (v - cy) / fy * depth_m,
+                                  depth_m);
+      const cv::Vec3d color_point =
+          color_R_depth * depth_point + color_t_depth;
+      if (color_point[2] > 0.0 && std::isfinite(color_point[0]) &&
+          std::isfinite(color_point[1]) && std::isfinite(color_point[2])) {
+        color_points.emplace_back(color_point[0],
+                                  color_point[1],
+                                  color_point[2]);
+      }
+    }
+  }
+
+  cv::Mat registered = cv::Mat::zeros(params.image_size_, source_depth.type());
+  if (color_points.empty()) {
+    return registered;
+  }
+
+  std::vector<cv::Point2f> color_pixels;
+  const cv::Vec3d zero_rotation(0.0, 0.0, 0.0);
+  const cv::Vec3d zero_translation(0.0, 0.0, 0.0);
+  if (params.distortion_model_ == DistortionModel::EQUIDISTANT) {
+    cv::fisheye::projectPoints(color_points,
+                               color_pixels,
+                               zero_rotation,
+                               zero_translation,
+                               params.K_,
+                               params.distortion_coeff_mat_);
+  } else {
+    CHECK(params.distortion_model_ == DistortionModel::NONE ||
+          params.distortion_model_ == DistortionModel::RADTAN)
+        << "Depth registration does not support omni projection.";
+    cv::projectPoints(color_points,
+                      zero_rotation,
+                      zero_translation,
+                      params.K_,
+                      params.distortion_coeff_mat_,
+                      color_pixels);
+  }
+
+  std::vector<float> nearest_depth(registered.total(),
+                                   std::numeric_limits<float>::infinity());
+  for (size_t i = 0; i < color_points.size(); ++i) {
+    const int u = cvRound(color_pixels[i].x);
+    const int v = cvRound(color_pixels[i].y);
+    if (u < 0 || u >= registered.cols || v < 0 || v >= registered.rows) {
+      continue;
+    }
+    const size_t output_index =
+        static_cast<size_t>(v) * registered.cols + u;
+    if (color_points[i].z >= nearest_depth[output_index]) {
+      continue;
+    }
+    nearest_depth[output_index] = color_points[i].z;
+    const float raw_depth =
+        color_points[i].z / params.depth.depth_to_meters_;
+    if (registered.type() == CV_32FC1) {
+      registered.at<float>(v, u) = raw_depth;
+    } else {
+      registered.at<uint16_t>(v, u) =
+          cv::saturate_cast<uint16_t>(raw_depth);
+    }
+  }
+  return registered;
+}
+
+}  // namespace
 
 DepthFrame::DepthFrame(const FrameId& id,
                        const Timestamp& timestamp,
@@ -101,13 +220,7 @@ void DepthFrame::registerDepth(const CameraParams& params) const {
     return;
   }
 
-  cv::rgbd::registerDepth(params.depth.K_,
-                          params.K_,
-                          params.distortion_coeff_mat_,
-                          params.depth.T_color_depth_,
-                          depth_img_,
-                          params.image_size_,
-                          registered_img_);
+  registered_img_ = registerDepthImage(params, depth_img_);
   is_registered_ = true;
 }
 

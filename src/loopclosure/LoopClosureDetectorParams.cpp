@@ -212,11 +212,13 @@ bool LoopClosureDetectorParams::parseYAML(const std::string& filepath) {
                              &vpr_max_sequence_distance_m_);
   }
 
-  yaml_parser.getYamlParam("min_seq_coverage_score", &min_seq_coverage_score_);
-  yaml_parser.getYamlParam("min_seq_structure_score",
-                           &min_seq_structure_score_);
   yaml_parser.getYamlParam("min_sim_score", &min_sim_score_);
   yaml_parser.getYamlParam("max_covisibility_score", &max_covisibility_score_);
+  if (yaml_parser.hasParam("max_consecutive_frame_covisibility_score")) {
+    yaml_parser.getYamlParam(
+        "max_consecutive_frame_covisibility_score",
+        &max_consecutive_frame_covisibility_score_);
+  }
   yaml_parser.getYamlParam("publish_only_sequence", &publish_only_sequence_);
   yaml_parser.getYamlParam("use_covis_projection", &use_covis_projection_);
   return true;
@@ -317,14 +319,12 @@ void LoopClosureDetectorParams::print() const {
                         static_cast<int>(vpr_short_sequence_policy_),
                         "vpr_max_sequence_distance_m_",
                         vpr_max_sequence_distance_m_,
-                        "min_seq_coverage_score_",
-                        min_seq_coverage_score_,
-                        "min_seq_structure_score_",
-                        min_seq_structure_score_,
                         "min_sim_score_",
                         min_sim_score_,
                         "max_covisibility_score_",
                         max_covisibility_score_,
+                        "max_consecutive_frame_covisibility_score_",
+                        max_consecutive_frame_covisibility_score_,
                         "publish_empty_output_",
                         publish_only_sequence_,
                         "use_covis_projection_",
@@ -384,11 +384,10 @@ bool LoopClosureDetectorParams::equals(const LoopClosureDetectorParams& lp2,
          (vpr_short_sequence_policy_ == lp2.vpr_short_sequence_policy_) &&
          (fabs(vpr_max_sequence_distance_m_ -
                lp2.vpr_max_sequence_distance_m_) <= tol) &&
-         (fabs(min_seq_coverage_score_ - lp2.min_seq_coverage_score_) <= tol) &&
-         (fabs(min_seq_structure_score_ - lp2.min_seq_structure_score_) <=
-          tol) &&
          (fabs(min_sim_score_ - lp2.min_sim_score_) <= tol) &&
          (fabs(max_covisibility_score_ - lp2.max_covisibility_score_) <= tol) &&
+         (fabs(max_consecutive_frame_covisibility_score_ -
+               lp2.max_consecutive_frame_covisibility_score_) <= tol) &&
          (publish_only_sequence_ == lp2.publish_only_sequence_) &&
          (use_covis_projection_ == lp2.use_covis_projection_);
 }

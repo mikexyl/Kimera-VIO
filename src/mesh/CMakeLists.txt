@@ -5,5 +5,9 @@ target_sources(kimera_vio
     "${CMAKE_CURRENT_LIST_DIR}/Mesher.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/MesherModule.cpp"
     "${CMAKE_CURRENT_LIST_DIR}/MesherFactory.cpp"
-    "${CMAKE_CURRENT_LIST_DIR}/MeshOptimization.cpp"
 )
+
+if(KIMERA_BUILD_OPENCV_VIZ)
+  target_sources(kimera_vio PRIVATE
+    "${CMAKE_CURRENT_LIST_DIR}/MeshOptimization.cpp")
+endif()

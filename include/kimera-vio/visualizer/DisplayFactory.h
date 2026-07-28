@@ -19,7 +19,9 @@
 #include "kimera-vio/utils/Macros.h"
 #include "kimera-vio/visualizer/Display.h"
 #include "kimera-vio/visualizer/DisplayParams.h"
+#if KIMERA_HAS_OPENCV_VIZ
 #include "kimera-vio/visualizer/OpenCvDisplay.h"
+#endif
 #ifdef Pangolin_FOUND
 #include "kimera-vio/visualizer/PangolinDisplay.h"
 #endif
@@ -48,7 +50,13 @@ class DisplayFactory {
 #endif
       }
       case DisplayType::kOpenCV: {
+#if KIMERA_HAS_OPENCV_VIZ
         return std::make_unique<OpenCv3dDisplay>(args...);
+#else
+        LOG(ERROR) << "OpenCV 3D display requested, but this build uses the "
+                      "Rerun-only visualization backend.";
+        return nullptr;
+#endif
       }
       default: {
         LOG(FATAL) << "Requested display type is not supported.\n"

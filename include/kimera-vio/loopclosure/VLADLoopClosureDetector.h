@@ -9,7 +9,9 @@
 #include <xfeat-cpp/faiss_database.h>
 #include <xfeat-cpp/lighterglue_trt.h>
 #include <xfeat-cpp/place_recognition/jist_onnx.h>
+#include <xfeat-cpp/place_recognition/jist_trt.h>
 #include <xfeat-cpp/place_recognition/mixvpr_onnx.h>
+#include <xfeat-cpp/place_recognition/mixvpr_trt.h>
 #include <xfeat-cpp/place_recognition/patchnetvlad_onnx.h>
 #include <xfeat-cpp/place_recognition/place_recognizer.h>
 

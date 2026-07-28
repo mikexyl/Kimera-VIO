@@ -18,7 +18,7 @@
 
 #include <glog/logging.h>
 
-#include <opencv2/viz.hpp>
+#include <opencv2/core.hpp>
 
 #include "kimera-vio/common/vio_types.h"
 
@@ -174,8 +174,8 @@ inline bool rayTriangleIntersect(const Vec3f& orig,
  * Maps an input h from a value between 0.0 and 1.0 into a rainbow. Copied from
  * OctomapProvider in octomap. Copied from voxblox itself.
  */
-inline cv::viz::Color rainbowColorMap(double h) {
-  cv::viz::Color color;
+inline cv::Vec3b rainbowColorMap(double h) {
+  cv::Vec3b color;
   // blend over HSV-values (more colors)
 
   double s = 1.0;
@@ -195,25 +195,25 @@ inline cv::viz::Color rainbowColorMap(double h) {
   switch (i) {
     case 6:
     case 0:
-      color = cv::Scalar(255 * m, 255 * n, 255 * v, 255);
+      color = cv::Vec3b(255 * m, 255 * n, 255 * v);
       break;
     case 1:
-      color = cv::Scalar(255 * m, 255 * v, 255 * n, 255);
+      color = cv::Vec3b(255 * m, 255 * v, 255 * n);
       break;
     case 2:
-      color = cv::Scalar(255 * n, 255 * v, 255 * m, 255);
+      color = cv::Vec3b(255 * n, 255 * v, 255 * m);
       break;
     case 3:
-      color = cv::Scalar(255 * v, 255 * n, 255 * m, 255);
+      color = cv::Vec3b(255 * v, 255 * n, 255 * m);
       break;
     case 4:
-      color = cv::Scalar(255 * v, 255 * m, 255 * n, 255);
+      color = cv::Vec3b(255 * v, 255 * m, 255 * n);
       break;
     case 5:
-      color = cv::Scalar(255 * n, 255 * m, 255 * v, 255);
+      color = cv::Vec3b(255 * n, 255 * m, 255 * v);
       break;
     default:
-      color = cv::Scalar(127, 127, 255, 255);
+      color = cv::Vec3b(127, 127, 255);
       break;
   }
 
@@ -221,13 +221,13 @@ inline cv::viz::Color rainbowColorMap(double h) {
 }
 
 /// Maps an input h from a value between 0.0 and 1.0 into a grayscale color.
-inline cv::viz::Color grayColorMap(double h) {
-  auto x = round(h * 255);
-  return cv::Scalar(x, x, x);
+inline cv::Vec3b grayColorMap(double h) {
+  const auto x = cv::saturate_cast<uchar>(round(h * 255));
+  return cv::Vec3b(x, x, x);
 }
 
-inline cv::viz::Color randomColor() {
-  return cv::Scalar(rand() % 256, rand() % 256, rand() % 256, 255);
+inline cv::Vec3b randomColor() {
+  return cv::Vec3b(rand() % 256, rand() % 256, rand() % 256);
 }
 
 template <class T>

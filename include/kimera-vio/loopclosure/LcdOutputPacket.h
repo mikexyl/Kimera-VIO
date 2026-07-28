@@ -105,10 +105,7 @@ struct LcdOutput : PipelinePayload {
   std::pair<FrameId, cv::Mat> debug_seq_frame;
   bool is_seq_frame{false};
 
-  double coverage_score{0.0};   ///< Shannon-entropy coverage score of the feature grid
-  double structure_score{0.0};  ///< Geometric structure score of the feature grid
   double covisibility_score{0.0};  ///< Covisibility score between the current frame and the previous frame
-  double similarity_penalty{0.0};  ///< Covisibility score between the current frame and the previous frame
   double avg_sequence_length{0.0};  ///< Average covered frame span of finalized VPR sequences
 };
 

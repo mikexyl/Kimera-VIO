@@ -15,7 +15,12 @@
 #pragma once
 
 #include <algorithm>
+#include <cstdint>
+#include <functional>
 #include <iostream>
+#include <string>
+#include <utility>
+#include <vector>
 
 namespace VIO {
 
@@ -78,7 +83,7 @@ std::string To_string_with_precision(const double a_value, const int n = 3);
 double NsecToSec(const std::int64_t& timestamp);
 
 // (NOT TESTED): converts time from seconds to nanoseconds
-int64_t SecToNsec(const double timeInSec);
+std::int64_t SecToNsec(const double timeInSec);
 
 // (NOT TESTED): get current time in seconds
 double GetTimeInSeconds();

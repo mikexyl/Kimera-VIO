@@ -14,7 +14,13 @@
 
 #pragma once
 
+#ifndef KIMERA_HAS_OPENCV_VIZ
+#define KIMERA_HAS_OPENCV_VIZ 1
+#endif
+
+#if KIMERA_HAS_OPENCV_VIZ
 #include <opencv2/viz.hpp>
+#endif
 
 #include "kimera-vio/utils/ThreadsafeQueue.h"
 #include "kimera-vio/visualizer/Visualizer3D-definitions.h"
@@ -31,8 +37,10 @@ struct WindowData {
   ~WindowData();
 
  public:
+#if KIMERA_HAS_OPENCV_VIZ
   //! 3D visualization
   cv::viz::Viz3d window_;
+#endif
 
   //! Stores the user set mesh representation.
   //! These objects are further modified by callbacks in the display module

@@ -15,7 +15,6 @@
 #pragma once
 
 #include <memory>
-#include <opencv2/viz/widgets.hpp>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -28,6 +27,14 @@
 #include "kimera-vio/pipeline/PipelinePayload.h"
 #include "kimera-vio/utils/Macros.h"
 #include "kimera-vio/utils/ThreadsafeQueue.h"
+
+#ifndef KIMERA_HAS_OPENCV_VIZ
+#define KIMERA_HAS_OPENCV_VIZ 1
+#endif
+
+#if KIMERA_HAS_OPENCV_VIZ
+#include <opencv2/viz/widgets.hpp>
+#endif
 
 namespace VIO {
 
@@ -43,7 +50,14 @@ enum class VisualizationType {
   kNone = 2               // does not visualize map
 };
 
-typedef std::unique_ptr<cv::viz::Widget3D> WidgetPtr;
+#if KIMERA_HAS_OPENCV_VIZ
+using WidgetPtr = std::unique_ptr<cv::viz::Widget3D>;
+#else
+// Rerun does not consume OpenCV widgets, but the generic visualizer payload
+// keeps the map so existing pipeline interfaces remain ABI-compatible.
+struct LegacyWidget3D {};
+using WidgetPtr = std::unique_ptr<LegacyWidget3D>;
+#endif
 typedef std::map<std::string, WidgetPtr> WidgetsMap;
 typedef std::vector<std::string> WidgetIds;
 

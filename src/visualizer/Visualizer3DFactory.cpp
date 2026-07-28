@@ -13,7 +13,9 @@
  */
 
 #include "kimera-vio/visualizer/Visualizer3DFactory.h"
+#if KIMERA_HAS_OPENCV_VIZ
 #include "kimera-vio/visualizer/OpenCvVisualizer3D.h"
+#endif
 
 namespace VIO {
 
@@ -23,7 +25,13 @@ Visualizer3D::UniquePtr VisualizerFactory::createVisualizer(
     const BackendType& backend_type) {
   switch (visualizer_type) {
     case VisualizerType::OpenCV: {
+#if KIMERA_HAS_OPENCV_VIZ
       return std::make_unique<OpenCvVisualizer3D>(viz_type, backend_type);
+#else
+      LOG(FATAL) << "OpenCV 3D visualizer requested, but this build uses the "
+                    "Rerun-only visualization backend.";
+      return nullptr;
+#endif
     }
     default: {
       LOG(FATAL) << "Requested visualizer type is not supported.\n"

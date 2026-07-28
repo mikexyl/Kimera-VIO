@@ -18,7 +18,7 @@
 #include <glog/logging.h>
 
 #include "kimera-vio/frontend/Camera.h"
-#include "kimera-vio/visualizer/OpenCvDisplay.h"  // for ocv display params...
+#include "kimera-vio/visualizer/OpenCvDisplayParams.h"
 
 DEFINE_bool(use_external_odometry, false, "Use an external odometry input.");
 

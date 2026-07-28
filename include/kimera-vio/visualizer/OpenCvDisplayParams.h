@@ -51,7 +51,11 @@ class OpenCv3dDisplayParams : public DisplayParams {
   //! the window.
   bool hold_3d_display_ = false;
   bool hold_2d_display_ = false;
+#if KIMERA_HAS_OPENCV_VIZ
   cv::viz::Color background_color_ = cv::viz::Color::black();
+#else
+  cv::Vec3b background_color_{0, 0, 0};
+#endif
 };
 
 }  // namespace VIO

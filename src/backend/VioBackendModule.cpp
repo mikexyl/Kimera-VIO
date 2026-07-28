@@ -15,6 +15,9 @@
 
 #include "kimera-vio/backend/VioBackendModule.h"
 
+#include "kimera-vio/utils/Statistics.h"
+#include "kimera-vio/utils/Timer.h"
+
 namespace VIO {
 
 VioBackendModule::VioBackendModule(InputQueue* input_queue,
@@ -29,7 +32,10 @@ VioBackendModule::OutputUniquePtr VioBackendModule::spinOnce(
     BackendInput::UniquePtr input) {
   CHECK(input);
   CHECK(vio_backend_);
+  utils::StatsCollector timing_stats("VioBackend Module [ms]");
+  const auto start_time = utils::Timer::tic();
   OutputUniquePtr output = vio_backend_->spinOnce(*input);
+  timing_stats.AddSample(utils::Timer::toc(start_time).count());
   if (!output) {
     LOG(ERROR) << "Backend did not return an output: shutting down Backend.";
     shutdown();

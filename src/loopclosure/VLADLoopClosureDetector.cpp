@@ -7,13 +7,12 @@
 #include <gtsam/nonlinear/GaussNewtonOptimizer.h>
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
 
+#include <filesystem>
 #include <memory>
 
 #include "kimera-vio/frontend/MonoVisionImuFrontend-definitions.h"
 #include "kimera-vio/frontend/RgbdVisionImuFrontend-definitions.h"
 #include "kimera-vio/frontend/Tracker-definitions.h"
-#include "kimera-vio/utils/Statistics.h"
-#include "kimera-vio/utils/Timer.h"
 #include "kimera-vio/utils/UtilsOpenCV.h"
 
 DECLARE_bool(lcd_no_optimize);
@@ -247,16 +246,28 @@ VLADLoopClosureDetector::VLADLoopClosureDetector(
 
   // Build VPR model selected by vpr_model_type_
   std::unique_ptr<xfeat::PlaceRecognizer> vpr_model;
+  const bool use_tensorrt =
+      std::filesystem::path(lcd_params_.vpr_model_path_).extension() ==
+      ".engine";
   switch (lcd_params_.vpr_model_type_) {
     case VprModelType::kMixVPR: {
-      xfeat::MixVPRONNX::Params p;
-      p.model_path = lcd_params_.vpr_model_path_;
-      p.use_gpu = kVLADLCDUseGPU;
-      p.normalize_output = true;
-      vpr_model = std::make_unique<xfeat::MixVPRONNX>(env, p);
+      if (use_tensorrt) {
+        xfeat::MixVPRTRT::Params p;
+        p.model_path = lcd_params_.vpr_model_path_;
+        p.normalize_output = true;
+        vpr_model = std::make_unique<xfeat::MixVPRTRT>(p);
+      } else {
+        xfeat::MixVPRONNX::Params p;
+        p.model_path = lcd_params_.vpr_model_path_;
+        p.use_gpu = kVLADLCDUseGPU;
+        p.normalize_output = true;
+        vpr_model = std::make_unique<xfeat::MixVPRONNX>(env, p);
+      }
       break;
     }
     case VprModelType::kPatchNetVLAD: {
+      CHECK(!use_tensorrt)
+          << "PatchNetVLAD does not have a native TensorRT backend";
       xfeat::PatchNetVLADONNX::Params p;
       p.model_path = lcd_params_.vpr_model_path_;
       p.use_gpu = kVLADLCDUseGPU;
@@ -265,14 +276,18 @@ VLADLoopClosureDetector::VLADLoopClosureDetector(
       break;
     }
     default: {  // kJist
-      xfeat::JistONNX::Params p;
+      CHECK(use_tensorrt)
+          << "JIST requires a native TensorRT .engine model: "
+          << lcd_params_.vpr_model_path_;
+      xfeat::JistTRT::Params p;
       p.model_path = lcd_params_.vpr_model_path_;
-      p.use_gpu = kVLADLCDUseGPU;
       p.normalize_output = true;
-      vpr_model = std::make_unique<xfeat::JistONNX>(env, p);
+      vpr_model = std::make_unique<xfeat::JistTRT>(p);
       break;
     }
   }
+  LOG(INFO) << "Using " << (use_tensorrt ? "native TensorRT" : "ONNX Runtime")
+            << " VPR backend: " << lcd_params_.vpr_model_path_;
 
   size_t free_before, total;
   cudaMemGetInfo(&free_before, &total);
@@ -403,7 +418,22 @@ LcdOutput::UniquePtr VLADLoopClosureDetector::spinOnce(const LcdInput& input) {
     LOG(FATAL) << "Unknown frontend output type.";
   }
 
-  computeSequenceGlobalDesc(lcd_frame_id, frame_is_valid);
+  const bool frame_too_repetitive_wrt_previous =
+      landmark_manager_->computeCovisibilityScore(lcd_frame_id - 1,
+                                                  lcd_frame_id) >
+      lcd_params_.max_consecutive_frame_covisibility_score_;
+  const auto sequence_anchor_id = getCurrentAnchorFrameId();
+  const bool frame_too_repetitive_wrt_sequence_anchor =
+      sequence_anchor_id
+          ? landmark_manager_->computeCovisibilityScore(*sequence_anchor_id,
+                                                        lcd_frame_id) >
+                lcd_params_.max_covisibility_score_
+          : false;
+
+  const bool add_frame_to_sequence =
+      frame_is_valid && !frame_too_repetitive_wrt_previous &&
+      !frame_too_repetitive_wrt_sequence_anchor;
+  computeSequenceGlobalDesc(lcd_frame_id, add_frame_to_sequence);
 
   updatePoseGraph(input.backend_states_, input.T_W_B_);
 
@@ -607,16 +637,17 @@ LcdOutput::UniquePtr VLADLoopClosureDetector::makeOutputPayload(
     return nullptr;
   }
 
-  bool is_seq_frame = curr_frame->descriptors_vec_.size() > 0;
+  const bool has_sequence_descriptor = !curr_frame->descriptors_vec_.empty();
 
   const auto grid_frame = augmentAndFilterFrameFeatures(lcd_frame_id);
   if (!grid_frame) {
     return nullptr;
   }
 
-  double S_cover = grid_frame->computeCoverageScore();
-  double S_struct = grid_frame->computeStructureScore();
-  double S_sim = grid_frame->computeDescriptorVariancePenalty();
+  const double descriptor_diversity_score =
+      grid_frame->computeDescriptorDiversityScore();
+  const bool passes_self_similarity_check =
+      descriptor_diversity_score > lcd_params_.min_sim_score_;
 
   auto filtered_keypoints = grid_frame->getKeypoints();
   auto filtered_landmarks = grid_frame->getLandmarks();
@@ -650,13 +681,13 @@ LcdOutput::UniquePtr VLADLoopClosureDetector::makeOutputPayload(
   CHECK_EQ(filtered_bearing_vectors.size(), filtered_landmark_ids.size());
 
   std::map<int, double> bow_vec{};
-  if (curr_frame->descriptors_vec_.size() and
-      S_cover > lcd_params_.min_seq_coverage_score_ and
-      S_struct > lcd_params_.min_seq_structure_score_ and
-      S_sim > lcd_params_.min_sim_score_) {
+  if (has_sequence_descriptor && passes_self_similarity_check) {
     bow_vec = globalDescToMap(curr_frame->descriptors_vec_[0]);
-  } else {
-    bow_vec = {};
+  } else if (has_sequence_descriptor) {
+    VLOG(1) << "VLADLoopClosureDetector: rejecting repetitive keyframe "
+            << lcd_frame_id
+            << " (descriptor diversity=" << descriptor_diversity_score
+            << ", minimum=" << lcd_params_.min_sim_score_ << ").";
   }
 
   cv::Mat debug_seq_frame;
@@ -692,15 +723,20 @@ LcdOutput::UniquePtr VLADLoopClosureDetector::makeOutputPayload(
                cv::INTER_AREA);
   }
 
-  std::string score_text =
-      "Sc: " + std::to_string(S_cover) + ", Ss: " + std::to_string(S_struct);
-  cv::putText(debug_seq_frame,
-              score_text,
-              cv::Point(10, 30),
-              cv::FONT_HERSHEY_SIMPLEX,
-              0.8,
-              cv::Scalar(0, 255, 0),
-              2);
+  if (has_sequence_descriptor) {
+    const std::string score_text =
+        "descriptor diversity: " +
+        std::to_string(descriptor_diversity_score).substr(0, 5) +
+        (passes_self_similarity_check ? " pass" : " reject");
+    cv::putText(debug_seq_frame,
+                score_text,
+                cv::Point(10, 30),
+                cv::FONT_HERSHEY_SIMPLEX,
+                0.6,
+                passes_self_similarity_check ? cv::Scalar(0, 255, 0)
+                                             : cv::Scalar(0, 0, 255),
+                2);
+  }
 
   if (not lcd_params_.publish_only_sequence_ or (not bow_vec.empty())) {
     output_payload->setFrameInformation(keypoints_2d,
@@ -726,10 +762,8 @@ LcdOutput::UniquePtr VLADLoopClosureDetector::makeOutputPayload(
   output_payload->seq_frames = seq_frames_;
   output_payload->debug_seq_frame =
       std::make_pair(lcd_frame_id, debug_seq_frame);
-  output_payload->is_seq_frame = is_seq_frame;
+  output_payload->is_seq_frame = !bow_vec.empty();
 
-  output_payload->coverage_score = S_cover;
-  output_payload->structure_score = S_struct;
   output_payload->avg_sequence_length =
       num_finalized_sequences_ > 0u
           ? static_cast<double>(total_sequence_frame_span_) /
@@ -739,8 +773,6 @@ LcdOutput::UniquePtr VLADLoopClosureDetector::makeOutputPayload(
   output_payload->covisibility_score =
       landmark_manager_->computeCovisibilityScore(lcd_frame_id - 1,
                                                   lcd_frame_id);
-  output_payload->similarity_penalty =
-      grid_frame->computeDescriptorVariancePenalty();
 
   return output_payload;
 }
@@ -1326,12 +1358,12 @@ bool VLADLoopClosureDetector::finalizeSequenceFrames(
   const double avg_sequence_length =
       static_cast<double>(total_sequence_frame_span_) /
       static_cast<double>(num_finalized_sequences_);
-  LOG(INFO) << "VLADLoopClosureDetector: covered frame-id span = "
-            << sequence_frame_span << " frames, sequence travel = "
-            << sequence_distance_m << " m, average sequence span = "
-            << avg_sequence_length
-            << " frames (includes intra-sequence downsampling by"
-            << " vpr_seq_interval and later sequence subsampling).";
+  VLOG(2) << "VLADLoopClosureDetector: covered frame-id span = "
+          << sequence_frame_span << " frames, sequence travel = "
+          << sequence_distance_m << " m, average sequence span = "
+          << avg_sequence_length
+          << " frames (includes intra-sequence downsampling by"
+          << " vpr_seq_interval and later sequence subsampling).";
 
   for (const auto& seq_frame : sequence_frames) {
     seq_frame->descriptors_vec_.clear();
@@ -1354,66 +1386,24 @@ void VLADLoopClosureDetector::computeSequenceGlobalDesc(
   new_frame->seq_id_ = new_seq_id_;
   new_frame->descriptors_vec_.clear();
 
-  if (!add_to_sequence) {
-    return;
-  }
-
-  if (new_seq_frames_.empty()) {
-    active_seq_boundary_reached_ = false;
-  } else if (target_frame_id < new_seq_frames_.back()->id_ + vpr_seq_interval) {
-    return;
-  }
-
-  new_seq_frames_.emplace_back(new_frame);
-
-  if (lcd_params_.vpr_max_sequence_distance_m_ > 0.0) {
-    const size_t distance_overflow_idx = findSequenceDistanceOverflowIndex(
-        new_seq_frames_, lcd_params_.vpr_max_sequence_distance_m_);
-    if (distance_overflow_idx < new_seq_frames_.size()) {
-      std::vector<LCDFrame::Ptr> finalized_sequence_frames(
-          new_seq_frames_.begin(),
-          new_seq_frames_.begin() + distance_overflow_idx);
-      VLOG(2) << "VLADLoopClosureDetector: Sequence reached max travel "
-              << "distance of " << lcd_params_.vpr_max_sequence_distance_m_
-              << " m; finalizing " << finalized_sequence_frames.size()
-              << " frames before starting a new sequence at frame "
-              << new_seq_frames_.at(distance_overflow_idx)->id_ << ".";
-      const bool finalized =
-          finalizeSequenceFrames(finalized_sequence_frames, true);
-      CHECK(finalized);
-
-      std::vector<LCDFrame::Ptr> rollover_sequence_frames(
-          new_seq_frames_.begin() + distance_overflow_idx,
-          new_seq_frames_.end());
-      new_seq_frames_ = rollover_sequence_frames;
-      active_seq_boundary_reached_ = false;
-      for (const auto& rollover_frame : new_seq_frames_) {
-        rollover_frame->seq_id_ = new_seq_id_;
-      }
-      return;
+  if ((target_frame_id % vpr_seq_interval == 0) && add_to_sequence) {
+    const bool in_active_sequence = !new_seq_frames_.empty();
+    const bool cooldown_expired =
+        !last_seq_end_frame_id_.has_value() ||
+        target_frame_id >= *last_seq_end_frame_id_ + vpr_seq_interval;
+    if (in_active_sequence || cooldown_expired) {
+      new_seq_frames_.emplace_back(new_frame);
     }
   }
 
-  const auto anchor_frame_id = getCurrentAnchorFrameId();
-  CHECK(anchor_frame_id);
-
-  const bool reached_sequence_boundary_now =
-      new_seq_frames_.size() > 1u &&
-      landmark_manager_->computeCovisibilityScore(*anchor_frame_id,
-                                                  target_frame_id) <
-          lcd_params_.max_covisibility_score_;
-  active_seq_boundary_reached_ =
-      active_seq_boundary_reached_ || reached_sequence_boundary_now;
-  if (!active_seq_boundary_reached_) {
-    return;
+  const size_t target_sequence_length =
+      static_cast<size_t>(vpr_db_->get_seq_length());
+  if (new_seq_frames_.size() == target_sequence_length) {
+    const bool finalized = finalizeSequenceFrames(new_seq_frames_, false);
+    CHECK(finalized);
+    new_seq_frames_.clear();
+    active_seq_boundary_reached_ = false;
   }
-
-  if (!finalizeSequenceFrames(new_seq_frames_, false)) {
-    return;
-  }
-
-  new_seq_frames_.clear();
-  active_seq_boundary_reached_ = false;
 }
 
 void VLADLoopClosureDetector::detectLoop(const FrameId& frame_id,

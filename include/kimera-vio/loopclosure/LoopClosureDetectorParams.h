@@ -158,10 +158,14 @@ class LoopClosureDetectorParams : public PipelineParams {
   float min_lmk_parallax_ = 20;
   float max_lmk_reproj_error = 36;
 
-  double min_seq_coverage_score_ = 0.0;   ///< Min coverage score for sequence frames
-  double min_seq_structure_score_ = 0.0;  ///< Min structure score for sequence frames
-  double min_sim_score_ = 0.85;           ///< Min similarity score for sequence frames
-  double max_covisibility_score_ = 1.0;   ///< Max covisibility score with previous frame (high covisibility means similar viewpoint, not a loop)
+  //! Minimum normalized local-descriptor dispersion. Frames below this value
+  //! are too self-similar/repetitive to publish for place recognition.
+  double min_sim_score_ = 0.85;
+  //! Maximum covisibility between the sequence anchor and an admitted frame.
+  double max_covisibility_score_ = 1.0;
+  //! Independent maximum covisibility between an admitted frame and the
+  //! immediately preceding keyframe.
+  double max_consecutive_frame_covisibility_score_ = 1.0;
 
   //! When the BoW vector is empty (no global descriptor), publish a minimal
   //! output payload so downstream modules do not stall. Set to false to
