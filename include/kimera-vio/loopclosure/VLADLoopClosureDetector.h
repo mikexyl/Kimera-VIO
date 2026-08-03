@@ -44,14 +44,32 @@ struct VPRWrapper {
   int get_seq_length() const { return model_->get_seq_length(); }
   int get_descriptor_dim() const { return model_->get_descriptor_dim(); }
 
-  void transform(std::vector<LCDFrame::Ptr> frames, GlobalDesc& global_desc) {
+  bool has_frame_descriptors() const {
+    const auto* jist = dynamic_cast<const xfeat::JistTRT*>(model_.get());
+    return jist != nullptr && jist->has_frame_descriptors();
+  }
+
+  void transform(std::vector<LCDFrame::Ptr> frames,
+                 GlobalDesc& global_desc,
+                 cv::Mat* frame_descriptors = nullptr) {
     std::vector<cv::Mat> image_sequence;
     image_sequence.reserve(frames.size());
     CHECK_EQ(static_cast<int>(frames.size()), model_->get_seq_length());
     for (const auto& frame : frames) {
       image_sequence.push_back(frame->image_);
     }
-    global_desc = model_->infer(image_sequence);
+    if (frame_descriptors == nullptr) {
+      global_desc = model_->infer(image_sequence);
+      return;
+    }
+    auto* jist = dynamic_cast<xfeat::JistTRT*>(model_.get());
+    if (jist == nullptr || !jist->has_frame_descriptors()) {
+      throw std::runtime_error(
+          "JIST frame refinement requires a dual-output TensorRT engine");
+    }
+    auto result = jist->infer_with_frame_descriptors(image_sequence);
+    global_desc = std::move(result.sequence_descriptor);
+    *frame_descriptors = std::move(result.frame_descriptors);
   }
 
   void add(const GlobalDesc& global_desc) {
@@ -344,6 +362,7 @@ class VLADLoopClosureDetector : public LoopClosureDetectorBase {
   LcdDebugInfo debug_info_;
 
   std::vector<std::vector<FrameId>> seq_frames_;
+  std::map<FrameId, JistRefinementBundle> pending_jist_refinement_bundles_;
 
   const bool log_output_ = false;
 

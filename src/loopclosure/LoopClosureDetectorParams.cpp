@@ -203,6 +203,14 @@ bool LoopClosureDetectorParams::parseYAML(const std::string& filepath) {
         "Unsupported vpr_model_type: " + vpr_model_type_str +
         ". TensorRT JIST and MixVPR are the only supported VPR models.");
   }
+  if (yaml_parser.hasParam("jist_frame_refinement")) {
+    yaml_parser.getYamlParam("jist_frame_refinement",
+                             &jist_frame_refinement_);
+  }
+  if (jist_frame_refinement_ && vpr_model_type_ != VprModelType::kJist) {
+    throw std::runtime_error(
+        "jist_frame_refinement requires vpr_model_type: jist");
+  }
   if (!vpr_model_path_.empty() &&
       std::filesystem::path(vpr_model_path_).extension() != ".engine") {
     throw std::runtime_error(
@@ -330,6 +338,8 @@ void LoopClosureDetectorParams::print() const {
                         vpr_model_path_,
                         "vpr_model_type_",
                         static_cast<int>(vpr_model_type_),
+                        "jist_frame_refinement_",
+                        jist_frame_refinement_,
                         "vpr_seq_interval_",
                         vpr_seq_interval_,
                         "vpr_min_sequence_frames_",
@@ -401,6 +411,7 @@ bool LoopClosureDetectorParams::equals(const LoopClosureDetectorParams& lp2,
           lp2.frame_cache.remove_cache_on_exit) &&
          (vpr_model_path_ == lp2.vpr_model_path_) &&
          (vpr_model_type_ == lp2.vpr_model_type_) &&
+         (jist_frame_refinement_ == lp2.jist_frame_refinement_) &&
          (vpr_seq_interval_ == lp2.vpr_seq_interval_) &&
          (vpr_min_sequence_frames_ == lp2.vpr_min_sequence_frames_) &&
          (vpr_short_sequence_policy_ == lp2.vpr_short_sequence_policy_) &&

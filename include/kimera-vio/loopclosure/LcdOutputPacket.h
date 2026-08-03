@@ -22,6 +22,8 @@
 #include <gtsam/nonlinear/NonlinearFactorGraph.h>
 #include <gtsam/nonlinear/Values.h>
 
+#include <optional>
+
 #include "kimera-vio/common/vio_types.h"
 #include "kimera-vio/loopclosure/LoopClosureDetector-definitions.h"
 #include "kimera-vio/pipeline/PipelinePayload.h"
@@ -34,6 +36,24 @@ class BowVector;  // forward declare to avoid public dbow dependency
 namespace VIO {
 
 typedef std::unordered_map<FrameId, Timestamp> FrameIDTimestampMap;
+
+struct LcdVerificationFrame {
+  FrameId frame_id{0};
+  Timestamp timestamp{0};
+  KeypointsCV keypoints_2d;
+  Landmarks keypoints_3d;
+  BearingVectors versors;
+  LandmarkIds landmark_ids;
+  cv::Mat descriptors_mat;
+  Pose3 T_base_cam;
+};
+
+struct JistRefinementBundle {
+  FrameId sequence_endpoint_id{0};
+  std::vector<FrameId> frame_ids;
+  cv::Mat frame_descriptors;
+  std::vector<LcdVerificationFrame> verification_frames;
+};
 
 struct LcdOutput : PipelinePayload {
   KIMERA_POINTER_TYPEDEFS(LcdOutput);
@@ -104,6 +124,7 @@ struct LcdOutput : PipelinePayload {
   std::vector<std::vector<FrameId>> seq_frames;  ///< Sequence of frame IDs for each sequence of frames added to the database
   std::pair<FrameId, cv::Mat> debug_seq_frame;
   bool is_seq_frame{false};
+  std::optional<JistRefinementBundle> jist_refinement_bundle;
   // Native (pre-augmentation, pre-grid) descriptor diversity used to decide
   // whether this keyframe is admitted to the active VPR sequence.
   double keyframe_diversity_score{0.0};

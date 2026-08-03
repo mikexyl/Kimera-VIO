@@ -142,6 +142,10 @@ class LoopClosureDetectorParams : public PipelineParams {
   // VPR model parameters
   std::string vpr_model_path_{};
   VprModelType vpr_model_type_ = VprModelType::kJist;
+  //! Select the highest-cosine frame pair from JIST's five frame outputs
+  //! after sequence-level retrieval. This is invalid for MixVPR and requires
+  //! a dual-output 5x512 JIST TensorRT engine.
+  bool jist_frame_refinement_ = false;
   int vpr_seq_interval_ = 1;
   //! Minimum number of admitted frames in a VPR sequence before it may be
   //! finalized. This is deliberately independent of the VPR model input size

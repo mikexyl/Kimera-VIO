@@ -264,6 +264,22 @@ VLADLoopClosureDetector::VLADLoopClosureDetector(
       break;
     }
   }
+  if (lcd_params_.jist_frame_refinement_) {
+    auto* jist = dynamic_cast<xfeat::JistTRT*>(vpr_model.get());
+    if (jist == nullptr) {
+      throw std::invalid_argument(
+          "jist_frame_refinement cannot be enabled with MixVPR");
+    }
+    if (!jist->has_frame_descriptors()) {
+      throw std::runtime_error(
+          "jist_frame_refinement requires a JIST engine with sequence and "
+          "frame descriptor outputs");
+    }
+    if (jist->get_seq_length() != 5 || jist->get_descriptor_dim() != 512) {
+      throw std::runtime_error(
+          "jist_frame_refinement requires JIST outputs [1,512] and [5,512]");
+    }
+  }
   LOG(INFO) << "Using native TensorRT VPR backend: "
             << lcd_params_.vpr_model_path_;
 
@@ -778,6 +794,15 @@ LcdOutput::UniquePtr VLADLoopClosureDetector::makeOutputPayload(
   output_payload->debug_seq_frame =
       std::make_pair(lcd_frame_id, debug_seq_frame);
   output_payload->is_seq_frame = !bow_vec.empty();
+
+  const auto refinement_it =
+      pending_jist_refinement_bundles_.find(lcd_frame_id);
+  if (refinement_it != pending_jist_refinement_bundles_.end()) {
+    if (!bow_vec.empty()) {
+      output_payload->jist_refinement_bundle = refinement_it->second;
+    }
+    pending_jist_refinement_bundles_.erase(refinement_it);
+  }
 
   output_payload->avg_sequence_length =
       num_finalized_sequences_ > 0u
@@ -1360,7 +1385,12 @@ bool VLADLoopClosureDetector::finalizeSequenceFrames(
           << " m.";
 
   auto global_desc = cv::Mat();
-  vpr_db_->transform(selected_frames, global_desc);
+  cv::Mat frame_descriptors;
+  vpr_db_->transform(selected_frames,
+                     global_desc,
+                     lcd_params_.jist_frame_refinement_
+                         ? &frame_descriptors
+                         : nullptr);
 
   std::vector<FrameId> frame_ids;
   frame_ids.reserve(selected_frames.size());
@@ -1368,6 +1398,47 @@ bool VLADLoopClosureDetector::finalizeSequenceFrames(
     frame_ids.push_back(seq_frame->id_);
   }
   seq_frames_.push_back(frame_ids);
+
+  if (lcd_params_.jist_frame_refinement_) {
+    if (selected_frames.size() != 5u || frame_descriptors.rows != 5 ||
+        frame_descriptors.cols != 512 ||
+        frame_descriptors.type() != CV_32FC1) {
+      throw std::runtime_error(
+          "JIST refinement inference did not return a 5x512 FP32 matrix");
+    }
+
+    JistRefinementBundle bundle;
+    bundle.sequence_endpoint_id = sequence_frames.back()->id_;
+    bundle.frame_ids = frame_ids;
+    bundle.frame_descriptors = frame_descriptors.clone();
+
+    std::set<FrameId> snapshotted_ids;
+    for (const auto& selected_frame : selected_frames) {
+      if (!snapshotted_ids.insert(selected_frame->id_).second) {
+        continue;
+      }
+      const auto grid_frame =
+          augmentAndFilterFrameFeatures(selected_frame->id_);
+      if (!grid_frame) {
+        throw std::runtime_error(
+            "Failed to snapshot selected JIST verification frame " +
+            std::to_string(selected_frame->id_));
+      }
+      LcdVerificationFrame verification;
+      verification.frame_id = selected_frame->id_;
+      verification.timestamp = selected_frame->timestamp_;
+      cv::KeyPoint::convert(grid_frame->getKeypoints(),
+                            verification.keypoints_2d);
+      verification.keypoints_3d = grid_frame->getLandmarks();
+      verification.versors = grid_frame->getBearingVectors();
+      verification.landmark_ids = grid_frame->getLandmarkIds();
+      verification.descriptors_mat = grid_frame->getDescriptors().clone();
+      verification.T_base_cam = B_Pose_Cam_;
+      bundle.verification_frames.push_back(std::move(verification));
+    }
+    pending_jist_refinement_bundles_.insert_or_assign(
+        bundle.sequence_endpoint_id, std::move(bundle));
+  }
 
   const size_t sequence_frame_span = static_cast<size_t>(
       sequence_frames.back()->id_ - sequence_frames.front()->id_ + 1);
