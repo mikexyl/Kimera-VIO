@@ -22,13 +22,11 @@ LandmarkId FeatureDetector::lmk_id = 0;
 LandmarkId FeatureDetector::of_lmk_id = 0;
 
 FeatureDetector::FeatureDetector(
-    const FeatureDetectorParams& feature_detector_params,
-    std::shared_ptr<Ort::Env> env)
+    const FeatureDetectorParams& feature_detector_params)
     : feature_detector_params_(feature_detector_params),
       non_max_suppression_(nullptr),
       feature_detector_(),
       xfeat_detector_(nullptr) {
-  (void)env;
   // TODO(Toni): parametrize as well whether we use bucketing or anms...
   // Right now we assume we want anms not bucketing...
   if (feature_detector_params.enable_non_max_suppression_) {

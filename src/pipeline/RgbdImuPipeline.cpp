@@ -73,7 +73,6 @@ RgbdImuPipeline::RgbdImuPipeline(const VioParams& params,
       &frontend_input_queue_,
       parallel_run_,
       std::make_unique<RgbdVisionImuFrontend>(
-          ort_env_,
           params.frontend_params_,
           params.imu_params_,
           gtsam::imuBias::ConstantBias(),

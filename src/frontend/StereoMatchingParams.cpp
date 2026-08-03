@@ -14,6 +14,8 @@
 
 #include "kimera-vio/frontend/StereoMatchingParams.h"
 
+#include <filesystem>
+
 #include <glog/logging.h>
 
 #include "kimera-vio/frontend/StereoFrame-definitions.h"
@@ -162,16 +164,30 @@ bool DenseStereoParams::parseYAML(const std::string& filepath) {
   if (yaml_parser.hasParam("enginePath")) {
     yaml_parser.getYamlParam("enginePath", &engine_path_);
   }
+  if (yaml_parser.hasParam("ffsMaxDisparity")) {
+    yaml_parser.getYamlParam("ffsMaxDisparity", &ffs_max_disparity_);
+  }
+  if (yaml_parser.hasParam("stereoWarmupIterations")) {
+    yaml_parser.getYamlParam("stereoWarmupIterations",
+                             &stereo_warmup_iterations_);
+  }
   if (yaml_parser.hasParam("dispHeight")) {
     yaml_parser.getYamlParam("dispHeight", &disp_height_);
   }
   if (yaml_parser.hasParam("dispWidth")) {
     yaml_parser.getYamlParam("dispWidth", &disp_width_);
   }
-  if (yaml_parser.hasParam("onnxWarmupIterations")) {
-    yaml_parser.getYamlParam("onnxWarmupIterations", &onnx_warmup_iterations_);
+  CHECK_GT(ffs_max_disparity_, 0);
+  CHECK_GE(stereo_warmup_iterations_, 0);
+  if (stereo_depth_method_ == StereoDepthMethod::LIGHTSTEREO ||
+      stereo_depth_method_ == StereoDepthMethod::FAST_FOUNDATION_STEREO) {
+    CHECK(!engine_path_.empty())
+        << stereoDepthMethodToString(stereo_depth_method_)
+        << " requires enginePath";
+    CHECK_EQ(std::filesystem::path(engine_path_).extension(), ".engine")
+        << stereoDepthMethodToString(stereo_depth_method_)
+        << " requires a TensorRT .engine file: " << engine_path_;
   }
-
   return true;
 }
 

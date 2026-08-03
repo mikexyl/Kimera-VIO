@@ -14,6 +14,8 @@
 
 #pragma once
 
+#include <stdexcept>
+
 #include <opencv2/calib3d.hpp>  // Only for StereoBM (put in another file).
 
 #include "kimera-vio/frontend/StereoFrame-definitions.h"
@@ -27,7 +29,7 @@ enum class StereoDepthMethod {
   OPENCV_SGBM,  // OpenCV Semi-Global Block Matching (CPU)
   LIBSGM,       // LibSGM (GPU-accelerated, falls back to CPU)
   LIGHTSTEREO,  // LightStereo deep learning (requires TensorRT)
-  ONNX_STEREO   // ONNX-based deep learning stereo (FastACVNet, etc.)
+  FAST_FOUNDATION_STEREO  // Fast-FoundationStereo (requires TensorRT)
 };
 struct DenseStereoParams {
   bool use_sgbm_ = true;
@@ -55,11 +57,13 @@ struct DenseStereoParams {
   // Stereo depth estimation method to use
   StereoDepthMethod stereo_depth_method_ = StereoDepthMethod::LIBSGM;
 
-  std::string engine_path_ = "";  // For LightStereo: path to TensorRT engine
+  // TensorRT engine used by the selected learned stereo backend.
+  std::string engine_path_ = "";
+  // Must match the max-disparity setting used to export the FFS engine.
+  int ffs_max_disparity_ = 192;
+  int stereo_warmup_iterations_ = 3;
   int disp_height_ = 480;
   int disp_width_ = 640;
-
-  int onnx_warmup_iterations_ = 3;     // Number of warmup iterations
 
   // Parse parameters from YAML file
   bool parseYAML(const std::string& filepath);
@@ -116,8 +120,8 @@ inline const char* stereoDepthMethodToString(StereoDepthMethod method) {
       return "LibSGM";
     case StereoDepthMethod::LIGHTSTEREO:
       return "LightStereo";
-    case StereoDepthMethod::ONNX_STEREO:
-      return "ONNX_Stereo";
+    case StereoDepthMethod::FAST_FOUNDATION_STEREO:
+      return "FastFoundationStereo";
     default:
       return "Unknown";
   }
@@ -133,12 +137,11 @@ inline StereoDepthMethod stereoDepthMethodFromString(const std::string& str) {
     return StereoDepthMethod::LIBSGM;
   } else if (str == "LightStereo" || str == "LIGHTSTEREO") {
     return StereoDepthMethod::LIGHTSTEREO;
-  } else if (str == "ONNX_Stereo" || str == "ONNX_STEREO" || str == "onnx_stereo") {
-    return StereoDepthMethod::ONNX_STEREO;
+  } else if (str == "FastFoundationStereo" ||
+             str == "FAST_FOUNDATION_STEREO" || str == "FFS") {
+    return StereoDepthMethod::FAST_FOUNDATION_STEREO;
   } else {
-    LOG(WARNING) << "Unknown stereo depth method: " << str
-                 << ", defaulting to LibSGM";
-    return StereoDepthMethod::LIBSGM;
+    throw std::runtime_error("Unsupported stereo depth method: " + str);
   }
 }
 

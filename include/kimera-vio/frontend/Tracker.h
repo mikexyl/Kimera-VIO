@@ -16,8 +16,6 @@
 // TODO(Toni): put tracker in another folder.
 #pragma once
 
-#include <onnxruntime_cxx_api.h>
-
 #include <gtsam/base/Matrix.h>
 #include <gtsam/geometry/Pose3.h>
 #include <gtsam/geometry/Rot3.h>
@@ -64,7 +62,6 @@ class Tracker {
   Tracker(const TrackerParams& tracker_params,
           const Camera::ConstPtr& camera,
           DisplayQueue* display_queue = nullptr,
-          std::shared_ptr<Ort::Env> env = nullptr,
           bool use_of_tracker = true);
 
   virtual ~Tracker() = default;

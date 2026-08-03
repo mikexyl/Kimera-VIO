@@ -14,6 +14,7 @@
 
 #include "kimera-vio/loopclosure/LoopClosureDetectorParams.h"
 
+#include <filesystem>
 #include <stdexcept>
 
 namespace VIO {
@@ -169,9 +170,12 @@ bool LoopClosureDetectorParams::parseYAML(const std::string& filepath) {
 
   yaml_parser.getYamlParam("lcd_lg_num_features", &lcd_lg_num_features_);
   yaml_parser.getYamlParam("lcd_lg_model_path", &lcd_lg_model_path_);
-  yaml_parser.getYamlParam("xfeat_nv_head_model_path",
-                           &xfeat_nv_head_model_path_);
-  yaml_parser.getYamlParam("netvlad_model_path", &netvlad_model_path_);
+  if (!lcd_lg_model_path_.empty() &&
+      std::filesystem::path(lcd_lg_model_path_).extension() != ".engine") {
+    throw std::runtime_error(
+        "LCD LighterGlue requires a TensorRT .engine file: " +
+        lcd_lg_model_path_);
+  }
   yaml_parser.getYamlParam("local_window_size", &local_window_size_);
   yaml_parser.getYamlParam("min_lmk_obs_ratio", &min_lmk_obs_ratio_);
   yaml_parser.getYamlParam("min_lmk_obs_count", &min_lmk_obs_cnt_);
@@ -183,17 +187,26 @@ bool LoopClosureDetectorParams::parseYAML(const std::string& filepath) {
   // VPR parameters
   yaml_parser.getYamlParam("vpr_model_path", &vpr_model_path_);
   yaml_parser.getYamlParam("vpr_seq_interval", &vpr_seq_interval_);
+  if (yaml_parser.hasParam("vpr_min_sequence_frames")) {
+    yaml_parser.getYamlParam("vpr_min_sequence_frames",
+                             &vpr_min_sequence_frames_);
+  }
+  CHECK_GT(vpr_min_sequence_frames_, 0);
   std::string vpr_model_type_str = "jist";
   yaml_parser.getYamlParam("vpr_model_type", &vpr_model_type_str);
   if (vpr_model_type_str == "mixvpr") {
     vpr_model_type_ = VprModelType::kMixVPR;
-  } else if (vpr_model_type_str == "patchnetvlad") {
-    vpr_model_type_ = VprModelType::kPatchNetVLAD;
   } else if (vpr_model_type_str == "jist") {
     vpr_model_type_ = VprModelType::kJist;
   } else {
-    throw std::runtime_error("Unsupported vpr_model_type: " +
-                             vpr_model_type_str);
+    throw std::runtime_error(
+        "Unsupported vpr_model_type: " + vpr_model_type_str +
+        ". TensorRT JIST and MixVPR are the only supported VPR models.");
+  }
+  if (!vpr_model_path_.empty() &&
+      std::filesystem::path(vpr_model_path_).extension() != ".engine") {
+    throw std::runtime_error(
+        "VPR models must use a TensorRT .engine file: " + vpr_model_path_);
   }
 
   std::string vpr_short_sequence_policy_str = "wait";
@@ -213,6 +226,10 @@ bool LoopClosureDetectorParams::parseYAML(const std::string& filepath) {
   }
 
   yaml_parser.getYamlParam("min_sim_score", &min_sim_score_);
+  if (yaml_parser.hasParam("min_keyframe_diversity_score")) {
+    yaml_parser.getYamlParam("min_keyframe_diversity_score",
+                             &min_keyframe_diversity_score_);
+  }
   yaml_parser.getYamlParam("max_covisibility_score", &max_covisibility_score_);
   if (yaml_parser.hasParam("max_consecutive_frame_covisibility_score")) {
     yaml_parser.getYamlParam(
@@ -315,12 +332,16 @@ void LoopClosureDetectorParams::print() const {
                         static_cast<int>(vpr_model_type_),
                         "vpr_seq_interval_",
                         vpr_seq_interval_,
+                        "vpr_min_sequence_frames_",
+                        vpr_min_sequence_frames_,
                         "vpr_short_sequence_policy_",
                         static_cast<int>(vpr_short_sequence_policy_),
                         "vpr_max_sequence_distance_m_",
                         vpr_max_sequence_distance_m_,
                         "min_sim_score_",
                         min_sim_score_,
+                        "min_keyframe_diversity_score_",
+                        min_keyframe_diversity_score_,
                         "max_covisibility_score_",
                         max_covisibility_score_,
                         "max_consecutive_frame_covisibility_score_",
@@ -381,10 +402,13 @@ bool LoopClosureDetectorParams::equals(const LoopClosureDetectorParams& lp2,
          (vpr_model_path_ == lp2.vpr_model_path_) &&
          (vpr_model_type_ == lp2.vpr_model_type_) &&
          (vpr_seq_interval_ == lp2.vpr_seq_interval_) &&
+         (vpr_min_sequence_frames_ == lp2.vpr_min_sequence_frames_) &&
          (vpr_short_sequence_policy_ == lp2.vpr_short_sequence_policy_) &&
          (fabs(vpr_max_sequence_distance_m_ -
                lp2.vpr_max_sequence_distance_m_) <= tol) &&
          (fabs(min_sim_score_ - lp2.min_sim_score_) <= tol) &&
+         (fabs(min_keyframe_diversity_score_ -
+               lp2.min_keyframe_diversity_score_) <= tol) &&
          (fabs(max_covisibility_score_ - lp2.max_covisibility_score_) <= tol) &&
          (fabs(max_consecutive_frame_covisibility_score_ -
                lp2.max_consecutive_frame_covisibility_score_) <= tol) &&

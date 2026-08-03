@@ -29,6 +29,10 @@ if (!new_seq_frames_.empty() &&
 So the active sequence is already downsampled before final VPR model selection:
 it keeps at most one frame per `vpr_seq_interval` frame-id interval.
 
+This admission and boundary logic is used for every VPR model, including
+single-image models such as MixVPR. A single-image model no longer interprets
+`vpr_seq_interval` as an immediate output stride.
+
 ## 2. Sequence Boundary / Finalization Logic
 
 After a frame is admitted into `new_seq_frames_`, the code may finalize the
@@ -89,28 +93,31 @@ starts fresh.
 
 ## 3. Short Sequence Policy
 
-`finalizeSequenceFrames()` gets the VPR model's required sequence length:
+Sequence finalization first checks the model-independent configured minimum:
 
 ```cpp
-target_seq_length = vpr_db_->get_seq_length();
+min_sequence_frames = lcd_params_.vpr_min_sequence_frames_;
 ```
 
-If the current sequence has fewer frames than `target_seq_length`, behavior
-depends on `lcd_params_.vpr_short_sequence_policy_`.
+If the current sequence has fewer frames than `min_sequence_frames`, behavior
+depends on `lcd_params_.vpr_short_sequence_policy_`. The default value is five,
+which preserves the existing JIST sequence boundary behavior while allowing a
+single-image model to use exactly the same finalized sequences.
 
 If the policy is `wait` and finalization was not forced:
 
 ```cpp
-if (sequence_frames.size() < target_seq_length &&
+if (sequence_frames.size() < min_sequence_frames &&
     !force_finalize_short_sequence &&
     vpr_short_sequence_policy == wait) {
   return false;
 }
 ```
 
-So the detector waits for enough frames to fill the VPR input.
+So the detector waits for the configured model-independent sequence minimum.
 
-Otherwise, short sequences are expanded to `target_seq_length` with
+After extraction, the VPR model's required input length is queried. Candidate
+sequences are reduced to that length, or short inputs are expanded with
 `duplicateSequenceFramesInOrder()`.
 
 That function samples evenly spaced positions over the available frames, using
@@ -127,6 +134,10 @@ selectDiverseSequenceFrames(sequence_frames, target_seq_length);
 
 This function chooses exactly `target_seq_length` frames from the candidate
 sequence.
+
+For a single-image model, the sequence's final boundary frame is selected. It
+therefore produces one descriptor at the same sequence endpoint where JIST's
+multi-frame descriptor is attached.
 
 The selection process is:
 

@@ -35,13 +35,10 @@ class LcdFactory {
       const std::optional<StereoCamera::ConstPtr>& stereo_camera,
       const std::optional<StereoMatchingParams>& stereo_matching_params,
       const std::optional<RgbdCamera::ConstPtr>& rgbd_camera,
-      bool log_output,
-      std::shared_ptr<Ort::Env> env = nullptr) {
+      bool log_output) {
     switch (lcd_type) {
       case LoopClosureDetectorType::NetVLAD: {
-        CHECK(env) << "VLADLoopClosureDetector requires Ort::Env to be set!";
-        return std::make_unique<VLADLoopClosureDetector>(*env,
-                                                         lcd_params,
+        return std::make_unique<VLADLoopClosureDetector>(lcd_params,
                                                          tracker_cam_params,
                                                          B_Pose_Cam,
                                                          stereo_camera,

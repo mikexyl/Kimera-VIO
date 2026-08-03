@@ -57,7 +57,6 @@ std::vector<int> remapOpenGvInliersToKimera(
 Tracker::Tracker(const TrackerParams& tracker_params,
                  const Camera::ConstPtr& camera,
                  DisplayQueue* display_queue,
-                 std::shared_ptr<Ort::Env> env,
                  bool use_of_tracker)
     : tracker_params_(tracker_params),
       landmark_count_(0),
@@ -66,7 +65,6 @@ Tracker::Tracker(const TrackerParams& tracker_params,
       optical_flow_predictor_(nullptr),
       display_queue_(display_queue),
       output_images_path_("./outputImages/") {
-  (void)env;
   // Create the optical flow prediction module
   optical_flow_predictor_ =
       OpticalFlowPredictorFactory::makeOpticalFlowPredictor(

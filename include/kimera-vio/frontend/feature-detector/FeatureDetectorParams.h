@@ -108,11 +108,6 @@ struct FeatureDetectorParams : public PipelineParams {
 
   // XFEAT specific params
   std::string xfeat_path_{""};
-  std::string interp_bilinear_path_{""};
-  std::string interp_bicubic_path_{""};
-  std::string interp_nearest_path_{""};
-  bool xfeat_use_gpu_{true};
-
   bool xfeat_use_of_points_{true};
 };
 

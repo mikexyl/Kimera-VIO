@@ -17,7 +17,6 @@
 #include <xfeat-cpp/xfeat_trt.h>
 
 #include <Eigen/Eigen>
-#include <onnxruntime_cxx_api.h>
 #include <opencv2/features2d.hpp>
 #include <optional>
 #include <vector>
@@ -35,8 +34,8 @@ class FeatureDetector {
   KIMERA_DELETE_COPY_CONSTRUCTORS(FeatureDetector);
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
-  FeatureDetector(const FeatureDetectorParams& feature_detector_params,
-                  std::shared_ptr<Ort::Env> env = nullptr);
+  explicit FeatureDetector(
+      const FeatureDetectorParams& feature_detector_params);
   virtual ~FeatureDetector() = default;
 
  public:

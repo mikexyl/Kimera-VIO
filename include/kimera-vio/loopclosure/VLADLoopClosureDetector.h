@@ -8,11 +8,8 @@
 #include <cuda_runtime.h>
 #include <xfeat-cpp/faiss_database.h>
 #include <xfeat-cpp/lighterglue_trt.h>
-#include <xfeat-cpp/place_recognition/jist_onnx.h>
 #include <xfeat-cpp/place_recognition/jist_trt.h>
-#include <xfeat-cpp/place_recognition/mixvpr_onnx.h>
 #include <xfeat-cpp/place_recognition/mixvpr_trt.h>
-#include <xfeat-cpp/place_recognition/patchnetvlad_onnx.h>
 #include <xfeat-cpp/place_recognition/place_recognizer.h>
 
 #include "kimera-vio/frontend/RgbdCamera.h"
@@ -33,15 +30,15 @@
 namespace VIO {
 
 // Generic VPR wrapper: holds any PlaceRecognizer + a FAISS database.
-struct VPRONNXWrapper {
+struct VPRWrapper {
   using GlobalDesc = cv::Mat;
   using Desc = cv::Mat;
   using DescVector = std::vector<cv::Mat>;
   using DescMat = cv::Mat;
   using Database = xfeat::FaissDatabase;
 
-  VPRONNXWrapper(std::unique_ptr<Database> faiss_db,
-                 std::unique_ptr<xfeat::PlaceRecognizer> model)
+  VPRWrapper(std::unique_ptr<Database> faiss_db,
+             std::unique_ptr<xfeat::PlaceRecognizer> model)
       : model_(std::move(model)), db_(std::move(faiss_db)) {}
 
   int get_seq_length() const { return model_->get_seq_length(); }
@@ -111,10 +108,7 @@ class VLADLoopClosureDetector : public LoopClosureDetectorBase {
   KIMERA_DELETE_COPY_CONSTRUCTORS(VLADLoopClosureDetector);
   EIGEN_MAKE_ALIGNED_OPERATOR_NEW
 
-  static constexpr bool kVLADLCDUseGPU = true;
-
   VLADLoopClosureDetector(
-      Ort::Env& env,
       const LoopClosureDetectorParams& lcd_params,
       const CameraParams& tracker_cam_params,
       const gtsam::Pose3& B_Pose_Cam,
@@ -303,6 +297,8 @@ class VLADLoopClosureDetector : public LoopClosureDetectorBase {
   void print() const { lcd_params_.print(); }
 
   std::vector<LCDFrame::Ptr> new_seq_frames_;
+  std::map<FrameId, double> keyframe_diversity_scores_;
+  std::map<FrameId, bool> keyframe_sequence_admission_;
   static size_t new_seq_id_;
   std::optional<FrameId> last_seq_end_frame_id_;
   bool active_seq_boundary_reached_ = false;
@@ -352,7 +348,7 @@ class VLADLoopClosureDetector : public LoopClosureDetectorBase {
   const bool log_output_ = false;
 
  private:
-  std::unique_ptr<VPRONNXWrapper> vpr_db_;
+  std::unique_ptr<VPRWrapper> vpr_db_;
 };
 
 }  // namespace VIO

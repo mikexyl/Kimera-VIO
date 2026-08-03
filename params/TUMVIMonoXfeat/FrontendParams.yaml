@@ -89,15 +89,11 @@ ransac_threshold_pnp: 1.0 # pixels
 optimize_2d3d_pose_from_inliers: 0
 
 # xfeat params
-xfeat_path: /workspaces/src/xfeat-cpp/onnx_model/xfeat_640x480.onnx
-interp_bilinear_path: /workspaces/src/xfeat-cpp/onnx_model/interpolator_bilinear_640x480.onnx
-interp_bicubic_path: /workspaces/src/xfeat-cpp/onnx_model/interpolator_bicubic_640x480.onnx
-interp_nearest_path: /workspaces/src/xfeat-cpp/onnx_model/interpolator_nearest_640x480.onnx
-xfeat_use_gpu: 1
+xfeat_path: /workspaces/src/xfeat-cpp/onnx_model/xfeat_640x480_fp16.engine
 matcher_type: 0 # 0: Brute Force, 1: FLANN, 2: LighterGlue
 
 feature_tracker_type: 3 # 0: OpticalFlow, 1: LighterGlue 2: Flann 3: GpuBFMatcher
 num_features: 2000
-lg_model_path: /workspaces/src/xfeat-cpp/onnx_model/lg_640x480_1000.onnx
+lg_model_path: /workspaces/src/xfeat-cpp/onnx_model/lg_640x480_1000_fp16.engine
 gpu_bf_min_sim: 0.7 # Minimum similarity for GpuBFMatcher
 search_radius: 30

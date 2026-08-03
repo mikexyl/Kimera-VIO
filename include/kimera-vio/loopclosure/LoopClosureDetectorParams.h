@@ -35,9 +35,8 @@ enum class PoseRecoveryType {
 };
 
 enum class VprModelType {
-  kJist = 0,       // Sequence-based (JIST)
-  kMixVPR = 1,     // Single-image (MixVPR)
-  kPatchNetVLAD = 2,  // Single-image with re-ranking (PatchNetVLAD)
+  kJist = 0,    // Sequence-based (JIST), TensorRT only.
+  kMixVPR = 1,  // Single-image (MixVPR), TensorRT only.
 };
 
 enum class VprShortSequencePolicy {
@@ -138,14 +137,17 @@ class LoopClosureDetectorParams : public PipelineParams {
   // lighterglue parameters
   int lcd_lg_num_features_ = 500;  // num features to track
   std::string lcd_lg_model_path_{};
-  std::string xfeat_nv_head_model_path_{};
-  std::string netvlad_model_path_{};
   int lcd_min_matched_features_ = 5;
 
   // VPR model parameters
   std::string vpr_model_path_{};
   VprModelType vpr_model_type_ = VprModelType::kJist;
   int vpr_seq_interval_ = 1;
+  //! Minimum number of admitted frames in a VPR sequence before it may be
+  //! finalized. This is deliberately independent of the VPR model input size
+  //! so sequence boundaries are identical for sequence and single-image VPR
+  //! models.
+  int vpr_min_sequence_frames_ = 5;
   VprShortSequencePolicy vpr_short_sequence_policy_ =
       VprShortSequencePolicy::kWait;
   double vpr_max_sequence_distance_m_ = 10.0;
@@ -158,11 +160,16 @@ class LoopClosureDetectorParams : public PipelineParams {
   float min_lmk_parallax_ = 20;
   float max_lmk_reproj_error = 36;
 
-  //! Minimum normalized local-descriptor dispersion. Frames below this value
-  //! are too self-similar/repetitive to publish for place recognition.
+  //! Minimum normalized local-descriptor dispersion for publishing the
+  //! completed sequence's descriptor after projection and grid filtering.
+  //! Non-positive disables this filter.
   double min_sim_score_ = 0.85;
+  //! Minimum normalized dispersion of a native keyframe's local descriptors
+  //! before admitting it to a VPR sequence. This check runs before landmark
+  //! projection. Non-positive disables this filter.
+  double min_keyframe_diversity_score_ = 0.0;
   //! Maximum covisibility between the sequence anchor and an admitted frame.
-  double max_covisibility_score_ = 1.0;
+  double max_covisibility_score_ = 0.1;
   //! Independent maximum covisibility between an admitted frame and the
   //! immediately preceding keyframe.
   double max_consecutive_frame_covisibility_score_ = 1.0;

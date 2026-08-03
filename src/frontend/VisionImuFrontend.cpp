@@ -19,8 +19,7 @@
 
 namespace VIO {
 
-VisionImuFrontend::VisionImuFrontend(std::shared_ptr<Ort::Env> env,
-                                     const FrontendParams& frontend_params,
+VisionImuFrontend::VisionImuFrontend(const FrontendParams& frontend_params,
                                      const ImuParams& imu_params,
                                      const ImuBias& imu_initial_bias,
                                      DisplayQueue* display_queue,
@@ -36,8 +35,7 @@ VisionImuFrontend::VisionImuFrontend(std::shared_ptr<Ort::Env> env,
       tracker_status_summary_(),
       display_queue_(display_queue),
       logger_(nullptr),
-      odom_params_(odom_params),
-      ort_env_(env) {
+      odom_params_(odom_params) {
   imu_frontend_ = std::make_unique<ImuFrontend>(imu_params, imu_initial_bias);
   if (log_output) {
     logger_ = std::make_unique<FrontendLogger>();

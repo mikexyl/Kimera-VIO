@@ -47,7 +47,6 @@ class StereoVisionImuFrontend : public VisionImuFrontend {
 
  public:
   StereoVisionImuFrontend(
-      std::shared_ptr<Ort::Env> env,
       const FrontendParams& params,
       const ImuParams& imu_params,
       const ImuBias& imu_initial_bias,

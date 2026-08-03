@@ -29,7 +29,6 @@ DECLARE_bool(do_fine_imu_camera_temporal_sync);
 namespace VIO {
 
 MonoVisionImuFrontend::MonoVisionImuFrontend(
-    std::shared_ptr<Ort::Env> env,
     const FrontendParams& frontend_params,
     const ImuParams& imu_params,
     const ImuBias& imu_initial_bias,
@@ -38,8 +37,7 @@ MonoVisionImuFrontend::MonoVisionImuFrontend(
     bool log_output,
     std::optional<OdometryParams> odom_params,
     const MonoDepthParams& mono_depth_params)
-    : VisionImuFrontend(env,
-                        frontend_params,
+    : VisionImuFrontend(frontend_params,
                         imu_params,
                         imu_initial_bias,
                         display_queue,
@@ -65,11 +63,10 @@ MonoVisionImuFrontend::MonoVisionImuFrontend(
   tracker_ = std::make_shared<Tracker>(frontend_params_.tracker_params_,
                                        mono_camera_,
                                        display_queue,
-                                       ort_env_,
                                        kFrontendTrackerUseOF);
 
   feature_detector_ = std::make_unique<FeatureDetector>(
-      frontend_params_.feature_detector_params_, ort_env_);
+      frontend_params_.feature_detector_params_);
 
   if (VLOG_IS_ON(1)) tracker_->tracker_params_.print();
 }

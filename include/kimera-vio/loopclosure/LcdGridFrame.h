@@ -131,7 +131,8 @@ class LcdGridFrame {
    * because their global descriptor is likely to produce ambiguous loop
    * candidates.
    */
-  double computeDescriptorDiversityScore() const {
+  static double computeDescriptorDiversityScore(
+      const cv::Mat& descriptors) {
     // tau_dist: saturation threshold calibrated for XFeat 64-D L2-normalised
     // unit vectors.  For such descriptors V_app = (1/N)*Σ||d_k - d_bar|| ≈
     // sqrt(1 - ||d_bar||²), which ranges from ~0.44 (very repetitive scene,
@@ -141,7 +142,6 @@ class LcdGridFrame {
     // (Previously 0.5 caused perpetual saturation to 1.0.)
     static constexpr double tau_dist = 0.8;
 
-    const cv::Mat descriptors = getDescriptors();
     const int N = descriptors.rows;
     if (N == 0) return 0.0;
 
@@ -165,6 +165,10 @@ class LcdGridFrame {
 
     // S_app = min(1, V_app / tau_dist)
     return std::min(1.0, V_app / tau_dist);
+  }
+
+  double computeDescriptorDiversityScore() const {
+    return computeDescriptorDiversityScore(getDescriptors());
   }
 };
 

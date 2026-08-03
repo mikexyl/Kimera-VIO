@@ -21,8 +21,8 @@
 
 #include "xfeat-cpp/stereo_depth/stereo_depth.h"
 #include "xfeat-cpp/stereo_depth/stereo_depth_libsgm.h"
-#include "xfeat-cpp/stereo_depth/stereo_depth_onnx.h"
 #ifdef HAVE_TENSORRT
+#include "xfeat-cpp/stereo_depth/stereo_depth_fast_foundation_stereo.h"
 #include "xfeat-cpp/stereo_depth/stereo_depth_lightstereo.h"
 #endif
 #include "kimera-vio/frontend/StereoFrame.h"
@@ -63,10 +63,11 @@ void StereoMatcher::denseStereoReconstruction(
        dense_stereo_params_.stereo_depth_method_ ==
            StereoDepthMethod::OPENCV_SGBM ||
        dense_stereo_params_.stereo_depth_method_ == StereoDepthMethod::LIBSGM);
-  bool needs_bgr = (dense_stereo_params_.stereo_depth_method_ ==
-                        StereoDepthMethod::LIGHTSTEREO ||
-                    dense_stereo_params_.stereo_depth_method_ ==
-                        StereoDepthMethod::ONNX_STEREO);
+  bool needs_bgr =
+      dense_stereo_params_.stereo_depth_method_ ==
+          StereoDepthMethod::LIGHTSTEREO ||
+      dense_stereo_params_.stereo_depth_method_ ==
+          StereoDepthMethod::FAST_FOUNDATION_STEREO;
 
   if (needs_grayscale) {
     // Convert to grayscale if needed
@@ -173,21 +174,23 @@ void StereoMatcher::denseStereoReconstruction(
 #endif
         break;
       }
-      case StereoDepthMethod::ONNX_STEREO: {
-        VLOG(1) << "Using ONNX-based deep learning stereo depth";
-        xfeat::OnnxStereoDepth::Params params;
-        params.model_path = dense_stereo_params_.engine_path_;
-        params.input_size = cv::Size(dense_stereo_params_.disp_width_,
-                                     dense_stereo_params_.disp_height_);
-        params.use_cuda = true;
-        params.warmup_iterations = dense_stereo_params_.onnx_warmup_iterations_;
-        params.max_disparity = dense_stereo_params_.num_disparities_;
-        params.focal_length = stereo_camera_->getLeftCamParams().intrinsics_[0];
-        params.baseline = stereo_camera_->getBaseline();
-        params.verbose = VLOG_IS_ON(1);
-        stereo_depth_ = std::make_shared<xfeat::OnnxStereoDepth>(params);
-        LOG(INFO) << "ONNX stereo depth initialized with model: "
-                  << params.model_path;
+      case StereoDepthMethod::FAST_FOUNDATION_STEREO: {
+#ifdef HAVE_TENSORRT
+        LOG(INFO) << "Using Fast-FoundationStereo depth (TensorRT): "
+                  << dense_stereo_params_.engine_path_;
+        xfeat::FastFoundationStereoDepth::Params params;
+        params.engine_path = dense_stereo_params_.engine_path_;
+        params.max_disparity = dense_stereo_params_.ffs_max_disparity_;
+        params.warmup_iterations =
+            dense_stereo_params_.stereo_warmup_iterations_;
+        stereo_depth_ =
+            std::make_shared<xfeat::FastFoundationStereoDepth>(params);
+        stereo_depth_->warmup(left_processed.size());
+#else
+        LOG(FATAL)
+            << "FastFoundationStereo selected but TensorRT support was not "
+               "compiled. Rebuild xfeat-cpp with TensorRT.";
+#endif
         break;
       }
       default:

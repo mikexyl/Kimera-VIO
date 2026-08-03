@@ -30,7 +30,6 @@ class VisionImuFrontendFactory {
 
   // Mono version: feed a VIO::Camera
   static VisionImuFrontend::UniquePtr createFrontend(
-      std::shared_ptr<Ort::Env> env,
       const FrontendType& frontend_type,
       const ImuParams& imu_params,
       const ImuBias& imu_initial_bias,
@@ -42,8 +41,7 @@ class VisionImuFrontendFactory {
       const MonoDepthParams& mono_depth_params = MonoDepthParams()) {
     switch (frontend_type) {
       case FrontendType::kMonoImu: {
-        return std::make_unique<MonoVisionImuFrontend>(env,
-                                                       frontend_params,
+        return std::make_unique<MonoVisionImuFrontend>(frontend_params,
                                                        imu_params,
                                                        imu_initial_bias,
                                                        camera,
@@ -69,7 +67,6 @@ class VisionImuFrontendFactory {
 
   // Stereo version: feed a VIO::StereoCamera
   static VisionImuFrontend::UniquePtr createFrontend(
-      std::shared_ptr<Ort::Env> env,
       const FrontendType& frontend_type,
       const ImuParams& imu_params,
       const ImuBias& imu_initial_bias,
@@ -84,8 +81,7 @@ class VisionImuFrontendFactory {
                    << "with a StereoCamera!";
       }
       case FrontendType::kStereoImu: {
-        return std::make_unique<StereoVisionImuFrontend>(env,
-                                                         frontend_params,
+        return std::make_unique<StereoVisionImuFrontend>(frontend_params,
                                                          imu_params,
                                                          imu_initial_bias,
                                                          stereo_camera,

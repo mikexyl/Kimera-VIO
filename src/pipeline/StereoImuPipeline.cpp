@@ -81,7 +81,6 @@ StereoImuPipeline::StereoImuPipeline(const VioParams& params,
       &frontend_input_queue_,
       parallel_run_,
       VisionImuFrontendFactory::createFrontend(
-          ort_env_,
           params.frontend_type_,
           params.imu_params_,
           gtsam::imuBias::ConstantBias(),
@@ -202,8 +201,7 @@ StereoImuPipeline::StereoImuPipeline(const VioParams& params,
                               stereo_camera_,
                               params.frontend_params_.stereo_matching_params_,
                               std::nullopt,
-                              FLAGS_log_output,
-                              ort_env_));
+                              FLAGS_log_output));
     //! Register input callbacks
     vio_backend_module_->registerOutputCallback(
         std::bind(&LcdModule::fillBackendQueue,

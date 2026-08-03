@@ -17,6 +17,7 @@
 #include <gflags/gflags.h>
 #include <glog/logging.h>
 
+#include <filesystem>
 #include <string>
 #include <utility>
 
@@ -155,6 +156,14 @@ bool TrackerParams::parseYAML(const std::string& filepath) {
   yaml_parser.getYamlParam("num_features", &num_features_);
   yaml_parser.getYamlParam("track_on_keyframe", &track_on_keyframe_);
   yaml_parser.getYamlParam("lg_model_path", &lighterglue_model_path_);
+  if (tracker_type_ == TrackerType::LIGHTERGLUE) {
+    CHECK(!lighterglue_model_path_.empty())
+        << "LighterGlue requires a TensorRT engine path.";
+    CHECK_EQ(std::filesystem::path(lighterglue_model_path_).extension(),
+             ".engine")
+        << "LighterGlue requires a TensorRT .engine file: "
+        << lighterglue_model_path_;
+  }
 
   yaml_parser.getYamlParam("gpu_bf_min_sim", &gpu_bf_min_sim_);
   yaml_parser.getYamlParam("search_radius", &search_radius_);

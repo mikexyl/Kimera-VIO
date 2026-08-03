@@ -14,6 +14,8 @@
 
 #include "kimera-vio/frontend/feature-detector/FeatureDetectorParams.h"
 
+#include <filesystem>
+
 #include "kimera-vio/frontend/VisionImuFrontendParams.h"
 #include "kimera-vio/frontend/feature-detector/NonMaximumSuppression.h"
 #include "kimera-vio/frontend/feature-detector/anms/anms.h"  // REMOVE
@@ -228,15 +230,13 @@ bool FeatureDetectorParams::parseYAML(const std::string& filepath) {
 
   // XFEAT specific params
   yaml_parser.getYamlParam("xfeat_path", &xfeat_path_);
-  yaml_parser.getYamlParam("interp_bilinear_path", &interp_bilinear_path_);
-  yaml_parser.getYamlParam("interp_bicubic_path", &interp_bicubic_path_);
-  yaml_parser.getYamlParam("interp_nearest_path", &interp_nearest_path_);
-  yaml_parser.getYamlParam("xfeat_use_gpu", &xfeat_use_gpu_);
 
   if (feature_detector_type_ >= FeatureDetectorType::XFEAT) {
-    if (xfeat_path_.empty()) {
-      LOG(FATAL) << "XFEAT feature detector requires a TensorRT engine path.";
-    }
+    CHECK(!xfeat_path_.empty())
+        << "XFeat feature detector requires a TensorRT engine path.";
+    CHECK_EQ(std::filesystem::path(xfeat_path_).extension(), ".engine")
+        << "XFeat feature detector requires a TensorRT .engine file: "
+        << xfeat_path_;
   }
 
   yaml_parser.getYamlParam("xfeat_use_of_points", &xfeat_use_of_points_);

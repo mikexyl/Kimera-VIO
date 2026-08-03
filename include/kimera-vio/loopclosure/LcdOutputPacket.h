@@ -104,6 +104,12 @@ struct LcdOutput : PipelinePayload {
   std::vector<std::vector<FrameId>> seq_frames;  ///< Sequence of frame IDs for each sequence of frames added to the database
   std::pair<FrameId, cv::Mat> debug_seq_frame;
   bool is_seq_frame{false};
+  // Native (pre-augmentation, pre-grid) descriptor diversity used to decide
+  // whether this keyframe is admitted to the active VPR sequence.
+  double keyframe_diversity_score{0.0};
+  double keyframe_diversity_threshold{0.0};
+  bool keyframe_diversity_filter_enabled{false};
+  bool keyframe_admitted_to_sequence{false};
 
   double covisibility_score{0.0};  ///< Covisibility score between the current frame and the previous frame
   double avg_sequence_length{0.0};  ///< Average covered frame span of finalized VPR sequences

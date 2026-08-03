@@ -48,12 +48,30 @@ int testDiverseFrame() {
   return EXIT_SUCCESS;
 }
 
+int testRawDescriptors() {
+  const cv::Mat repetitive =
+      (cv::Mat_<float>(4, 2) << 1.0f, 0.0f, 1.0f, 0.0f, 1.0f, 0.0f, 1.0f,
+       0.0f);
+  EXPECT_TRUE(
+      VIO::LcdGridFrame::computeDescriptorDiversityScore(repetitive) == 0.0,
+      "raw identical descriptors are rejected as self-similar");
+
+  const cv::Mat diverse =
+      (cv::Mat_<float>(4, 2) << 1.0f, 0.0f, -1.0f, 0.0f, 0.0f, 1.0f, 0.0f,
+       -1.0f);
+  EXPECT_TRUE(
+      VIO::LcdGridFrame::computeDescriptorDiversityScore(diverse) == 1.0,
+      "raw diverse descriptors saturate the diversity score");
+  return EXIT_SUCCESS;
+}
+
 }  // namespace
 
 int main() {
   if (testEmptyFrame() != EXIT_SUCCESS) return EXIT_FAILURE;
   if (testRepetitiveFrame() != EXIT_SUCCESS) return EXIT_FAILURE;
   if (testDiverseFrame() != EXIT_SUCCESS) return EXIT_FAILURE;
+  if (testRawDescriptors() != EXIT_SUCCESS) return EXIT_FAILURE;
   std::cout << "All LcdGridFrame tests passed.\n";
   return EXIT_SUCCESS;
 }

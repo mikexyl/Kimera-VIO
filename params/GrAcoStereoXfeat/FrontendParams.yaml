@@ -89,16 +89,12 @@ ransac_threshold_pnp: 1.0 # pixels
 optimize_2d3d_pose_from_inliers: 0
 
 # xfeat params
-xfeat_path: /workspaces/src/xfeat-cpp/onnx_model/xfeat_320x224.onnx
-interp_bilinear_path: /workspaces/src/xfeat-cpp/onnx_model/interpolator_bilinear_320x224.onnx
-interp_bicubic_path: /workspaces/src/xfeat-cpp/onnx_model/interpolator_bicubic_320x224.onnx
-interp_nearest_path: /workspaces/src/xfeat-cpp/onnx_model/interpolator_nearest_320x224.onnx
-xfeat_use_gpu: 1
+xfeat_path: /workspaces/src/xfeat-cpp/onnx_model/xfeat_320x224_fp16.engine
 matcher_type: 0 # 0: Brute Force, 1: FLANN, 2: LighterGlue
 
 feature_tracker_type: 1 # 0: OpticalFlow, 1: LighterGlue 2: Flann 3: GpuBFMatcher
 num_features: 500
-lg_model_path: /workspaces/src/xfeat-cpp/onnx_model/lg_320x224_dyn.onnx
+lg_model_path: /workspaces/src/xfeat-cpp/onnx_model/lg_320x224_dyn_min1_fp16.engine
 gpu_bf_min_sim: 0.3 # Minimum similarity for GpuBFMatcher
 search_radius: 30
 
@@ -119,7 +115,7 @@ xfeat_use_of_points: 1
 # ============================================================================
 # Dense Stereo Depth Estimation Parameters
 # ============================================================================
-# stereoDepthMethod options: OpenCV_BM, OpenCV_SGBM, LIBSGM, LightStereo, ONNX_Stereo
+# stereoDepthMethod options: OpenCV_BM, OpenCV_SGBM, LIBSGM, LightStereo
 
 # General stereo parameters (used by all methods)
 minDisparity: 10
@@ -158,7 +154,7 @@ textureThreshold: 10
 postFilterDisparity: 0
 medianBlurDisparity: 0
 
-# Deep learning stereo parameters (for LightStereo/ONNX_Stereo)
+# Deep learning stereo parameters (for LightStereo)
 # Uncomment and adjust for deep learning methods:
 # stereoDepthMethod: LightStereo
 # enginePath: /workspaces/src/xfeat-cpp/onnx_model/LightStereo-S-KITTI_480x640.engine
@@ -166,11 +162,8 @@ medianBlurDisparity: 0
 # dispHeight: 480
 
 stereoDepthMethod: LibSGM
-# enginePath: /workspaces/src/ONNX-FastACVNet-Depth-Estimation/models/fast_acvnet_plus_generalization_opset11_288x512.onnx
-enginePath: /workspaces/src/xfeat-cpp/onnx_model/fast_acvnet_plus_generalization_opset11_288x512.onnx
 dispWidth: 512
 dispHeight: 288
-onnxWarmupIterations: 3
 
 rectifiedInputs: 0
 

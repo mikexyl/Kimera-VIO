@@ -305,7 +305,6 @@ class Pipeline {
   std::unique_ptr<std::thread> lcd_thread_ = {nullptr};
   std::unique_ptr<std::thread> visualizer_thread_ = {nullptr};
 
-  std::shared_ptr<Ort::Env> ort_env_ = nullptr;  // ONNX Runtime environment
 };
 
 }  // namespace VIO

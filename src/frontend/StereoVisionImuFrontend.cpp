@@ -31,7 +31,6 @@ DECLARE_bool(do_fine_imu_camera_temporal_sync);
 namespace VIO {
 
 StereoVisionImuFrontend::StereoVisionImuFrontend(
-    std::shared_ptr<Ort::Env> env,
     const FrontendParams& frontend_params,
     const ImuParams& imu_params,
     const ImuBias& imu_initial_bias,
@@ -39,8 +38,7 @@ StereoVisionImuFrontend::StereoVisionImuFrontend(
     DisplayQueue* display_queue,
     bool log_output,
     std::optional<OdometryParams> odom_params)
-    : VisionImuFrontend(env,
-                        frontend_params,
+    : VisionImuFrontend(frontend_params,
                         imu_params,
                         imu_initial_bias,
                         display_queue,
@@ -55,16 +53,14 @@ StereoVisionImuFrontend::StereoVisionImuFrontend(
       stereo_matcher_(stereo_camera, frontend_params.stereo_matching_params_),
       output_images_path_("./outputImages/") {
   CHECK(stereo_camera_);
-  CHECK(ort_env_);
 
   feature_detector_ = std::make_unique<FeatureDetector>(
-      frontend_params.feature_detector_params_, ort_env_);
+      frontend_params.feature_detector_params_);
 
   static constexpr bool kFrontendTrackerUseOF = true;
   tracker_ = std::make_unique<Tracker>(frontend_params_.tracker_params_,
                                        stereo_camera_->getOriginalLeftCamera(),
                                        display_queue,
-                                       ort_env_,
                                        kFrontendTrackerUseOF);
 
   if (VLOG_IS_ON(1)) tracker_->tracker_params_.print();
