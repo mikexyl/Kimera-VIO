@@ -23,7 +23,6 @@
 #include "xfeat-cpp/stereo_depth/stereo_depth_libsgm.h"
 #ifdef HAVE_TENSORRT
 #include "xfeat-cpp/stereo_depth/stereo_depth_fast_foundation_stereo.h"
-#include "xfeat-cpp/stereo_depth/stereo_depth_lightstereo.h"
 #endif
 #include "kimera-vio/frontend/StereoFrame.h"
 #include "kimera-vio/utils/Macros.h"
@@ -63,11 +62,8 @@ void StereoMatcher::denseStereoReconstruction(
        dense_stereo_params_.stereo_depth_method_ ==
            StereoDepthMethod::OPENCV_SGBM ||
        dense_stereo_params_.stereo_depth_method_ == StereoDepthMethod::LIBSGM);
-  bool needs_bgr =
-      dense_stereo_params_.stereo_depth_method_ ==
-          StereoDepthMethod::LIGHTSTEREO ||
-      dense_stereo_params_.stereo_depth_method_ ==
-          StereoDepthMethod::FAST_FOUNDATION_STEREO;
+  bool needs_bgr = dense_stereo_params_.stereo_depth_method_ ==
+                   StereoDepthMethod::FAST_FOUNDATION_STEREO;
 
   if (needs_grayscale) {
     // Convert to grayscale if needed
@@ -156,22 +152,6 @@ void StereoMatcher::denseStereoReconstruction(
                 << ", uniqueness=" << params.uniqueness_ratio
                 << ", num_disp=" << params.num_disparities
                 << ", LR_max_diff=" << params.lr_max_diff;
-        break;
-      }
-      case StereoDepthMethod::LIGHTSTEREO: {
-#ifdef HAVE_TENSORRT
-        VLOG(1) << "Using LightStereo deep learning stereo depth (TensorRT)";
-        xfeat::LightStereoDepth::Params params;
-        params.engine_path = dense_stereo_params_.engine_path_;
-        params.max_disparity = dense_stereo_params_.num_disparities_;
-        params.target_size = cv::Size(dense_stereo_params_.disp_width_,
-                                      dense_stereo_params_.disp_height_);
-        stereo_depth_ = std::make_shared<xfeat::LightStereoDepth>(params);
-#else
-        LOG(FATAL) << "LightStereo selected but TensorRT support not compiled. "
-                   << "Please rebuild with TensorRT or choose a different "
-                      "stereo method.";
-#endif
         break;
       }
       case StereoDepthMethod::FAST_FOUNDATION_STEREO: {

@@ -9,7 +9,7 @@
 # - "OpenCV_BM"      : OpenCV Block Matching (fast, basic quality, CPU only)
 # - "OpenCV_SGBM"    : OpenCV Semi-Global Block Matching (good quality, CPU only)
 # - "LibSGM"         : LibSGM GPU-accelerated SGM (fast with GPU, auto CPU fallback)
-# - "LightStereo"    : Deep learning stereo (best quality, requires TensorRT)
+# - "FastFoundationStereo"    : Deep learning stereo (best quality, requires TensorRT)
 stereoDepthMethod: "LibSGM"
 
 # ============================================================================
@@ -103,7 +103,7 @@ useSGBM: true
 #    sgmDownscaleFactor: 2
 #
 # 3. Best quality with TensorRT:
-#    stereoDepthMethod: "LightStereo"
+#    stereoDepthMethod: "FastFoundationStereo"
 #
 # 4. Fastest processing:
 #    stereoDepthMethod: "OpenCV_BM"
@@ -129,7 +129,7 @@ useSGBM: true
 # To improve quality:
 # - Decrease sgmDownscaleFactor (use 1 if memory allows)
 # - Increase numDisparities for close objects
-# - Use LightStereo if TensorRT available
+# - Use FastFoundationStereo if TensorRT available
 #
 # To improve speed:
 # - Increase sgmDownscaleFactor

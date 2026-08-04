@@ -179,8 +179,7 @@ bool DenseStereoParams::parseYAML(const std::string& filepath) {
   }
   CHECK_GT(ffs_max_disparity_, 0);
   CHECK_GE(stereo_warmup_iterations_, 0);
-  if (stereo_depth_method_ == StereoDepthMethod::LIGHTSTEREO ||
-      stereo_depth_method_ == StereoDepthMethod::FAST_FOUNDATION_STEREO) {
+  if (stereo_depth_method_ == StereoDepthMethod::FAST_FOUNDATION_STEREO) {
     CHECK(!engine_path_.empty())
         << stereoDepthMethodToString(stereo_depth_method_)
         << " requires enginePath";

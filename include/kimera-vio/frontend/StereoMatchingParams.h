@@ -28,7 +28,6 @@ enum class StereoDepthMethod {
   OPENCV_BM,    // OpenCV Block Matching (CPU)
   OPENCV_SGBM,  // OpenCV Semi-Global Block Matching (CPU)
   LIBSGM,       // LibSGM (GPU-accelerated, falls back to CPU)
-  LIGHTSTEREO,  // LightStereo deep learning (requires TensorRT)
   FAST_FOUNDATION_STEREO  // Fast-FoundationStereo (requires TensorRT)
 };
 struct DenseStereoParams {
@@ -118,8 +117,6 @@ inline const char* stereoDepthMethodToString(StereoDepthMethod method) {
       return "OpenCV_SGBM";
     case StereoDepthMethod::LIBSGM:
       return "LibSGM";
-    case StereoDepthMethod::LIGHTSTEREO:
-      return "LightStereo";
     case StereoDepthMethod::FAST_FOUNDATION_STEREO:
       return "FastFoundationStereo";
     default:
@@ -135,8 +132,6 @@ inline StereoDepthMethod stereoDepthMethodFromString(const std::string& str) {
     return StereoDepthMethod::OPENCV_SGBM;
   } else if (str == "LibSGM" || str == "LIBSGM") {
     return StereoDepthMethod::LIBSGM;
-  } else if (str == "LightStereo" || str == "LIGHTSTEREO") {
-    return StereoDepthMethod::LIGHTSTEREO;
   } else if (str == "FastFoundationStereo" ||
              str == "FAST_FOUNDATION_STEREO" || str == "FFS") {
     return StereoDepthMethod::FAST_FOUNDATION_STEREO;
