@@ -14,9 +14,9 @@
 
 #include "kimera-vio/frontend/StereoMatchingParams.h"
 
-#include <filesystem>
-
 #include <glog/logging.h>
+
+#include <filesystem>
 
 #include "kimera-vio/frontend/StereoFrame-definitions.h"
 #include "kimera-vio/pipeline/PipelineParams.h"
@@ -158,8 +158,30 @@ bool DenseStereoParams::parseYAML(const std::string& filepath) {
   if (yaml_parser.hasParam("useModeHH")) {
     yaml_parser.getYamlParam("useModeHH", &use_mode_HH_);
   }
-  if (yaml_parser.hasParam("sgmDownscaleFactor")) {
-    yaml_parser.getYamlParam("sgmDownscaleFactor", &sgm_downscale_factor_);
+  if (yaml_parser.hasParam("vpiMinDisparity")) {
+    yaml_parser.getYamlParam("vpiMinDisparity", &vpi_min_disparity_);
+  }
+  if (yaml_parser.hasParam("vpiMinValidDisparity")) {
+    yaml_parser.getYamlParam("vpiMinValidDisparity", &vpi_min_valid_disparity_);
+  }
+  if (yaml_parser.hasParam("vpiMaxDisparity")) {
+    yaml_parser.getYamlParam("vpiMaxDisparity", &vpi_max_disparity_);
+  }
+  if (yaml_parser.hasParam("vpiP1")) {
+    yaml_parser.getYamlParam("vpiP1", &vpi_p1_);
+  }
+  if (yaml_parser.hasParam("vpiP2")) {
+    yaml_parser.getYamlParam("vpiP2", &vpi_p2_);
+  }
+  if (yaml_parser.hasParam("vpiConfidenceThreshold")) {
+    yaml_parser.getYamlParam("vpiConfidenceThreshold",
+                             &vpi_confidence_threshold_);
+  }
+  if (yaml_parser.hasParam("vpiUniqueness")) {
+    yaml_parser.getYamlParam("vpiUniqueness", &vpi_uniqueness_);
+  }
+  if (yaml_parser.hasParam("vpiIncludeDiagonals")) {
+    yaml_parser.getYamlParam("vpiIncludeDiagonals", &vpi_include_diagonals_);
   }
   if (yaml_parser.hasParam("enginePath")) {
     yaml_parser.getYamlParam("enginePath", &engine_path_);
@@ -179,6 +201,18 @@ bool DenseStereoParams::parseYAML(const std::string& filepath) {
   }
   CHECK_GT(ffs_max_disparity_, 0);
   CHECK_GE(stereo_warmup_iterations_, 0);
+  CHECK_GE(vpi_min_disparity_, 0);
+  CHECK_GE(vpi_min_valid_disparity_, vpi_min_disparity_);
+  CHECK_GT(vpi_max_disparity_, vpi_min_disparity_);
+  CHECK_GT(vpi_max_disparity_, vpi_min_valid_disparity_);
+  CHECK_LE(vpi_max_disparity_, 256);
+  CHECK_GT(vpi_p1_, 0);
+  CHECK_GE(vpi_p2_, vpi_p1_);
+  CHECK_LT(vpi_p2_, 256);
+  CHECK_GE(vpi_confidence_threshold_, 0);
+  CHECK_LE(vpi_confidence_threshold_, 65535);
+  CHECK(vpi_uniqueness_ == -1.0 ||
+        (vpi_uniqueness_ >= 0.0 && vpi_uniqueness_ <= 1.0));
   if (stereo_depth_method_ == StereoDepthMethod::FAST_FOUNDATION_STEREO) {
     CHECK(!engine_path_.empty())
         << stereoDepthMethodToString(stereo_depth_method_)

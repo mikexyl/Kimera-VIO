@@ -118,8 +118,8 @@ copy_optical_flow_tracks: 1
 # ============================================================================
 # Dense Stereo Depth Estimation Parameters
 # ============================================================================
-# stereoDepthMethod options: OpenCV_BM, OpenCV_SGBM, LIBSGM, FastFoundationStereo
-# stereoDepthMethod: LIBSGM
+# stereoDepthMethod options: OpenCV_BM, OpenCV_SGBM, FastFoundationStereo
+# stereoDepthMethod: OpenCV_SGBM
 
 # General stereo parameters (used by all methods)
 minDisparity: 10
@@ -130,7 +130,7 @@ speckleWindowSize: 100
 speckleRange: 2
 disp12MaxDiff: 1
 
-# SGBM-specific parameters (for OpenCV_SGBM and LibSGM)
+# SGBM-specific parameters (for OpenCV_SGBM)
 # P1: Penalty for small disparity changes
 # Typical formula: 8 * channels * block_size^2
 # For grayscale with sadWindowSize=15: 8 * 1 * 225 = 1800
@@ -145,8 +145,6 @@ P2: 120
 # Use Hirschmuller mode (MODE_HH) for OpenCV_SGBM - more accurate but slower
 useModeHH: false
 
-# LibSGM downscale factor (1=no downscale, 2=half resolution)
-sgmDownscaleFactor: 2
 
 # Block Matching parameters (for OpenCV_BM only)
 preFilterCap: 31
@@ -165,7 +163,7 @@ medianBlurDisparity: 0
 # dispWidth: 640
 # dispHeight: 480
 
-stereoDepthMethod: LibSGM
+stereoDepthMethod: OpenCV_SGBM
 dispWidth: 512
 dispHeight: 288
 

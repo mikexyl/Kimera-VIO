@@ -129,8 +129,6 @@ P2: 120
 # Use Hirschmuller mode (MODE_HH) for OpenCV_SGBM - more accurate but slower
 useModeHH: 0
 
-# LibSGM downscale factor (1=no downscale, 2=half resolution)
-sgmDownscaleFactor: 1
 
 # Block Matching parameters (for OpenCV_BM only)
 preFilterCap: 31
@@ -149,7 +147,7 @@ medianBlurDisparity: 0
 # dispWidth: 640
 # dispHeight: 480
 
-stereoDepthMethod: LibSGM
+stereoDepthMethod: OpenCV_SGBM
 dispWidth: 512
 dispHeight: 288
 

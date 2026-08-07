@@ -8,9 +8,8 @@
 # Choose between different stereo depth estimation algorithms:
 # - "OpenCV_BM"      : OpenCV Block Matching (fast, basic quality, CPU only)
 # - "OpenCV_SGBM"    : OpenCV Semi-Global Block Matching (good quality, CPU only)
-# - "LibSGM"         : LibSGM GPU-accelerated SGM (fast with GPU, auto CPU fallback)
 # - "FastFoundationStereo"    : Deep learning stereo (best quality, requires TensorRT)
-stereoDepthMethod: "LibSGM"
+stereoDepthMethod: "OpenCV_SGBM"
 
 # ============================================================================
 # General Stereo Parameters (used by all methods)
@@ -21,6 +20,12 @@ minDisparity: 0
 # Number of disparity levels to search (must be divisible by 16)
 # Higher values allow detecting objects at closer range but increase computation
 numDisparities: 128
+
+# Working resolution for dense stereo matching. OpenCV BM/SGBM downsample the
+# rectified pair to this size and restore disparity to the camera resolution,
+# including the horizontal disparity scale factor.
+dispWidth: 640
+dispHeight: 480
 
 # Block/window size for matching (must be odd, typically 3-21)
 # Larger values give smoother results but less detail
@@ -40,7 +45,7 @@ speckleRange: 2
 disp12MaxDiff: 2
 
 # ============================================================================
-# SGBM-Specific Parameters (for OpenCV_SGBM and LibSGM)
+# SGBM-Specific Parameters (for OpenCV_SGBM)
 # ============================================================================
 # P1: Penalty for small disparity changes (pixels with similar intensity)
 # Typical value: 8 * channels * block_size^2
@@ -71,15 +76,6 @@ preFilterSize: 9
 textureThreshold: 0
 
 # ============================================================================
-# LibSGM-Specific Parameters
-# ============================================================================
-# Downscale factor for SGM processing
-# 1 = no downscaling (high memory, best quality)
-# 2 = half resolution (medium memory, good quality)
-# 4 = quarter resolution (low memory, reduced quality)
-sgmDownscaleFactor: 2
-
-# ============================================================================
 # Post-Processing Parameters
 # ============================================================================
 # Apply median blur to disparity map for noise reduction
@@ -98,40 +94,26 @@ useSGBM: true
 # 1. CPU-only system (no GPU):
 #    stereoDepthMethod: "OpenCV_SGBM"
 #
-# 2. GPU-accelerated system (CUDA available):
-#    stereoDepthMethod: "LibSGM"
-#    sgmDownscaleFactor: 2
-#
-# 3. Best quality with TensorRT:
+# 2. Best quality with TensorRT:
 #    stereoDepthMethod: "FastFoundationStereo"
 #
-# 4. Fastest processing:
+# 3. Fastest native processing:
 #    stereoDepthMethod: "OpenCV_BM"
-#    or
-#    stereoDepthMethod: "LibSGM"
-#    sgmDownscaleFactor: 4
 #
-# 5. Close-range objects:
+# 4. Close-range objects:
 #    numDisparities: 256
-#    sgmDownscaleFactor: 1  # if using LibSGM
 #
-# 6. Long-range objects:
+# 5. Long-range objects:
 #    numDisparities: 64
 #
 # ============================================================================
 # Performance Tuning
 # ============================================================================
 #
-# To reduce GPU memory usage (LibSGM):
-# - Increase sgmDownscaleFactor (2 or 4)
-# - Reduce numDisparities
-#
 # To improve quality:
-# - Decrease sgmDownscaleFactor (use 1 if memory allows)
 # - Increase numDisparities for close objects
 # - Use FastFoundationStereo if TensorRT available
 #
 # To improve speed:
-# - Increase sgmDownscaleFactor
 # - Use OpenCV_BM for fastest CPU processing
-# - Use LibSGM with GPU for best GPU performance
+# - Reduce numDisparities

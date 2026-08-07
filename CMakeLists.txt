@@ -166,7 +166,6 @@ target_link_libraries(${PROJECT_NAME}
     gtsam_points::gtsam_points
     opengv
     xfeat-cpp::xfeat-cpp
-    xfeat-cpp::sgm
     vio-factors
     vilib::vilib
 )
@@ -266,6 +265,10 @@ if(KIMERA_BUILD_TESTS)
   add_executable(testLcdGridFrame tests/testLcdGridFrame.cpp)
   target_link_libraries(testLcdGridFrame PUBLIC kimera_vio::kimera_vio)
   add_test(NAME testLcdGridFrame COMMAND testLcdGridFrame)
+
+  add_executable(testStereoDepthMethod tests/testStereoDepthMethod.cpp)
+  target_link_libraries(testStereoDepthMethod PUBLIC kimera_vio::kimera_vio)
+  add_test(NAME testStereoDepthMethod COMMAND testStereoDepthMethod)
 endif()
 
 ############################### INSTALL/EXPORT #################################

@@ -176,6 +176,8 @@ class StereoFrame {
 
   cv::Mat left_disp_img_;  // left disparity image
   cv::Mat left_depth_img_;
+  //! Intrinsics of the undistorted/rectified left image and depth map.
+  cv::Mat left_rectified_camera_matrix_;
 };
 
 }  // namespace VIO

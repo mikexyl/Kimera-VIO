@@ -20,7 +20,9 @@
 #include <opencv2/calib3d.hpp>
 
 #include "xfeat-cpp/stereo_depth/stereo_depth.h"
-#include "xfeat-cpp/stereo_depth/stereo_depth_libsgm.h"
+#ifdef HAVE_VPI
+#include "xfeat-cpp/stereo_depth/stereo_depth_vpi.h"
+#endif
 #ifdef HAVE_TENSORRT
 #include "xfeat-cpp/stereo_depth/stereo_depth_fast_foundation_stereo.h"
 #endif
@@ -56,12 +58,12 @@ void StereoMatcher::denseStereoReconstruction(
   cv::Mat left_processed, right_processed;
 
   // Determine what format we need
-  bool needs_grayscale =
-      (dense_stereo_params_.stereo_depth_method_ ==
-           StereoDepthMethod::OPENCV_BM ||
-       dense_stereo_params_.stereo_depth_method_ ==
-           StereoDepthMethod::OPENCV_SGBM ||
-       dense_stereo_params_.stereo_depth_method_ == StereoDepthMethod::LIBSGM);
+  bool needs_grayscale = (dense_stereo_params_.stereo_depth_method_ ==
+                              StereoDepthMethod::OPENCV_BM ||
+                          dense_stereo_params_.stereo_depth_method_ ==
+                              StereoDepthMethod::OPENCV_SGBM ||
+                          dense_stereo_params_.stereo_depth_method_ ==
+                              StereoDepthMethod::VPI_CUDA);
   bool needs_bgr = dense_stereo_params_.stereo_depth_method_ ==
                    StereoDepthMethod::FAST_FOUNDATION_STEREO;
 
@@ -108,6 +110,8 @@ void StereoMatcher::denseStereoReconstruction(
         params.speckle_window_size = dense_stereo_params_.speckle_window_size_;
         params.speckle_range = dense_stereo_params_.speckle_range_;
         params.disp12_max_diff = dense_stereo_params_.disp_12_max_diff_;
+        params.target_size = cv::Size(dense_stereo_params_.disp_width_,
+                                      dense_stereo_params_.disp_height_);
         stereo_depth_ = std::make_shared<xfeat::OpenCVStereoDepth>(params);
         break;
       }
@@ -120,6 +124,7 @@ void StereoMatcher::denseStereoReconstruction(
         params.block_size = dense_stereo_params_.sad_window_size_;
         params.P1 = dense_stereo_params_.p1_;
         params.P2 = dense_stereo_params_.p2_;
+        params.pre_filter_cap = dense_stereo_params_.pre_filter_cap_;
         params.uniqueness_ratio = dense_stereo_params_.uniqueness_ratio_;
         params.speckle_window_size = dense_stereo_params_.speckle_window_size_;
         params.speckle_range = dense_stereo_params_.speckle_range_;
@@ -127,31 +132,34 @@ void StereoMatcher::denseStereoReconstruction(
         params.mode = dense_stereo_params_.use_mode_HH_
                           ? cv::StereoSGBM::MODE_HH
                           : cv::StereoSGBM::MODE_SGBM;
+        params.target_size = cv::Size(dense_stereo_params_.disp_width_,
+                                      dense_stereo_params_.disp_height_);
         stereo_depth_ = std::make_shared<xfeat::OpenCVStereoDepth>(params);
         break;
       }
-      case StereoDepthMethod::LIBSGM: {
-        VLOG(1) << "Using LibSGM stereo depth (GPU-accelerated)";
-        xfeat::LibSGMStereoDepth::Params params;
-        params.num_disparities = dense_stereo_params_.num_disparities_;
-        params.P1 = dense_stereo_params_.p1_;
-        params.P2 = dense_stereo_params_.p2_;
-        params.uniqueness_ratio =
-            1.0f - dense_stereo_params_.uniqueness_ratio_ / 100.0f;
-        params.subpixel = false;
-        params.path_type = 1;  // SCAN_8PATH
-        params.min_disparity = dense_stereo_params_.min_disparity_;
-        params.lr_max_diff = dense_stereo_params_.disp_12_max_diff_;
-        params.census_type = 1;  // SYMMETRIC_CENSUS_9x7
-        params.use_gpu =
-            true;  // Will auto-fallback to CPU if OpenCV lacks CUDA
+      case StereoDepthMethod::VPI_CUDA: {
+#ifdef HAVE_VPI
+        LOG(INFO) << "Using NVIDIA VPI CUDA Semi-Global Matching stereo depth";
+        xfeat::VPIStereoDepth::Params params;
+        params.min_disparity = dense_stereo_params_.vpi_min_disparity_;
+        params.min_valid_disparity =
+            dense_stereo_params_.vpi_min_valid_disparity_;
+        params.max_disparity = dense_stereo_params_.vpi_max_disparity_;
+        params.p1 = dense_stereo_params_.vpi_p1_;
+        params.p2 = dense_stereo_params_.vpi_p2_;
+        params.confidence_threshold =
+            dense_stereo_params_.vpi_confidence_threshold_;
+        params.uniqueness =
+            static_cast<float>(dense_stereo_params_.vpi_uniqueness_);
+        params.include_diagonals = dense_stereo_params_.vpi_include_diagonals_;
         params.target_size = cv::Size(dense_stereo_params_.disp_width_,
                                       dense_stereo_params_.disp_height_);
-        stereo_depth_ = std::make_shared<xfeat::LibSGMStereoDepth>(params);
-        VLOG(1) << "LibSGM parameters: P1=" << params.P1 << ", P2=" << params.P2
-                << ", uniqueness=" << params.uniqueness_ratio
-                << ", num_disp=" << params.num_disparities
-                << ", LR_max_diff=" << params.lr_max_diff;
+        stereo_depth_ = std::make_shared<xfeat::VPIStereoDepth>(params);
+        stereo_depth_->warmup(left_processed.size());
+#else
+        LOG(FATAL) << "VPI_CUDA selected but NVIDIA VPI support was not "
+                      "compiled. Install vpi4-dev and rebuild xfeat-cpp.";
+#endif
         break;
       }
       case StereoDepthMethod::FAST_FOUNDATION_STEREO: {
@@ -178,15 +186,21 @@ void StereoMatcher::denseStereoReconstruction(
     }
   }
 
-  // Reconstruct scene
-  // Output will be CV_16S format (disparity scaled by 16 if subpixel enabled)
-  cv::Mat disparity_32f(left_processed.size(), CV_32F);
+  // Reconstruct scene and normalize the backend-specific disparity format to
+  // physical pixel disparity in CV_32F.
+  cv::Mat raw_disparity;
+  stereo_depth_->compute(left_processed, right_processed, raw_disparity);
+  const int disparity_scale = stereo_depth_->getDisparityScale();
+  CHECK_GT(disparity_scale, 0);
+  cv::Mat disparity_32f;
+  raw_disparity.convertTo(
+      disparity_32f, CV_32F, 1.0 / static_cast<double>(disparity_scale));
 
-  // Use our stereo depth interface
-  stereo_depth_->compute(left_processed, right_processed, disparity_32f);
-
-  // Create mask for invalid disparities before conversion
-  cv::Mat valid_mask = disparity_32f > 0;
+  // OpenCV encodes invalid pixels as min_disparity - 1. Keep only physical,
+  // in-range disparities after fixed-point normalization.
+  cv::Mat valid_mask =
+      (disparity_32f > 0.0f) &
+      (disparity_32f >= static_cast<float>(stereo_depth_->getMinDisparity()));
 
   disparity_32f.copyTo(*disparity_img);
 
@@ -288,6 +302,11 @@ void StereoMatcher::sparseStereoReconstruction(StereoFrame* stereo_frame) {
   // depth = fx * baseline / disparity (vectorized operation)
   const auto& stereo_calib = stereo_camera_->getStereoCalib();
   CHECK(stereo_calib);
+  const cv::Mat left_projection = stereo_camera_->getP1();
+  CHECK_EQ(left_projection.rows, 3);
+  CHECK_EQ(left_projection.cols, 4);
+  stereo_frame->left_rectified_camera_matrix_ =
+      left_projection(cv::Rect(0, 0, 3, 3)).clone();
   double fx_b = stereo_calib->fx() * stereo_camera_->getBaseline();
 
   // Create mask for valid disparities (positive values)

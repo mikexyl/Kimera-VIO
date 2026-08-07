@@ -14,9 +14,8 @@
 
 #pragma once
 
-#include <stdexcept>
-
 #include <opencv2/calib3d.hpp>  // Only for StereoBM (put in another file).
+#include <stdexcept>
 
 #include "kimera-vio/frontend/StereoFrame-definitions.h"
 #include "kimera-vio/pipeline/PipelineParams.h"
@@ -25,9 +24,9 @@ namespace VIO {
 
 // Stereo depth estimation methods
 enum class StereoDepthMethod {
-  OPENCV_BM,    // OpenCV Block Matching (CPU)
-  OPENCV_SGBM,  // OpenCV Semi-Global Block Matching (CPU)
-  LIBSGM,       // LibSGM (GPU-accelerated, falls back to CPU)
+  OPENCV_BM,              // OpenCV Block Matching (CPU)
+  OPENCV_SGBM,            // OpenCV Semi-Global Block Matching (CPU)
+  VPI_CUDA,               // NVIDIA VPI Semi-Global Matching (CUDA)
   FAST_FOUNDATION_STEREO  // Fast-FoundationStereo (requires TensorRT)
 };
 struct DenseStereoParams {
@@ -50,17 +49,27 @@ struct DenseStereoParams {
   int p2_ = 240;
   int disp_12_max_diff_ = -1;
   bool use_mode_HH_ = true;
-  // Downscale factor for SGM processing (1 = no downscaling, 2 = half size,
-  // etc.) Higher values reduce GPU memory usage but may reduce accuracy
-  int sgm_downscale_factor_ = 2;
+  // NVIDIA VPI CUDA SGM parameters. These are intentionally independent of
+  // the legacy/OpenCV matcher values: VPI applies them at disp_width_ x
+  // disp_height_, before disparity is restored to camera resolution.
+  int vpi_min_disparity_ = 0;
+  int vpi_min_valid_disparity_ = 0;
+  int vpi_max_disparity_ = 128;
+  int vpi_p1_ = 3;
+  int vpi_p2_ = 48;
+  int vpi_confidence_threshold_ = 55535;
+  double vpi_uniqueness_ = -1.0;
+  bool vpi_include_diagonals_ = true;
   // Stereo depth estimation method to use
-  StereoDepthMethod stereo_depth_method_ = StereoDepthMethod::LIBSGM;
+  StereoDepthMethod stereo_depth_method_ = StereoDepthMethod::OPENCV_SGBM;
 
   // TensorRT engine used by the selected learned stereo backend.
   std::string engine_path_ = "";
   // Must match the max-disparity setting used to export the FFS engine.
   int ffs_max_disparity_ = 192;
   int stereo_warmup_iterations_ = 3;
+  // Working resolution for dense stereo. Backend disparity is scaled back to
+  // the rectified input resolution before triangulation.
   int disp_height_ = 480;
   int disp_width_ = 640;
 
@@ -115,8 +124,8 @@ inline const char* stereoDepthMethodToString(StereoDepthMethod method) {
       return "OpenCV_BM";
     case StereoDepthMethod::OPENCV_SGBM:
       return "OpenCV_SGBM";
-    case StereoDepthMethod::LIBSGM:
-      return "LibSGM";
+    case StereoDepthMethod::VPI_CUDA:
+      return "VPI_CUDA";
     case StereoDepthMethod::FAST_FOUNDATION_STEREO:
       return "FastFoundationStereo";
     default:
@@ -130,10 +139,10 @@ inline StereoDepthMethod stereoDepthMethodFromString(const std::string& str) {
     return StereoDepthMethod::OPENCV_BM;
   } else if (str == "OpenCV_SGBM" || str == "OPENCV_SGBM") {
     return StereoDepthMethod::OPENCV_SGBM;
-  } else if (str == "LibSGM" || str == "LIBSGM") {
-    return StereoDepthMethod::LIBSGM;
-  } else if (str == "FastFoundationStereo" ||
-             str == "FAST_FOUNDATION_STEREO" || str == "FFS") {
+  } else if (str == "VPI" || str == "VPI_CUDA") {
+    return StereoDepthMethod::VPI_CUDA;
+  } else if (str == "FastFoundationStereo" || str == "FAST_FOUNDATION_STEREO" ||
+             str == "FFS") {
     return StereoDepthMethod::FAST_FOUNDATION_STEREO;
   } else {
     throw std::runtime_error("Unsupported stereo depth method: " + str);
